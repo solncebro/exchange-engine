@@ -1,6 +1,35 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import { ExchangeLogger } from '../types/common';
 
+const MAX_RETRIES = 3;
+const RETRY_BASE_DELAY_MS = 1000;
+
+function isRetryable(error: AxiosError): boolean {
+  if (!error.response) {
+    return true;
+  }
+
+  const status = error.response.status;
+
+  return status === 429 || status >= 500;
+}
+
+function getRetryDelayMs(error: AxiosError, attempt: number): number {
+  if (error.response?.status === 429) {
+    const retryAfterRaw = error.response.headers['retry-after'];
+
+    if (retryAfterRaw) {
+      return parseInt(String(retryAfterRaw), 10) * 1000;
+    }
+  }
+
+  return RETRY_BASE_DELAY_MS * Math.pow(2, attempt);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export abstract class BaseHttpClient {
   protected readonly axiosInstance: AxiosInstance;
   protected readonly logger: ExchangeLogger;
@@ -11,7 +40,7 @@ export abstract class BaseHttpClient {
     this.logger = logger;
     this.axiosInstance = axios.create({
       baseURL,
-      timeout: timeout || 30000,
+      timeout: timeout ?? 30000,
     });
   }
 
@@ -20,14 +49,26 @@ export abstract class BaseHttpClient {
     params?: Record<string, string | number | boolean>,
     headers?: Record<string, string>
   ): Promise<T> {
-    try {
-      this.logger.debug(`GET ${url} with params: ${JSON.stringify(params)}`);
-      const response = await this.axiosInstance.get<T>(url, { params, headers });
-      return response.data;
-    } catch (error) {
-      this.handleError(error as AxiosError);
-      throw error;
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        this.logger.debug(`GET ${url} with params: ${JSON.stringify(params)}`);
+        const response = await this.axiosInstance.get<T>(url, { params, headers });
+        return response.data;
+      } catch (error) {
+        const axiosError = error as AxiosError;
+        this.handleError(axiosError);
+
+        if (!isRetryable(axiosError) || attempt === MAX_RETRIES) {
+          throw error;
+        }
+
+        const delayMs = getRetryDelayMs(axiosError, attempt);
+        this.logger.warn(`GET ${url} failed, retrying (${attempt + 1}/${MAX_RETRIES}) in ${delayMs}ms`);
+        await sleep(delayMs);
+      }
     }
+
+    throw new Error('Unreachable');
   }
 
   protected async post<T>(
