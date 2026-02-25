@@ -1,0 +1,58 @@
+{
+  "name": "@solncebro/exchange-engine",
+  "version": "0.1.0",
+  "description": "Universal TypeScript client library for Binance and Bybit with unified API, type safety, and WebSocket support",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.json",
+    "build:watch": "tsc -p tsconfig.json --watch",
+    "test:smoke": "ts-node --project test/tsconfig.json test/smoke.test.ts",
+    "type-check": "tsc -p tsconfig.json --noEmit",
+    "prepublishOnly": "npm run build && npm run type-check"
+  },
+  "keywords": [
+    "exchange",
+    "binance",
+    "bybit",
+    "trading",
+    "websocket",
+    "rest",
+    "crypto",
+    "cryptocurrency",
+    "api",
+    "client",
+    "typescript"
+  ],
+  "author": {
+    "name": "solncebro",
+    "url": "https://github.com/solncebro"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/solncebro/exchange-engine.git"
+  },
+  "bugs": {
+    "url": "https://github.com/solncebro/exchange-engine/issues"
+  },
+  "homepage": "https://github.com/solncebro/exchange-engine#readme",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "@solncebro/websocket-engine": "^0.1.0",
+    "axios": "^1.7.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.18.1",
+    "typescript": "^5.7.0"
+  }
+}
