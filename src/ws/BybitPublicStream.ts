@@ -2,26 +2,20 @@ import type { RawData } from 'ws';
 import { ReliableWebSocket } from '@solncebro/websocket-engine';
 
 import type { ExchangeLogger, Kline, KlineInterval, TickerBySymbol } from '../types/common';
+import type { KlineHandler } from '../types/exchange';
 import { normalizeBybitKlineWsMessage, normalizeBybitTickers } from '../normalizers/bybitNormalizer';
 import type { BybitRawTicker, BybitRawWsKline } from '../normalizers/bybitNormalizer';
 import { BYBIT_KLINE_INTERVAL } from '../constants/bybit';
+import { isBybitPongResponse, BYBIT_HEARTBEAT_CONFIG, BYBIT_PING_INTERVAL } from './bybitWsUtils';
+import type { BybitBaseWsMessage } from './bybitWsUtils';
 
-interface BybitWsMessage {
-  op?: string;
+interface BybitWsMessage extends BybitBaseWsMessage {
   topic?: string;
-  data?: unknown;
   ret_code?: number;
-  success?: boolean;
-  ret_msg?: string;
-  [key: string]: unknown;
 }
 
 function parseBybitMessage(rawData: RawData): BybitWsMessage {
   return JSON.parse(rawData.toString()) as BybitWsMessage;
-}
-
-function isBybitPongResponse(message: BybitWsMessage): boolean {
-  return message.op === 'pong' || message.ret_msg === 'pong';
 }
 
 function resolveUnifiedInterval(bybitInterval: string): KlineInterval {
@@ -35,12 +29,12 @@ function resolveUnifiedInterval(bybitInterval: string): KlineInterval {
 }
 
 class BybitPublicStream {
-  private ws: ReliableWebSocket<BybitWsMessage> | null = null;
+  private webSocket: ReliableWebSocket<BybitWsMessage> | null = null;
   private readonly url: string;
   private readonly logger: ExchangeLogger;
   private readonly onNotify?: (message: string) => void | Promise<void>;
   private readonly tickerHandlerSet: Set<(tickers: TickerBySymbol) => void> = new Set();
-  private readonly klineHandlerByKey: Map<string, Set<(kline: Kline) => void>> = new Map();
+  private readonly klineHandlerByKey: Map<string, Set<KlineHandler>> = new Map();
   private readonly activeSubscriptionSet: Set<string> = new Set();
 
   constructor(url: string, logger: ExchangeLogger, onNotify?: (message: string) => void | Promise<void>) {
@@ -65,7 +59,7 @@ class BybitPublicStream {
     }
   }
 
-  subscribeKlines(symbol: string, interval: KlineInterval, handler: (kline: Kline) => void): void {
+  subscribeKlines(symbol: string, interval: KlineInterval, handler: KlineHandler): void {
     const key = `${symbol}_${interval}`;
 
     if (!this.klineHandlerByKey.has(key)) {
@@ -78,14 +72,14 @@ class BybitPublicStream {
     const topic = `kline.${bybitInterval}.${symbol}`;
     this.activeSubscriptionSet.add(topic);
 
-    if (this.ws !== null) {
+    if (this.webSocket !== null) {
       this.sendSubscribe([topic]);
     } else {
       this.ensureConnected();
     }
   }
 
-  unsubscribeKlines(symbol: string, interval: KlineInterval, handler: (kline: Kline) => void): void {
+  unsubscribeKlines(symbol: string, interval: KlineInterval, handler: KlineHandler): void {
     const key = `${symbol}_${interval}`;
     const handlerSet = this.klineHandlerByKey.get(key);
 
@@ -102,26 +96,26 @@ class BybitPublicStream {
       const topic = `kline.${bybitInterval}.${symbol}`;
       this.activeSubscriptionSet.delete(topic);
 
-      if (this.ws !== null) {
+      if (this.webSocket !== null) {
         this.sendUnsubscribe([topic]);
       }
     }
   }
 
   close(): void {
-    if (this.ws !== null) {
-      this.ws.close();
+    if (this.webSocket !== null) {
+      this.webSocket.close();
 
-      this.ws = null;
+      this.webSocket = null;
     }
   }
 
   private ensureConnected(): void {
-    if (this.ws !== null) {
+    if (this.webSocket !== null) {
       return;
     }
 
-    this.ws = new ReliableWebSocket<BybitWsMessage>({
+    this.webSocket = new ReliableWebSocket<BybitWsMessage>({
       label: 'BybitPublicStream',
       url: this.url,
       logger: this.logger,
@@ -129,12 +123,9 @@ class BybitPublicStream {
       onMessage: (message) => this.handleMessage(message),
       onReconnectSuccess: () => this.resubscribeAll(),
       onNotify: this.onNotify,
-      heartbeat: {
-        buildPayload: () => ({ op: 'ping' }),
-        isResponse: isBybitPongResponse,
-      },
+      heartbeat: BYBIT_HEARTBEAT_CONFIG,
       configuration: {
-        pingInterval: 20000,
+        pingInterval: BYBIT_PING_INTERVAL,
       },
     });
 
@@ -193,7 +184,7 @@ class BybitPublicStream {
     const kline = normalizeBybitKlineWsMessage(dataList[0]);
 
     for (const handler of handlerSet) {
-      handler(kline);
+      handler(symbol, kline);
     }
   }
 
@@ -207,7 +198,7 @@ class BybitPublicStream {
 
   private sendSubscribe(topicList: string[]): void {
     try {
-      this.ws!.sendToConnectedSocket({ op: 'subscribe', args: topicList });
+      this.webSocket!.sendToConnectedSocket({ op: 'subscribe', args: topicList });
     } catch {
       this.logger.warn('BybitPublicStream: failed to subscribe, socket not connected');
     }
@@ -215,7 +206,7 @@ class BybitPublicStream {
 
   private sendUnsubscribe(topicList: string[]): void {
     try {
-      this.ws!.sendToConnectedSocket({ op: 'unsubscribe', args: topicList });
+      this.webSocket!.sendToConnectedSocket({ op: 'unsubscribe', args: topicList });
     } catch {
       this.logger.warn('BybitPublicStream: failed to unsubscribe, socket not connected');
     }

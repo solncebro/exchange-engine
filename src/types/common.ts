@@ -32,6 +32,7 @@ export interface ExchangeConfig {
   apiKey: string;
   secret: string;
   recvWindow?: number;
+  demoMode?: boolean;
 }
 
 export interface ExchangeLogger {
@@ -52,13 +53,13 @@ export interface Ticker {
 export type TickerBySymbol = Map<string, Ticker>;
 
 export interface Kline {
-  openTime: number;
+  openTimestamp: number;
   open: number;
   high: number;
   low: number;
   close: number;
   volume: number;
-  closeTime: number;
+  closeTimestamp: number;
   quoteVolume: number;
   trades: number;
 }
@@ -68,6 +69,7 @@ export interface MarketFilter {
   stepSize: string;
   minQty: string;
   maxQty: string;
+  minNotional: string;
 }
 
 export interface Market {

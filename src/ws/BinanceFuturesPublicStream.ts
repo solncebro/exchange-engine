@@ -2,9 +2,11 @@ import type { RawData } from 'ws';
 import { ReliableWebSocket } from '@solncebro/websocket-engine';
 
 import type { ExchangeLogger, Kline, KlineInterval, TickerBySymbol } from '../types/common';
+import type { KlineHandler } from '../types/exchange';
 import { normalizeBinanceKlineWsMessage, normalizeBinanceTickers } from '../normalizers/binanceNormalizer';
 import type { BinanceRawTicker24hr, BinanceRawWsKline } from '../normalizers/binanceNormalizer';
-import { BINANCE_KLINE_INTERVAL, BINANCE_FUTURES_WS_COMBINED_URL } from '../constants/binance';
+import { BINANCE_KLINE_INTERVAL } from '../constants/binance';
+import { resolveUnifiedBinanceInterval } from './binanceWsUtils';
 
 const MAX_STREAMS_PER_CONNECTION = 200;
 
@@ -14,7 +16,8 @@ interface BinanceCombinedMessage {
 }
 
 interface FuturesConnection {
-  ws: ReliableWebSocket<BinanceCombinedMessage>;
+  webSocket: ReliableWebSocket<BinanceCombinedMessage>;
+  label: string;
   streams: string[];
 }
 
@@ -22,7 +25,7 @@ function parseBinanceCombinedMessage(rawData: RawData): BinanceCombinedMessage {
   return JSON.parse(rawData.toString()) as BinanceCombinedMessage;
 }
 
-function buildKlineStreamList(klineHandlerByKey: Map<string, Set<(kline: Kline) => void>>): string[] {
+function buildKlineStreamList(klineHandlerByKey: Map<string, Set<KlineHandler>>): string[] {
   const streamList: string[] = [];
 
   for (const key of klineHandlerByKey.keys()) {
@@ -36,26 +39,18 @@ function buildKlineStreamList(klineHandlerByKey: Map<string, Set<(kline: Kline) 
   return streamList;
 }
 
-function resolveUnifiedInterval(binanceInterval: string): KlineInterval {
-  for (const [unified, binance] of Object.entries(BINANCE_KLINE_INTERVAL)) {
-    if (binance === binanceInterval) {
-      return unified as KlineInterval;
-    }
-  }
-
-  return '1m';
-}
-
 class BinanceFuturesPublicStream {
+  private readonly wsCombinedUrl: string;
   private readonly logger: ExchangeLogger;
   private readonly onNotify?: (message: string) => void | Promise<void>;
   private readonly tickerHandlerSet: Set<(tickers: TickerBySymbol) => void> = new Set();
-  private readonly klineHandlerByKey: Map<string, Set<(kline: Kline) => void>> = new Map();
+  private readonly klineHandlerByKey: Map<string, Set<KlineHandler>> = new Map();
   private readonly connections: FuturesConnection[] = [];
   private connectScheduled = false;
   private subscriptionIdCounter = 1;
 
-  constructor(logger: ExchangeLogger, onNotify?: (message: string) => void | Promise<void>) {
+  constructor(wsCombinedUrl: string, logger: ExchangeLogger, onNotify?: (message: string) => void | Promise<void>) {
+    this.wsCombinedUrl = wsCombinedUrl;
     this.logger = logger;
     this.onNotify = onNotify;
   }
@@ -69,7 +64,7 @@ class BinanceFuturesPublicStream {
     this.tickerHandlerSet.delete(handler);
   }
 
-  subscribeKlines(symbol: string, interval: KlineInterval, handler: (kline: Kline) => void): void {
+  subscribeKlines(symbol: string, interval: KlineInterval, handler: KlineHandler): void {
     const key = `${symbol}_${interval}`;
 
     if (!this.klineHandlerByKey.has(key)) {
@@ -87,7 +82,7 @@ class BinanceFuturesPublicStream {
     }
   }
 
-  unsubscribeKlines(symbol: string, interval: KlineInterval, handler: (kline: Kline) => void): void {
+  unsubscribeKlines(symbol: string, interval: KlineInterval, handler: KlineHandler): void {
     const key = `${symbol}_${interval}`;
     const handlerSet = this.klineHandlerByKey.get(key);
 
@@ -107,8 +102,8 @@ class BinanceFuturesPublicStream {
   }
 
   close(): void {
-    for (const conn of this.connections) {
-      conn.ws.close();
+    for (const connection of this.connections) {
+      connection.webSocket.close();
     }
 
     this.connections.length = 0;
@@ -138,7 +133,7 @@ class BinanceFuturesPublicStream {
 
     for (let i = 0; i < allStreams.length; i += MAX_STREAMS_PER_CONNECTION) {
       const chunk = allStreams.slice(i, i + MAX_STREAMS_PER_CONNECTION);
-      this.createConnection(chunk);
+      this.createConnection(chunk, this.connections.length);
     }
 
     this.logger.info(
@@ -146,90 +141,66 @@ class BinanceFuturesPublicStream {
     );
   }
 
-  private createConnection(streams: string[]): void {
-    const conn: FuturesConnection = { ws: null!, streams };
+  private createConnection(streams: string[], index: number): void {
+    const label = `BinanceFuturesPublicStream-${index}`;
+    const url = `${this.wsCombinedUrl}?streams=${streams.join('/')}`;
+    const connection: FuturesConnection = { webSocket: null!, label, streams };
 
-    conn.ws = new ReliableWebSocket<BinanceCombinedMessage>({
-      label: 'BinanceFuturesPublicStream',
-      url: BINANCE_FUTURES_WS_COMBINED_URL,
+    connection.webSocket = new ReliableWebSocket<BinanceCombinedMessage>({
+      label,
+      url,
       logger: this.logger,
       parseMessage: parseBinanceCombinedMessage,
       onMessage: (message) => this.handleMessage(message),
-      onOpen: async () => {
-        this.logger.info(`BinanceFuturesPublicStream connected (${conn.streams.length} streams)`);
-        this.sendSubscribe(conn);
-      },
-      onReconnectSuccess: () => this.sendSubscribe(conn),
       onNotify: this.onNotify,
-      heartbeat: {
-        buildPayload: () => ({ method: 'PING' }),
-        isResponse: (message) => {
-          const raw = message as Record<string, unknown>;
-          return raw['id'] !== undefined && raw['result'] === null;
-        },
-      },
       configuration: {
         pingInterval: 30000,
       },
     });
 
-    this.connections.push(conn);
+    this.connections.push(connection);
   }
 
   private addStreamToConnection(stream: string): void {
-    let targetConn = this.connections.find(
-      (c) => c.streams.length < MAX_STREAMS_PER_CONNECTION
+    let targetConnection = this.connections.find(
+      (connection) => connection.streams.length < MAX_STREAMS_PER_CONNECTION
     );
 
-    if (!targetConn) {
-      this.createConnection([stream]);
+    if (!targetConnection) {
+      this.createConnection([stream], this.connections.length);
       return;
     }
 
-    targetConn.streams.push(stream);
+    targetConnection.streams.push(stream);
 
     try {
-      targetConn.ws.sendToConnectedSocket({
+      targetConnection.webSocket.sendToConnectedSocket({
         method: 'SUBSCRIBE',
         params: [stream],
         id: this.subscriptionIdCounter++,
       });
     } catch {
-      // Will be subscribed on reconnect
     }
   }
 
   private removeStreamFromConnection(stream: string): void {
-    for (const conn of this.connections) {
-      const idx = conn.streams.indexOf(stream);
+    for (const connection of this.connections) {
+      const index = connection.streams.indexOf(stream);
 
-      if (idx !== -1) {
-        conn.streams.splice(idx, 1);
+      if (index !== -1) {
+        connection.streams.splice(index, 1);
 
         try {
-          conn.ws.sendToConnectedSocket({
+          connection.webSocket.sendToConnectedSocket({
             method: 'UNSUBSCRIBE',
             params: [stream],
             id: this.subscriptionIdCounter++,
           });
         } catch {
-          // Will be reflected on reconnect
         }
 
         break;
       }
-    }
-  }
-
-  private sendSubscribe(conn: FuturesConnection): void {
-    try {
-      conn.ws.sendToConnectedSocket({
-        method: 'SUBSCRIBE',
-        params: conn.streams,
-        id: this.subscriptionIdCounter++,
-      });
-    } catch {
-      this.logger.warn('BinanceFuturesPublicStream: failed to subscribe, socket not connected');
     }
   }
 
@@ -260,13 +231,13 @@ class BinanceFuturesPublicStream {
       const symbolLower = message.stream.slice(0, continuousKlineIndex).replace(/_perpetual$/, '');
       const symbol = symbolLower.toUpperCase();
       const binanceInterval = message.stream.slice(continuousKlineIndex + '@continuousKline_'.length);
-      const unifiedInterval = resolveUnifiedInterval(binanceInterval);
+      const unifiedInterval = resolveUnifiedBinanceInterval(binanceInterval);
       const key = `${symbol}_${unifiedInterval}`;
       const handlerSet = this.klineHandlerByKey.get(key);
 
       if (handlerSet) {
         for (const handler of handlerSet) {
-          handler(kline);
+          handler(symbol, kline);
         }
       }
     }

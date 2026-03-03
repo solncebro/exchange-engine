@@ -1,18 +1,18 @@
-import crypto from 'node:crypto';
 import type { RawData } from 'ws';
 import { ReliableWebSocket } from '@solncebro/websocket-engine';
 import type { WebSocketOpenContext } from '@solncebro/websocket-engine';
 
 import type { ExchangeLogger } from '../types/common';
 import { BYBIT_PRIVATE_WS_URL } from '../constants/bybit';
+import {
+  BYBIT_HEARTBEAT_CONFIG,
+  BYBIT_PING_INTERVAL,
+  authenticateBybitWs,
+} from './bybitWsUtils';
+import type { BybitBaseWsMessage } from './bybitWsUtils';
 
-interface BybitPrivateMessage {
-  op?: string;
+interface BybitPrivateMessage extends BybitBaseWsMessage {
   topic?: string;
-  data?: unknown;
-  success?: boolean;
-  ret_msg?: string;
-  [key: string]: unknown;
 }
 
 interface BybitPrivateStreamArgs {
@@ -27,12 +27,8 @@ function parseBybitPrivateMessage(rawData: RawData): BybitPrivateMessage {
   return JSON.parse(rawData.toString()) as BybitPrivateMessage;
 }
 
-function isBybitPongResponse(message: BybitPrivateMessage): boolean {
-  return message.op === 'pong' || message.ret_msg === 'pong';
-}
-
 class BybitPrivateStream {
-  private ws: ReliableWebSocket<BybitPrivateMessage> | null = null;
+  private webSocket: ReliableWebSocket<BybitPrivateMessage> | null = null;
   private readonly logger: ExchangeLogger;
   private readonly apiKey: string;
   private readonly secret: string;
@@ -48,11 +44,11 @@ class BybitPrivateStream {
   }
 
   connect(): void {
-    if (this.ws !== null) {
+    if (this.webSocket !== null) {
       return;
     }
 
-    this.ws = new ReliableWebSocket<BybitPrivateMessage>({
+    this.webSocket = new ReliableWebSocket<BybitPrivateMessage>({
       label: 'BybitPrivateStream',
       url: BYBIT_PRIVATE_WS_URL,
       logger: this.logger,
@@ -60,45 +56,26 @@ class BybitPrivateStream {
       onMessage: (message) => this.handleMessage(message),
       onOpen: (context) => this.authenticate(context),
       onNotify: this.onNotify,
-      heartbeat: {
-        buildPayload: () => ({ op: 'ping' }),
-        isResponse: isBybitPongResponse,
-      },
+      heartbeat: BYBIT_HEARTBEAT_CONFIG,
       configuration: {
-        pingInterval: 20000,
+        pingInterval: BYBIT_PING_INTERVAL,
       },
     });
   }
 
   close(): void {
-    if (this.ws !== null) {
-      this.ws.close();
-      this.ws = null;
+    if (this.webSocket !== null) {
+      this.webSocket.close();
+      this.webSocket = null;
     }
   }
 
   isConnected(): boolean {
-    return this.ws !== null;
+    return this.webSocket !== null;
   }
 
   private async authenticate(context: WebSocketOpenContext<BybitPrivateMessage>): Promise<void> {
-    const timestamp = Date.now();
-
-    const payload = `GET/realtime${timestamp}`;
-
-    const signature = crypto.createHmac('sha256', this.secret).update(payload).digest('hex');
-
-    context.send({
-      op: 'auth',
-      args: [this.apiKey, timestamp, signature],
-    });
-
-    await context.waitForMessage(
-      (message) => message.op === 'auth' && message.success === true,
-      10000,
-    );
-
-    this.logger.info('BybitPrivateStream authenticated');
+    await authenticateBybitWs({ context, apiKey: this.apiKey, secret: this.secret, label: 'BybitPrivateStream', logger: this.logger });
   }
 
   private handleMessage(message: BybitPrivateMessage): void {

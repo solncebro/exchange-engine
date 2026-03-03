@@ -1,4 +1,4 @@
-import {
+import type {
   Ticker,
   TickerBySymbol,
   Kline,
@@ -67,6 +67,7 @@ export interface BinanceRawPositionRisk {
   liquidationPrice: string;
   notional: string;
   isolatedMargin: string;
+  [key: string]: unknown;
 }
 
 export interface BinanceRawOrderResponse {
@@ -91,7 +92,7 @@ export interface BinanceRawAccount {
 }
 
 function extractFilter(filterList: BinanceRawFilter[], filterType: string): BinanceRawFilter | undefined {
-  return filterList.find((f) => f.filterType === filterType);
+  return filterList.find((filter) => filter.filterType === filterType);
 }
 
 export function normalizeBinanceMarkets(raw: BinanceRawExchangeInfo): MarketBySymbol {
@@ -120,6 +121,9 @@ export function normalizeBinanceMarkets(raw: BinanceRawExchangeInfo): MarketBySy
         stepSize: lotSizeFilter?.stepSize ?? '0',
         minQty: lotSizeFilter?.minQty ?? '0',
         maxQty: lotSizeFilter?.maxQty ?? '0',
+        minNotional: minNotionalFilter?.notional
+          ?? minNotionalFilter?.minNotional
+          ?? '0',
       },
     };
 
@@ -148,13 +152,13 @@ export function normalizeBinanceTickers(rawList: BinanceRawTicker24hr[]): Ticker
 
 export function normalizeBinanceKlines(rawList: unknown[][]): Kline[] {
   return rawList.map((row) => ({
-    openTime: row[0] as number,
+    openTimestamp: row[0] as number,
     open: parseFloat(row[1] as string),
     high: parseFloat(row[2] as string),
     low: parseFloat(row[3] as string),
     close: parseFloat(row[4] as string),
     volume: parseFloat(row[5] as string),
-    closeTime: row[6] as number,
+    closeTimestamp: row[6] as number,
     quoteVolume: parseFloat(row[7] as string),
     trades: row[8] as number,
   }));
@@ -162,13 +166,13 @@ export function normalizeBinanceKlines(rawList: unknown[][]): Kline[] {
 
 export function normalizeBinanceKlineWsMessage(raw: BinanceRawWsKline): Kline {
   return {
-    openTime: raw.t,
+    openTimestamp: raw.t,
     open: parseFloat(raw.o),
     high: parseFloat(raw.h),
     low: parseFloat(raw.l),
     close: parseFloat(raw.c),
     volume: parseFloat(raw.v),
-    closeTime: raw.T,
+    closeTimestamp: raw.T,
     quoteVolume: parseFloat(raw.q),
     trades: raw.n,
   };
@@ -195,7 +199,7 @@ export function normalizeBinancePosition(raw: BinanceRawPositionRisk): Position 
     leverage: parseFloat(raw.leverage),
     marginMode,
     liquidationPrice: isNaN(liquidationPriceRaw) ? 0 : liquidationPriceRaw,
-    info: raw as unknown as Record<string, unknown>,
+    info: raw,
   };
 }
 

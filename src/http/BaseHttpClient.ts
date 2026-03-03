@@ -30,17 +30,24 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+interface BaseHttpClientArgs {
+  baseUrl: string;
+  apiKey: string;
+  logger: ExchangeLogger;
+  timeout?: number;
+}
+
 export abstract class BaseHttpClient {
   protected readonly axiosInstance: AxiosInstance;
   protected readonly logger: ExchangeLogger;
   protected readonly apiKey: string;
 
-  constructor(baseURL: string, apiKey: string, logger: ExchangeLogger, timeout?: number) {
-    this.apiKey = apiKey;
-    this.logger = logger;
+  constructor(args: BaseHttpClientArgs) {
+    this.apiKey = args.apiKey;
+    this.logger = args.logger;
     this.axiosInstance = axios.create({
-      baseURL,
-      timeout: timeout ?? 30000,
+      baseURL: args.baseUrl,
+      timeout: args.timeout ?? 30000,
     });
   }
 
@@ -86,6 +93,21 @@ export abstract class BaseHttpClient {
     }
   }
 
+  protected async postWithParams<T>(
+    url: string,
+    params?: Record<string, string | number | boolean>,
+    headers?: Record<string, string>
+  ): Promise<T> {
+    try {
+      this.logger.debug(`POST ${url} with params: ${JSON.stringify(params)}`);
+      const response = await this.axiosInstance.post<T>(url, null, { params, headers });
+      return response.data;
+    } catch (error) {
+      this.handleError(error as AxiosError);
+      throw error;
+    }
+  }
+
   protected async put<T>(
     url: string,
     data?: Record<string, unknown>,
@@ -94,6 +116,21 @@ export abstract class BaseHttpClient {
     try {
       this.logger.debug(`PUT ${url} with data: ${JSON.stringify(data)}`);
       const response = await this.axiosInstance.put<T>(url, data, { headers });
+      return response.data;
+    } catch (error) {
+      this.handleError(error as AxiosError);
+      throw error;
+    }
+  }
+
+  protected async putWithParams<T>(
+    url: string,
+    params?: Record<string, string | number | boolean>,
+    headers?: Record<string, string>
+  ): Promise<T> {
+    try {
+      this.logger.debug(`PUT ${url} with params: ${JSON.stringify(params)}`);
+      const response = await this.axiosInstance.put<T>(url, null, { params, headers });
       return response.data;
     } catch (error) {
       this.handleError(error as AxiosError);

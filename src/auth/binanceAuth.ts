@@ -1,7 +1,7 @@
-import crypto from 'crypto';
+import { hmacSha256 } from '../utils/crypto';
 
 export function buildBinanceSignature(queryString: string, secret: string): string {
-  return crypto.createHmac('sha256', secret).update(queryString).digest('hex');
+  return hmacSha256(queryString, secret);
 }
 
 export interface BuildBinanceSignedParamsArgs {
@@ -20,7 +20,7 @@ export function buildBinanceSignedParams(args: BuildBinanceSignedParamsArgs): Re
   };
 
   const queryString = new URLSearchParams(
-    Object.entries(signedParams).map(([k, v]) => [k, String(v)]) as [string, string][]
+    Object.entries(signedParams).map(([key, value]) => [key, String(value)]) as [string, string][]
   ).toString();
 
   const signature = buildBinanceSignature(queryString, secret);

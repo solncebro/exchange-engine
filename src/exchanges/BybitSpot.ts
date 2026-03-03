@@ -1,12 +1,5 @@
+import type { CreateOrderWsArgs, ExchangeArgs, FetchKlinesArgs } from '../types/exchange';
 import type {
-  ExchangeClient,
-  ExchangeArgs,
-  CreateOrderWsArgs,
-  FetchKlinesArgs,
-  SubscribeKlinesArgs,
-} from '../types/exchange';
-import type {
-  ExchangeLogger,
   Kline,
   KlineInterval,
   MarketBySymbol,
@@ -16,120 +9,108 @@ import type {
   Order,
   MarginMode,
 } from '../types/common';
+import type { PublicStreamLike } from '../types/stream';
 import { BybitHttpClient } from '../http/BybitHttpClient';
 import {
   normalizeBybitMarkets,
   normalizeBybitTickers,
   normalizeBybitKlines,
-  normalizeBybitOrder,
   normalizeBybitBalance,
-} from '../normalizers/bybitNormalizer';
-import type {
-  BybitRawInstrumentInfo,
-  BybitRawTicker,
-  BybitRawOrderResponse,
-  BybitRawWalletBalance,
+  buildBybitOrderFromCreateResponse,
 } from '../normalizers/bybitNormalizer';
 import { BybitPublicStream } from '../ws/BybitPublicStream';
-import { BYBIT_KLINE_INTERVAL, BYBIT_PUBLIC_SPOT_WS_URL } from '../constants/bybit';
-import { amountToPrecision, priceToPrecision } from '../precision/precision';
+import {
+  BYBIT_KLINE_INTERVAL,
+  BYBIT_BASE_URL,
+  BYBIT_DEMO_BASE_URL,
+  BYBIT_PUBLIC_SPOT_WS_URL,
+  BYBIT_DEMO_PUBLIC_SPOT_WS_URL,
+} from '../constants/bybit';
+import { BaseExchangeClient } from './BaseExchangeClient';
 
-class BybitSpot implements ExchangeClient {
-  readonly apiKey: string;
-  readonly markets: MarketBySymbol = new Map();
+class BybitSpot extends BaseExchangeClient {
+  protected readonly marketLabel = 'spot';
+  protected readonly klineLimit = 200;
 
-  private httpClient: BybitHttpClient;
-  private publicStream: BybitPublicStream;
-  private logger: ExchangeLogger;
-  private onNotify?: (message: string) => void | Promise<void>;
+  private readonly httpClient: BybitHttpClient;
+  private readonly publicStream: BybitPublicStream;
 
   constructor(args: ExchangeArgs) {
-    this.apiKey = args.config.apiKey;
-    this.logger = args.logger;
-    this.onNotify = args.onNotify;
+    super(args);
 
-    this.httpClient = new BybitHttpClient(
-      args.config.apiKey,
-      args.config.secret,
-      args.logger,
-    );
+    const demo = args.config.demoMode === true;
+    const baseUrl = demo ? BYBIT_DEMO_BASE_URL : BYBIT_BASE_URL;
+    const publicWsUrl = demo ? BYBIT_DEMO_PUBLIC_SPOT_WS_URL : BYBIT_PUBLIC_SPOT_WS_URL;
+
+    this.httpClient = new BybitHttpClient({
+      baseUrl,
+      apiKey: args.config.apiKey,
+      secret: args.config.secret,
+      logger: args.logger,
+    });
 
     this.publicStream = new BybitPublicStream(
-      BYBIT_PUBLIC_SPOT_WS_URL,
+      publicWsUrl,
       args.logger,
       args.onNotify,
     );
   }
 
-  async loadMarkets(reload: boolean = false): Promise<MarketBySymbol> {
-    if (!reload && this.markets.size > 0) {
-      return this.markets;
-    }
-
-    this.logger.info('Loading spot markets');
-
-    const raw = await this.httpClient.fetchInstrumentsInfo('spot');
-    const normalized = normalizeBybitMarkets(
-      raw.result.list as unknown as BybitRawInstrumentInfo[],
-    );
-
-    for (const [symbol, market] of normalized) {
-      this.markets.set(symbol, market);
-    }
-
-    this.logger.info(`Loaded ${this.markets.size} spot markets`);
-
-    return this.markets;
+  protected getPublicStream(): PublicStreamLike {
+    return this.publicStream;
   }
 
-  async fetchTickers(): Promise<TickerBySymbol> {
-    this.logger.debug('Fetching spot tickers');
+  protected async fetchAndNormalizeMarkets(): Promise<MarketBySymbol> {
+    const raw = await this.httpClient.fetchInstrumentsInfo('spot');
+
+    return normalizeBybitMarkets(raw.result.list);
+  }
+
+  protected async fetchAndNormalizeTickers(): Promise<TickerBySymbol> {
     const raw = await this.httpClient.fetchTickers('spot');
 
-    return normalizeBybitTickers(raw.result.list as unknown as BybitRawTicker[]);
+    return normalizeBybitTickers(raw.result.list);
   }
 
-  async fetchKlines(
+  protected async fetchAndNormalizeKlines(
     symbol: string,
     interval: KlineInterval,
     options?: FetchKlinesArgs,
   ): Promise<Kline[]> {
-    this.logger.debug(`Fetching klines for ${symbol} ${interval}`);
     const bybitInterval = BYBIT_KLINE_INTERVAL[interval];
-    const raw = await this.httpClient.fetchKline('spot', symbol, bybitInterval, {
-      startTime: options?.startTime,
-      endTime: options?.endTime,
-      limit: options?.limit,
+    const raw = await this.httpClient.fetchKline({
+      category: 'spot',
+      symbol,
+      interval: bybitInterval,
+      options,
     });
 
     return normalizeBybitKlines(raw.result.list);
   }
 
-  async *watchTickers(): AsyncGenerator<TickerBySymbol> {
-    this.publicStream.subscribeAllTickers(() => {});
+  protected async fetchAndNormalizeBalance(): Promise<BalanceByAsset> {
+    const raw = await this.httpClient.fetchWalletBalance('UNIFIED');
 
-    yield await this.fetchTickers();
-  }
-
-  subscribeKlines(args: SubscribeKlinesArgs): void {
-    this.publicStream.subscribeKlines(args.symbol, args.interval, args.handler);
-  }
-
-  unsubscribeKlines(args: SubscribeKlinesArgs): void {
-    this.publicStream.unsubscribeKlines(args.symbol, args.interval, args.handler);
+    return normalizeBybitBalance(raw.result);
   }
 
   async createOrderWs(args: CreateOrderWsArgs): Promise<Order> {
     this.logger.debug(`Creating order via REST: ${args.symbol}`);
 
+    const isMarket = args.type === 'market';
+
     const orderParams: Record<string, unknown> = {
       category: 'spot',
       symbol: args.symbol,
-      orderType: args.type === 'market' ? 'Market' : 'Limit',
+      orderType: isMarket ? 'Market' : 'Limit',
       side: args.side === 'buy' ? 'Buy' : 'Sell',
       qty: this.amountToPrecision(args.symbol, args.amount),
       ...args.params,
     };
+
+    if (isMarket) {
+      orderParams.marketUnit = 'baseCoin';
+    }
 
     if (args.price > 0) {
       orderParams.price = this.priceToPrecision(args.symbol, args.price);
@@ -137,7 +118,7 @@ class BybitSpot implements ExchangeClient {
 
     const raw = await this.httpClient.createOrder(orderParams);
 
-    return normalizeBybitOrder(raw.result as unknown as BybitRawOrderResponse);
+    return buildBybitOrderFromCreateResponse(args, raw.result.orderId);
   }
 
   async fetchPosition(_symbol: string): Promise<Position> {
@@ -150,37 +131,6 @@ class BybitSpot implements ExchangeClient {
 
   async setMarginMode(_marginMode: MarginMode, _symbol: string): Promise<void> {
     throw new Error('Not supported for spot market');
-  }
-
-  async fetchBalance(): Promise<BalanceByAsset> {
-    this.logger.debug('Fetching balance');
-    const raw = await this.httpClient.fetchWalletBalance('UNIFIED');
-
-    return normalizeBybitBalance(raw.result as unknown as BybitRawWalletBalance);
-  }
-
-  amountToPrecision(symbol: string, amount: number): string {
-    const market = this.markets.get(symbol);
-
-    if (!market) {
-      this.logger.warn(`Market ${symbol} not found, using raw amount`);
-
-      return String(amount);
-    }
-
-    return amountToPrecision(market, amount);
-  }
-
-  priceToPrecision(symbol: string, price: number): string {
-    const market = this.markets.get(symbol);
-
-    if (!market) {
-      this.logger.warn(`Market ${symbol} not found, using raw price`);
-
-      return String(price);
-    }
-
-    return priceToPrecision(market, price);
   }
 
   async close(): Promise<void> {

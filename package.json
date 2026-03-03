@@ -47,7 +47,7 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
-    "@solncebro/websocket-engine": "^0.1.0",
+    "@solncebro/websocket-engine": "^0.2.0",
     "axios": "^1.7.7"
   },
   "devDependencies": {

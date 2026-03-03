@@ -1,20 +1,18 @@
 export const BYBIT_BASE_URL = 'https://api.bybit.com';
-export const BYBIT_TESTNET_BASE_URL = 'https://api-testnet.bybit.com';
+
+export const BYBIT_DEMO_BASE_URL = 'https://api-demo.bybit.com';
 
 export const BYBIT_PUBLIC_LINEAR_WS_URL = 'wss://stream.bybit.com/v5/public/linear';
 export const BYBIT_PUBLIC_SPOT_WS_URL = 'wss://stream.bybit.com/v5/public/spot';
 export const BYBIT_PRIVATE_WS_URL = 'wss://stream.bybit.com/v5/private';
 export const BYBIT_TRADE_WS_URL = 'wss://stream.bybit.com/v5/trade';
 
-export const BYBIT_PUBLIC_LINEAR_WS_TESTNET_URL = 'wss://stream-testnet.bybit.com/v5/public/linear';
-export const BYBIT_PUBLIC_SPOT_WS_TESTNET_URL = 'wss://stream-testnet.bybit.com/v5/public/spot';
-export const BYBIT_PRIVATE_WS_TESTNET_URL = 'wss://stream-testnet.bybit.com/v5/private';
-export const BYBIT_TRADE_WS_TESTNET_URL = 'wss://stream-testnet.bybit.com/v5/trade';
+export const BYBIT_DEMO_PUBLIC_LINEAR_WS_URL = 'wss://stream-demo.bybit.com/v5/public/linear';
+export const BYBIT_DEMO_PUBLIC_SPOT_WS_URL = 'wss://stream-demo.bybit.com/v5/public/spot';
 
-export const BYBIT_RECV_WINDOW = 7000; // milliseconds
-export const BYBIT_REQUEST_TIMEOUT = 30000; // 30 seconds
+export const BYBIT_RECV_WINDOW = 7000;
+export const BYBIT_REQUEST_TIMEOUT = 30000;
 
-// Маппинг KlineInterval -> формат Bybit (числа минут или D/W/M)
 export const BYBIT_KLINE_INTERVAL: Record<string, string> = {
   '1m': '1',
   '3m': '3',

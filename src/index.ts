@@ -1,4 +1,6 @@
 export { Exchange } from './exchanges/Exchange';
+export { BINANCE_KLINE_LIMIT_SPOT, BINANCE_KLINE_LIMIT_FUTURES } from './constants/binance';
+export { KLINE_CHUNK_SIZE } from './utils/klineLoader';
 
 export type {
   ExchangeClient,
@@ -6,6 +8,7 @@ export type {
   CreateOrderWsArgs,
   FetchKlinesArgs,
   SubscribeKlinesArgs,
+  KlineHandler,
 } from './types/exchange';
 
 export type {

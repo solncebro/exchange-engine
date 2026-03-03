@@ -1,14 +1,85 @@
-import { ExchangeLogger } from '../types/common';
+import type { ExchangeLogger } from '../types/common';
+import type { FetchKlinesArgs } from '../types/exchange';
+import type {
+  BybitRawInstrumentInfo,
+  BybitRawTicker,
+  BybitRawPosition,
+  BybitRawOrderResponse,
+  BybitRawWalletBalance,
+} from '../normalizers/bybitNormalizer';
 import { buildBybitAuthHeaders } from '../auth/bybitAuth';
-import { BYBIT_BASE_URL, BYBIT_REQUEST_TIMEOUT } from '../constants/bybit';
+import { applyTimeRangeOptions } from '../utils/httpParams';
+import { BYBIT_REQUEST_TIMEOUT } from '../constants/bybit';
 import { BaseHttpClient } from './BaseHttpClient';
+
+interface BybitHttpClientArgs {
+  baseUrl: string;
+  apiKey: string;
+  secret: string;
+  logger: ExchangeLogger;
+}
+
+interface SymbolFilterArgs {
+  symbol?: string;
+}
+
+interface SymbolLimitFilterArgs {
+  symbol?: string;
+  limit?: number;
+}
+
+interface PeriodFilterArgs {
+  period?: string;
+  limit?: number;
+}
+
+interface CategoryFilterArgs {
+  category?: string;
+  limit?: number;
+}
+
+interface FetchBybitKlineArgs {
+  category: string;
+  symbol: string;
+  interval: string;
+  options?: FetchKlinesArgs;
+}
+
+interface SetBybitLeverageArgs {
+  category: string;
+  symbol: string;
+  buyLeverage: number;
+  sellLeverage: number;
+}
+
+interface SwitchBybitIsolatedArgs {
+  category: string;
+  symbol: string;
+  tradeMode: number;
+  buyLeverage: number;
+  sellLeverage: number;
+}
+
+interface BybitListResponse<T> {
+  result: { list: T[] };
+}
+
+interface BybitResponse<T> {
+  result: T;
+}
+
+interface BybitCreateOrderApiResponse {
+  retCode: number;
+  retMsg: string;
+  result: BybitRawOrderResponse;
+}
 
 export class BybitHttpClient extends BaseHttpClient {
   private readonly secret: string;
 
-  constructor(apiKey: string, secret: string, logger: ExchangeLogger) {
-    super(BYBIT_BASE_URL, apiKey, logger, BYBIT_REQUEST_TIMEOUT);
-    this.secret = secret;
+  constructor(args: BybitHttpClientArgs) {
+    super({ baseUrl: args.baseUrl, apiKey: args.apiKey, logger: args.logger, timeout: BYBIT_REQUEST_TIMEOUT });
+    this.secret = args.secret;
   }
 
   private buildAuthHeaders(payload: string): Record<string, string> {
@@ -22,110 +93,96 @@ export class BybitHttpClient extends BaseHttpClient {
 
   private toQueryString(params: Record<string, string | number | boolean>): string {
     const urlParams = new URLSearchParams();
-    for (const [k, v] of Object.entries(params)) {
-      urlParams.append(k, String(v));
+
+    for (const [key, value] of Object.entries(params)) {
+      urlParams.append(key, String(value));
     }
+
     return urlParams.toString();
+  }
+
+  private authenticatedGet<T>(
+    path: string,
+    params: Record<string, string | number | boolean>,
+  ): Promise<T> {
+    const headers = this.buildAuthHeaders(this.toQueryString(params));
+
+    return this.get<T>(path, params, headers);
+  }
+
+  private authenticatedPost<T>(
+    path: string,
+    body: Record<string, unknown>,
+  ): Promise<T> {
+    const headers = this.buildAuthHeaders(JSON.stringify(body));
+
+    return this.post<T>(path, body, headers);
   }
 
   async fetchInstrumentsInfo(
     category: string,
-    options?: { symbol?: string }
-  ): Promise<{ result: { list: Array<Record<string, unknown>> } }> {
+    options?: SymbolFilterArgs,
+  ): Promise<BybitListResponse<BybitRawInstrumentInfo>> {
     const params: Record<string, string | number | boolean> = { category };
 
     if (options?.symbol !== undefined) {
       params.symbol = options.symbol;
     }
 
-    const headers = this.buildAuthHeaders(this.toQueryString(params));
-    return this.get('/v5/market/instruments-info', params, headers);
+    return this.authenticatedGet('/v5/market/instruments-info', params);
   }
 
   async fetchTickers(
     category: string,
-    options?: { symbol?: string }
-  ): Promise<{ result: { list: Array<Record<string, unknown>> } }> {
+    options?: SymbolFilterArgs,
+  ): Promise<BybitListResponse<BybitRawTicker>> {
     const params: Record<string, string | number | boolean> = { category };
 
     if (options?.symbol !== undefined) {
       params.symbol = options.symbol;
     }
 
-    const headers = this.buildAuthHeaders(this.toQueryString(params));
-    return this.get('/v5/market/tickers', params, headers);
+    return this.authenticatedGet('/v5/market/tickers', params);
   }
 
   async fetchOrderBook(
     category: string,
     symbol: string,
-    limit?: number
-  ): Promise<{ result: { a: string[][]; b: string[][] } }> {
+    limit?: number,
+  ): Promise<BybitResponse<{ a: string[][]; b: string[][] }>> {
     const params: Record<string, string | number | boolean> = { category, symbol };
 
     if (limit !== undefined) {
       params.limit = limit;
     }
 
-    const headers = this.buildAuthHeaders(this.toQueryString(params));
-
-    return this.get('/v5/market/orderbook', params, headers);
+    return this.authenticatedGet('/v5/market/orderbook', params);
   }
 
-  async fetchKline(
-    category: string,
-    symbol: string,
-    interval: string,
-    options?: { startTime?: number; endTime?: number; limit?: number }
-  ): Promise<{ result: { list: string[][] } }> {
+  async fetchKline(args: FetchBybitKlineArgs): Promise<BybitListResponse<string[]>> {
+    const { category, symbol, interval, options } = args;
     const params: Record<string, string | number | boolean> = { category, symbol, interval };
+    applyTimeRangeOptions(params, options);
 
-    if (options?.startTime !== undefined) {
-      params.startTime = options.startTime;
-    }
-
-    if (options?.endTime !== undefined) {
-      params.endTime = options.endTime;
-    }
-
-    if (options?.limit !== undefined) {
-      params.limit = options.limit;
-    }
-
-    const headers = this.buildAuthHeaders(this.toQueryString(params));
-
-    return this.get('/v5/market/kline', params, headers);
+    return this.authenticatedGet('/v5/market/kline', params);
   }
 
   async fetchFundingHistory(
     category: string,
     symbol: string,
-    options?: { startTime?: number; endTime?: number; limit?: number }
-  ): Promise<{ result: { list: Array<Record<string, unknown>> } }> {
+    options?: FetchKlinesArgs,
+  ): Promise<BybitListResponse<Record<string, unknown>>> {
     const params: Record<string, string | number | boolean> = { category, symbol };
+    applyTimeRangeOptions(params, options);
 
-    if (options?.startTime !== undefined) {
-      params.startTime = options.startTime;
-    }
-
-    if (options?.endTime !== undefined) {
-      params.endTime = options.endTime;
-    }
-
-    if (options?.limit !== undefined) {
-      params.limit = options.limit;
-    }
-
-    const headers = this.buildAuthHeaders(this.toQueryString(params));
-
-    return this.get('/v5/market/funding/history', params, headers);
+    return this.authenticatedGet('/v5/market/funding/history', params);
   }
 
   async fetchOpenInterest(
     category: string,
     symbol: string,
-    options?: { period?: string; limit?: number }
-  ): Promise<{ result: { list: Array<Record<string, unknown>> } }> {
+    options?: PeriodFilterArgs,
+  ): Promise<BybitListResponse<Record<string, unknown>>> {
     const params: Record<string, string | number | boolean> = { category, symbol };
 
     if (options?.period !== undefined) {
@@ -136,64 +193,61 @@ export class BybitHttpClient extends BaseHttpClient {
       params.limit = options.limit;
     }
 
-    const headers = this.buildAuthHeaders(this.toQueryString(params));
-
-    return this.get('/v5/market/open-interest', params, headers);
+    return this.authenticatedGet('/v5/market/open-interest', params);
   }
 
   async fetchRecentTrades(
     category: string,
     symbol: string,
-    limit?: number
-  ): Promise<{ result: { list: Array<Record<string, unknown>> } }> {
+    limit?: number,
+  ): Promise<BybitListResponse<Record<string, unknown>>> {
     const params: Record<string, string | number | boolean> = { category, symbol };
 
     if (limit !== undefined) {
       params.limit = limit;
     }
 
-    const headers = this.buildAuthHeaders(this.toQueryString(params));
-
-    return this.get('/v5/market/recent-trade', params, headers);
+    return this.authenticatedGet('/v5/market/recent-trade', params);
   }
 
-  async createOrder(params: Record<string, unknown>): Promise<{ result: { orderId: string } }> {
-    const body = params as Record<string, unknown>;
-    const headers = this.buildAuthHeaders(JSON.stringify(body));
-    return this.post('/v5/order/create', body, headers);
+  async createOrder(params: Record<string, unknown>): Promise<BybitResponse<BybitRawOrderResponse>> {
+    const response = await this.authenticatedPost<BybitCreateOrderApiResponse>(
+      '/v5/order/create',
+      params,
+    );
+
+    if (response.retCode !== 0) {
+      throw new Error(`Bybit API error ${response.retCode}: ${response.retMsg}`);
+    }
+
+    return response;
   }
 
-  async amendOrder(params: Record<string, unknown>): Promise<{ result: Record<string, unknown> }> {
-    const body = params as Record<string, unknown>;
-    const headers = this.buildAuthHeaders(JSON.stringify(body));
-    return this.post('/v5/order/amend', body, headers);
+  async amendOrder(params: Record<string, unknown>): Promise<BybitResponse<Record<string, unknown>>> {
+    return this.authenticatedPost('/v5/order/amend', params);
   }
 
-  async cancelOrder(params: Record<string, unknown>): Promise<{ result: Record<string, unknown> }> {
-    const body = params as Record<string, unknown>;
-    const headers = this.buildAuthHeaders(JSON.stringify(body));
-    return this.post('/v5/order/cancel', body, headers);
+  async cancelOrder(params: Record<string, unknown>): Promise<BybitResponse<Record<string, unknown>>> {
+    return this.authenticatedPost('/v5/order/cancel', params);
   }
 
   async cancelAllOrders(
     category: string,
-    symbol?: string
-  ): Promise<{ result: { list: Array<Record<string, unknown>> } }> {
+    symbol?: string,
+  ): Promise<BybitListResponse<Record<string, unknown>>> {
     const body: Record<string, unknown> = { category };
 
     if (symbol !== undefined) {
       body.symbol = symbol;
     }
 
-    const headers = this.buildAuthHeaders(JSON.stringify(body));
-
-    return this.post('/v5/order/cancel-all', body, headers);
+    return this.authenticatedPost('/v5/order/cancel-all', body);
   }
 
   async getOpenOrders(
     category: string,
-    options?: { symbol?: string; limit?: number }
-  ): Promise<{ result: { list: Array<Record<string, unknown>> } }> {
+    options?: SymbolLimitFilterArgs,
+  ): Promise<BybitListResponse<Record<string, unknown>>> {
     const params: Record<string, string | number | boolean> = { category };
 
     if (options?.symbol !== undefined) {
@@ -204,15 +258,13 @@ export class BybitHttpClient extends BaseHttpClient {
       params.limit = options.limit;
     }
 
-    const headers = this.buildAuthHeaders(this.toQueryString(params));
-
-    return this.get('/v5/order/realtime', params, headers);
+    return this.authenticatedGet('/v5/order/realtime', params);
   }
 
   async getOrderHistory(
     category: string,
-    options?: { symbol?: string; limit?: number }
-  ): Promise<{ result: { list: Array<Record<string, unknown>> } }> {
+    options?: SymbolLimitFilterArgs,
+  ): Promise<BybitListResponse<Record<string, unknown>>> {
     const params: Record<string, string | number | boolean> = { category };
 
     if (options?.symbol !== undefined) {
@@ -223,33 +275,27 @@ export class BybitHttpClient extends BaseHttpClient {
       params.limit = options.limit;
     }
 
-    const headers = this.buildAuthHeaders(this.toQueryString(params));
-
-    return this.get('/v5/order/history', params, headers);
+    return this.authenticatedGet('/v5/order/history', params);
   }
 
   async createBatchOrders(
     category: string,
-    requestList: Array<Record<string, unknown>>
-  ): Promise<{ result: { list: Array<Record<string, unknown>> } }> {
-    const body = { category, request: requestList };
-    const headers = this.buildAuthHeaders(JSON.stringify(body));
-    return this.post('/v5/order/create-batch', body, headers);
+    requestList: Array<Record<string, unknown>>,
+  ): Promise<BybitListResponse<Record<string, unknown>>> {
+    return this.authenticatedPost('/v5/order/create-batch', { category, request: requestList });
   }
 
   async cancelBatchOrders(
     category: string,
-    requestList: Array<Record<string, unknown>>
-  ): Promise<{ result: { list: Array<Record<string, unknown>> } }> {
-    const body = { category, request: requestList };
-    const headers = this.buildAuthHeaders(JSON.stringify(body));
-    return this.post('/v5/order/cancel-batch', body, headers);
+    requestList: Array<Record<string, unknown>>,
+  ): Promise<BybitListResponse<Record<string, unknown>>> {
+    return this.authenticatedPost('/v5/order/cancel-batch', { category, request: requestList });
   }
 
   async getPositionList(
     category: string,
-    options?: { symbol?: string; limit?: number }
-  ): Promise<{ result: { list: Array<Record<string, unknown>> } }> {
+    options?: SymbolLimitFilterArgs,
+  ): Promise<BybitListResponse<BybitRawPosition>> {
     const params: Record<string, string | number | boolean> = { category };
 
     if (options?.symbol !== undefined) {
@@ -260,50 +306,36 @@ export class BybitHttpClient extends BaseHttpClient {
       params.limit = options.limit;
     }
 
-    const headers = this.buildAuthHeaders(this.toQueryString(params));
-
-    return this.get('/v5/position/list', params, headers);
+    return this.authenticatedGet('/v5/position/list', params);
   }
 
-  async setLeverage(
-    category: string,
-    symbol: string,
-    buyLeverage: number,
-    sellLeverage: number
-  ): Promise<Record<string, unknown>> {
-    const body = { category, symbol, buyLeverage: String(buyLeverage), sellLeverage: String(sellLeverage) };
-    const headers = this.buildAuthHeaders(JSON.stringify(body));
-    return this.post('/v5/position/set-leverage', body, headers);
+  async setLeverage(args: SetBybitLeverageArgs): Promise<Record<string, unknown>> {
+    return this.authenticatedPost('/v5/position/set-leverage', {
+      category: args.category,
+      symbol: args.symbol,
+      buyLeverage: String(args.buyLeverage),
+      sellLeverage: String(args.sellLeverage),
+    });
   }
 
-  async switchIsolated(
-    category: string,
-    symbol: string,
-    tradeMode: number,
-    buyLeverage: number,
-    sellLeverage: number
-  ): Promise<Record<string, unknown>> {
-    const body = {
-      category,
-      symbol,
-      tradeMode,
-      buyLeverage: String(buyLeverage),
-      sellLeverage: String(sellLeverage),
-    };
-    const headers = this.buildAuthHeaders(JSON.stringify(body));
-    return this.post('/v5/position/switch-isolated', body, headers);
+  async switchIsolated(args: SwitchBybitIsolatedArgs): Promise<Record<string, unknown>> {
+    return this.authenticatedPost('/v5/position/switch-isolated', {
+      category: args.category,
+      symbol: args.symbol,
+      tradeMode: args.tradeMode,
+      buyLeverage: String(args.buyLeverage),
+      sellLeverage: String(args.sellLeverage),
+    });
   }
 
   async setTradingStop(params: Record<string, unknown>): Promise<Record<string, unknown>> {
-    const body = params as Record<string, unknown>;
-    const headers = this.buildAuthHeaders(JSON.stringify(body));
-    return this.post('/v5/position/trading-stop', body, headers);
+    return this.authenticatedPost('/v5/position/trading-stop', params);
   }
 
   async getClosedPnl(
     category: string,
-    options?: { symbol?: string; limit?: number }
-  ): Promise<{ result: { list: Array<Record<string, unknown>> } }> {
+    options?: SymbolLimitFilterArgs,
+  ): Promise<BybitListResponse<Record<string, unknown>>> {
     const params: Record<string, string | number | boolean> = { category };
 
     if (options?.symbol !== undefined) {
@@ -314,49 +346,39 @@ export class BybitHttpClient extends BaseHttpClient {
       params.limit = options.limit;
     }
 
-    const headers = this.buildAuthHeaders(this.toQueryString(params));
-
-    return this.get('/v5/position/closed-pnl', params, headers);
+    return this.authenticatedGet('/v5/position/closed-pnl', params);
   }
 
   async fetchWalletBalance(
-    accountType: string
-  ): Promise<{ result: { list: Array<Record<string, unknown>> } }> {
-    const params: Record<string, string | number | boolean> = { accountType };
-    const headers = this.buildAuthHeaders(this.toQueryString(params));
-    return this.get('/v5/account/wallet-balance', params, headers);
+    accountType: string,
+  ): Promise<BybitResponse<BybitRawWalletBalance>> {
+    return this.authenticatedGet('/v5/account/wallet-balance', { accountType });
   }
 
-  async fetchAccountInfo(): Promise<{ result: Record<string, unknown> }> {
-    const params: Record<string, string | number | boolean> = {};
-    const headers = this.buildAuthHeaders(this.toQueryString(params));
-    return this.get('/v5/account/info', params, headers);
+  async fetchAccountInfo(): Promise<BybitResponse<Record<string, unknown>>> {
+    return this.authenticatedGet('/v5/account/info', {});
   }
 
   async fetchFeeRate(
     category: string,
-    options?: { symbol?: string }
-  ): Promise<{ result: Record<string, unknown> }> {
+    options?: SymbolFilterArgs,
+  ): Promise<BybitResponse<Record<string, unknown>>> {
     const params: Record<string, string | number | boolean> = { category };
 
     if (options?.symbol !== undefined) {
       params.symbol = options.symbol;
     }
 
-    const headers = this.buildAuthHeaders(this.toQueryString(params));
-
-    return this.get('/v5/account/fee-rate', params, headers);
+    return this.authenticatedGet('/v5/account/fee-rate', params);
   }
 
   async setMarginMode(mode: string): Promise<Record<string, unknown>> {
-    const body = { setMarginMode: mode };
-    const headers = this.buildAuthHeaders(JSON.stringify(body));
-    return this.post('/v5/account/set-margin-mode', body, headers);
+    return this.authenticatedPost('/v5/account/set-margin-mode', { setMarginMode: mode });
   }
 
   async fetchTransactionLog(
-    options?: { category?: string; limit?: number }
-  ): Promise<{ result: { list: Array<Record<string, unknown>> } }> {
+    options?: CategoryFilterArgs,
+  ): Promise<BybitListResponse<Record<string, unknown>>> {
     const params: Record<string, string | number | boolean> = {};
 
     if (options?.category !== undefined) {
@@ -367,8 +389,6 @@ export class BybitHttpClient extends BaseHttpClient {
       params.limit = options.limit;
     }
 
-    const headers = this.buildAuthHeaders(this.toQueryString(params));
-
-    return this.get('/v5/account/transaction-log', params, headers);
+    return this.authenticatedGet('/v5/account/transaction-log', params);
   }
 }

@@ -16,7 +16,7 @@ function parseUserDataMessage(rawData: RawData): Record<string, unknown> {
 }
 
 class BinanceUserDataStream {
-  private ws: ReliableWebSocket<Record<string, unknown>> | null = null;
+  private webSocket: ReliableWebSocket<Record<string, unknown>> | null = null;
   private readonly logger: ExchangeLogger;
   private readonly listenKey: string;
   private readonly baseWsUrl: string;
@@ -32,13 +32,13 @@ class BinanceUserDataStream {
   }
 
   connect(): void {
-    if (this.ws !== null) {
+    if (this.webSocket !== null) {
       return;
     }
 
     const url = `${this.baseWsUrl}/${this.listenKey}`;
 
-    this.ws = new ReliableWebSocket<Record<string, unknown>>({
+    this.webSocket = new ReliableWebSocket<Record<string, unknown>>({
       label: 'BinanceUserDataStream',
       url,
       logger: this.logger,
@@ -51,14 +51,14 @@ class BinanceUserDataStream {
   }
 
   close(): void {
-    if (this.ws !== null) {
-      this.ws.close();
-      this.ws = null;
+    if (this.webSocket !== null) {
+      this.webSocket.close();
+      this.webSocket = null;
     }
   }
 
   isConnected(): boolean {
-    return this.ws !== null;
+    return this.webSocket !== null;
   }
 }
 

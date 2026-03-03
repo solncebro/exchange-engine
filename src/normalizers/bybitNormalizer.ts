@@ -1,4 +1,4 @@
-import {
+import type {
   Ticker,
   TickerBySymbol,
   Kline,
@@ -11,11 +11,15 @@ import {
   Balance,
   BalanceByAsset,
 } from '../types/common';
+import type { CreateOrderWsArgs } from '../types/exchange';
 
 interface BybitRawLotSizeFilter {
+  basePrecision?: string;
   qtyStep?: string;
   minOrderQty?: string;
   maxOrderQty?: string;
+  minNotionalValue?: string;
+  minOrderAmt?: string;
 }
 
 interface BybitRawPriceFilter {
@@ -64,6 +68,7 @@ export interface BybitRawPosition {
   tradeMode: number;
   liqPrice: string;
   positionIdx: number;
+  [key: string]: unknown;
 }
 
 export interface BybitRawOrderResponse {
@@ -109,9 +114,12 @@ export function normalizeBybitMarkets(rawList: BybitRawInstrumentInfo[]): Market
       contractSize: parseFloat(raw.contractSize ?? '1'),
       filter: {
         tickSize: raw.priceFilter?.tickSize ?? '0',
-        stepSize: raw.lotSizeFilter?.qtyStep ?? '0',
+        stepSize: raw.lotSizeFilter?.qtyStep ?? raw.lotSizeFilter?.basePrecision ?? '0',
         minQty: raw.lotSizeFilter?.minOrderQty ?? '0',
         maxQty: raw.lotSizeFilter?.maxOrderQty ?? '0',
+        minNotional: raw.lotSizeFilter?.minNotionalValue
+          ?? raw.lotSizeFilter?.minOrderAmt
+          ?? '0',
       },
     };
 
@@ -140,13 +148,13 @@ export function normalizeBybitTickers(rawList: BybitRawTicker[]): TickerBySymbol
 
 export function normalizeBybitKlines(rawList: string[][]): Kline[] {
   return rawList.map((row) => ({
-    openTime: parseFloat(row[0]),
+    openTimestamp: parseFloat(row[0]),
     open: parseFloat(row[1]),
     high: parseFloat(row[2]),
     low: parseFloat(row[3]),
     close: parseFloat(row[4]),
     volume: parseFloat(row[5]),
-    closeTime: 0,
+    closeTimestamp: 0,
     quoteVolume: parseFloat(row[6]),
     trades: 0,
   }));
@@ -154,13 +162,13 @@ export function normalizeBybitKlines(rawList: string[][]): Kline[] {
 
 export function normalizeBybitKlineWsMessage(raw: BybitRawWsKline): Kline {
   return {
-    openTime: raw.start,
+    openTimestamp: raw.start,
     open: parseFloat(raw.open),
     high: parseFloat(raw.high),
     low: parseFloat(raw.low),
     close: parseFloat(raw.close),
     volume: parseFloat(raw.volume),
-    closeTime: raw.timestamp,
+    closeTimestamp: raw.timestamp,
     quoteVolume: parseFloat(raw.turnover),
     trades: 0,
   };
@@ -186,7 +194,7 @@ export function normalizeBybitPosition(raw: BybitRawPosition): Position {
     leverage: parseFloat(raw.leverage),
     marginMode,
     liquidationPrice: isNaN(liquidationPriceRaw) ? 0 : liquidationPriceRaw,
-    info: raw as unknown as Record<string, unknown>,
+    info: raw,
   };
 }
 
@@ -213,6 +221,19 @@ export function normalizeBybitOrder(raw: BybitRawOrderResponse): Order {
     price: parseFloat(raw.price),
     status,
     timestamp: parseFloat(raw.createdTime),
+  };
+}
+
+export function buildBybitOrderFromCreateResponse(args: CreateOrderWsArgs, orderId: string): Order {
+  return {
+    id: orderId,
+    symbol: args.symbol,
+    side: args.side,
+    type: args.type,
+    amount: args.amount,
+    price: args.price,
+    status: 'open',
+    timestamp: Date.now(),
   };
 }
 
