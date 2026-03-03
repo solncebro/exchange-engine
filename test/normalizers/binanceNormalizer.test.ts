@@ -2,16 +2,17 @@ import {
   normalizeBinanceMarkets,
   normalizeBinanceTickers,
   normalizeBinanceKlines,
-  normalizeBinanceKlineWsMessage,
+  normalizeBinanceKlineWebSocketMessage,
   normalizeBinancePosition,
   normalizeBinanceOrder,
   normalizeBinanceBalance,
 } from '../../src/normalizers/binanceNormalizer';
+import { MarketType, PositionSide, MarginMode } from '../../src/types/common';
 import {
   BINANCE_RAW_EXCHANGE_INFO,
   BINANCE_RAW_TICKER_LIST,
   BINANCE_RAW_KLINE_LIST,
-  BINANCE_RAW_WS_KLINE,
+  BINANCE_RAW_WEBSOCKET_KLINE,
   BINANCE_RAW_POSITION_RISK,
   BINANCE_RAW_ORDER_RESPONSE,
   BINANCE_RAW_ACCOUNT,
@@ -34,8 +35,8 @@ describe('normalizeBinanceMarkets', () => {
     const result = normalizeBinanceMarkets(BINANCE_RAW_EXCHANGE_INFO);
     const btc = result.get('BTCUSDT')!;
 
-    expect(btc.type).toBe('swap');
-    expect(btc.linear).toBe(true);
+    expect(btc.type).toBe(MarketType.Swap);
+    expect(btc.isLinear).toBe(true);
     expect(btc.settle).toBe('USDT');
   });
 
@@ -43,8 +44,8 @@ describe('normalizeBinanceMarkets', () => {
     const result = normalizeBinanceMarkets(BINANCE_RAW_EXCHANGE_INFO);
     const eth = result.get('ETHBTC')!;
 
-    expect(eth.type).toBe('spot');
-    expect(eth.linear).toBe(false);
+    expect(eth.type).toBe(MarketType.Spot);
+    expect(eth.isLinear).toBe(false);
     expect(eth.settle).toBe('');
   });
 
@@ -75,17 +76,17 @@ describe('normalizeBinanceMarkets', () => {
     expect(result.get('ETHBTC')!.filter.minNotional).toBe('0.0001');
   });
 
-  it('sets active=true for TRADING status', () => {
+  it('sets isActive=true for TRADING status', () => {
     const result = normalizeBinanceMarkets(BINANCE_RAW_EXCHANGE_INFO);
 
-    expect(result.get('BTCUSDT')!.active).toBe(true);
+    expect(result.get('BTCUSDT')!.isActive).toBe(true);
   });
 
-  it('sets active=false for non-TRADING status', () => {
+  it('sets isActive=false for non-TRADING status', () => {
     const info = { symbols: [{ ...BINANCE_RAW_EXCHANGE_INFO.symbols[0], status: 'BREAK' }] };
     const result = normalizeBinanceMarkets(info);
 
-    expect(result.get('BTCUSDT')!.active).toBe(false);
+    expect(result.get('BTCUSDT')!.isActive).toBe(false);
   });
 });
 
@@ -144,9 +145,9 @@ describe('normalizeBinanceKlines', () => {
   });
 });
 
-describe('normalizeBinanceKlineWsMessage', () => {
+describe('normalizeBinanceKlineWebSocketMessage', () => {
   it('maps short names to Kline fields', () => {
-    const result = normalizeBinanceKlineWsMessage(BINANCE_RAW_WS_KLINE);
+    const result = normalizeBinanceKlineWebSocketMessage(BINANCE_RAW_WEBSOCKET_KLINE);
 
     expect(result.openTimestamp).toBe(1700000000000);
     expect(result.open).toBe(65000);
@@ -164,41 +165,41 @@ describe('normalizeBinancePosition', () => {
   it('maps LONG to long', () => {
     const result = normalizeBinancePosition(BINANCE_RAW_POSITION_RISK);
 
-    expect(result.side).toBe('long');
+    expect(result.side).toBe(PositionSide.Long);
   });
 
   it('maps SHORT to short', () => {
     const raw = { ...BINANCE_RAW_POSITION_RISK, positionSide: 'SHORT' };
     const result = normalizeBinancePosition(raw);
 
-    expect(result.side).toBe('short');
+    expect(result.side).toBe(PositionSide.Short);
   });
 
   it('maps BOTH to both', () => {
     const raw = { ...BINANCE_RAW_POSITION_RISK, positionSide: 'BOTH' };
     const result = normalizeBinancePosition(raw);
 
-    expect(result.side).toBe('both');
+    expect(result.side).toBe(PositionSide.Both);
   });
 
   it('falls back to both for unknown side', () => {
     const raw = { ...BINANCE_RAW_POSITION_RISK, positionSide: 'UNKNOWN' };
     const result = normalizeBinancePosition(raw);
 
-    expect(result.side).toBe('both');
+    expect(result.side).toBe(PositionSide.Both);
   });
 
   it('maps ISOLATED marginType', () => {
     const result = normalizeBinancePosition(BINANCE_RAW_POSITION_RISK);
 
-    expect(result.marginMode).toBe('isolated');
+    expect(result.marginMode).toBe(MarginMode.Isolated);
   });
 
   it('maps CROSSED marginType to cross', () => {
     const raw = { ...BINANCE_RAW_POSITION_RISK, marginType: 'CROSSED' };
     const result = normalizeBinancePosition(raw);
 
-    expect(result.marginMode).toBe('cross');
+    expect(result.marginMode).toBe(MarginMode.Cross);
   });
 
   it('parses numeric fields', () => {

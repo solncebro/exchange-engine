@@ -1,4 +1,4 @@
-import { Market } from '../types/common';
+import type { Market } from '../types/common';
 
 export function countDecimalPlaces(step: string): number {
   const parts = step.split('.');

@@ -1,13 +1,13 @@
 import type {
-  BybitRawInstrumentInfo,
-  BybitRawTicker,
-  BybitRawWsKline,
-  BybitRawPosition,
-  BybitRawOrderResponse,
-  BybitRawWalletBalance,
+  BybitInstrumentInfoRaw,
+  BybitTickerRaw,
+  BybitWebSocketKlineRaw,
+  BybitPositionRaw,
+  BybitOrderResponseRaw,
+  BybitWalletBalanceRaw,
 } from '../../src/normalizers/bybitNormalizer';
 
-export const BYBIT_RAW_INSTRUMENT_LIST: BybitRawInstrumentInfo[] = [
+export const BYBIT_RAW_INSTRUMENT_LIST: BybitInstrumentInfoRaw[] = [
   {
     symbol: 'BTCUSDT',
     status: 'Trading',
@@ -29,7 +29,7 @@ export const BYBIT_RAW_INSTRUMENT_LIST: BybitRawInstrumentInfo[] = [
   },
 ];
 
-export const BYBIT_RAW_TICKER_LIST: BybitRawTicker[] = [
+export const BYBIT_RAW_TICKER_LIST: BybitTickerRaw[] = [
   { symbol: 'BTCUSDT', lastPrice: '65432.10', price24hPcnt: '0.0235', time: 1700000000000 },
   { symbol: 'ETHUSDT', lastPrice: '3456.78', price24hPcnt: '-0.0120' },
 ];
@@ -39,7 +39,7 @@ export const BYBIT_RAW_KLINE_LIST: string[][] = [
   ['1700003600000', '65500.00', '67000.00', '65000.00', '66800.00', '2345.67', '155000000.00'],
 ];
 
-export const BYBIT_RAW_WS_KLINE: BybitRawWsKline = {
+export const BYBIT_RAW_WEBSOCKET_KLINE: BybitWebSocketKlineRaw = {
   start: 1700000000000,
   open: '65000.00',
   high: '66000.00',
@@ -51,7 +51,7 @@ export const BYBIT_RAW_WS_KLINE: BybitRawWsKline = {
   timestamp: 1700003600000,
 };
 
-export const BYBIT_RAW_POSITION: BybitRawPosition = {
+export const BYBIT_RAW_POSITION: BybitPositionRaw = {
   symbol: 'BTCUSDT',
   side: 'Buy',
   size: '0.100',
@@ -64,7 +64,7 @@ export const BYBIT_RAW_POSITION: BybitRawPosition = {
   positionIdx: 1,
 };
 
-export const BYBIT_RAW_ORDER_RESPONSE: BybitRawOrderResponse = {
+export const BYBIT_RAW_ORDER_RESPONSE: BybitOrderResponseRaw = {
   orderId: 'abc-123-def',
   symbol: 'BTCUSDT',
   side: 'Buy',
@@ -75,7 +75,7 @@ export const BYBIT_RAW_ORDER_RESPONSE: BybitRawOrderResponse = {
   createdTime: '1700000000000',
 };
 
-export const BYBIT_RAW_WALLET_BALANCE: BybitRawWalletBalance = {
+export const BYBIT_RAW_WALLET_BALANCE: BybitWalletBalanceRaw = {
   list: [
     { coin: 'USDT', availableToWithdraw: '1000.50', walletBalance: '1200.50', locked: '200.00' },
     { coin: 'BTC', availableToWithdraw: '0.5', walletBalance: '0.6', locked: '0.1' },

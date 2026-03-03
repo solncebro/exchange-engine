@@ -1,13 +1,14 @@
 import type { Market, MarketBySymbol } from '../../src/types/common';
+import { MarketType } from '../../src/types/common';
 
 export const BTCUSDT_MARKET: Market = {
   symbol: 'BTCUSDT',
   baseAsset: 'BTC',
   quoteAsset: 'USDT',
   settle: 'USDT',
-  active: true,
-  type: 'swap',
-  linear: true,
+  isActive: true,
+  type: MarketType.Swap,
+  isLinear: true,
   contractSize: 1,
   filter: {
     tickSize: '0.10',
@@ -23,9 +24,9 @@ export const ETHUSDT_MARKET: Market = {
   baseAsset: 'ETH',
   quoteAsset: 'USDT',
   settle: 'USDT',
-  active: true,
-  type: 'swap',
-  linear: true,
+  isActive: true,
+  type: MarketType.Swap,
+  isLinear: true,
   contractSize: 1,
   filter: {
     tickSize: '0.01',

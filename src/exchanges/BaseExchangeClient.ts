@@ -42,8 +42,8 @@ abstract class BaseExchangeClient implements ExchangeClient {
   ): Promise<Kline[]>;
   protected abstract fetchAndNormalizeBalance(): Promise<BalanceByAsset>;
 
-  async loadMarkets(reload: boolean = false): Promise<MarketBySymbol> {
-    if (!reload && this.markets.size > 0) {
+  async loadMarkets(shouldReload: boolean = false): Promise<MarketBySymbol> {
+    if (!shouldReload && this.markets.size > 0) {
       return this.markets;
     }
 
@@ -155,7 +155,7 @@ abstract class BaseExchangeClient implements ExchangeClient {
     return parseFloat(market.filter.minNotional);
   }
 
-  abstract createOrderWs(...args: Parameters<ExchangeClient['createOrderWs']>): ReturnType<ExchangeClient['createOrderWs']>;
+  abstract createOrderWebSocket(...args: Parameters<ExchangeClient['createOrderWebSocket']>): ReturnType<ExchangeClient['createOrderWebSocket']>;
   abstract fetchPosition(...args: Parameters<ExchangeClient['fetchPosition']>): ReturnType<ExchangeClient['fetchPosition']>;
   abstract setLeverage(...args: Parameters<ExchangeClient['setLeverage']>): ReturnType<ExchangeClient['setLeverage']>;
   abstract setMarginMode(...args: Parameters<ExchangeClient['setMarginMode']>): ReturnType<ExchangeClient['setMarginMode']>;

@@ -1,11 +1,11 @@
 import type { ExchangeLogger } from '../types/common';
 import type { FetchKlinesArgs } from '../types/exchange';
 import type {
-  BybitRawInstrumentInfo,
-  BybitRawTicker,
-  BybitRawPosition,
-  BybitRawOrderResponse,
-  BybitRawWalletBalance,
+  BybitInstrumentInfoRaw,
+  BybitTickerRaw,
+  BybitPositionRaw,
+  BybitOrderResponseRaw,
+  BybitWalletBalanceRaw,
 } from '../normalizers/bybitNormalizer';
 import { buildBybitAuthHeaders } from '../auth/bybitAuth';
 import { applyTimeRangeOptions } from '../utils/httpParams';
@@ -68,10 +68,15 @@ interface BybitResponse<T> {
   result: T;
 }
 
+interface BybitOrderBookRaw {
+  a: string[][];
+  b: string[][];
+}
+
 interface BybitCreateOrderApiResponse {
   retCode: number;
   retMsg: string;
-  result: BybitRawOrderResponse;
+  result: BybitOrderResponseRaw;
 }
 
 export class BybitHttpClient extends BaseHttpClient {
@@ -122,7 +127,7 @@ export class BybitHttpClient extends BaseHttpClient {
   async fetchInstrumentsInfo(
     category: string,
     options?: SymbolFilterArgs,
-  ): Promise<BybitListResponse<BybitRawInstrumentInfo>> {
+  ): Promise<BybitListResponse<BybitInstrumentInfoRaw>> {
     const params: Record<string, string | number | boolean> = { category };
 
     if (options?.symbol !== undefined) {
@@ -135,7 +140,7 @@ export class BybitHttpClient extends BaseHttpClient {
   async fetchTickers(
     category: string,
     options?: SymbolFilterArgs,
-  ): Promise<BybitListResponse<BybitRawTicker>> {
+  ): Promise<BybitListResponse<BybitTickerRaw>> {
     const params: Record<string, string | number | boolean> = { category };
 
     if (options?.symbol !== undefined) {
@@ -149,7 +154,7 @@ export class BybitHttpClient extends BaseHttpClient {
     category: string,
     symbol: string,
     limit?: number,
-  ): Promise<BybitResponse<{ a: string[][]; b: string[][] }>> {
+  ): Promise<BybitResponse<BybitOrderBookRaw>> {
     const params: Record<string, string | number | boolean> = { category, symbol };
 
     if (limit !== undefined) {
@@ -210,7 +215,7 @@ export class BybitHttpClient extends BaseHttpClient {
     return this.authenticatedGet('/v5/market/recent-trade', params);
   }
 
-  async createOrder(params: Record<string, unknown>): Promise<BybitResponse<BybitRawOrderResponse>> {
+  async createOrder(params: Record<string, unknown>): Promise<BybitResponse<BybitOrderResponseRaw>> {
     const response = await this.authenticatedPost<BybitCreateOrderApiResponse>(
       '/v5/order/create',
       params,
@@ -295,7 +300,7 @@ export class BybitHttpClient extends BaseHttpClient {
   async getPositionList(
     category: string,
     options?: SymbolLimitFilterArgs,
-  ): Promise<BybitListResponse<BybitRawPosition>> {
+  ): Promise<BybitListResponse<BybitPositionRaw>> {
     const params: Record<string, string | number | boolean> = { category };
 
     if (options?.symbol !== undefined) {
@@ -351,7 +356,7 @@ export class BybitHttpClient extends BaseHttpClient {
 
   async fetchWalletBalance(
     accountType: string,
-  ): Promise<BybitResponse<BybitRawWalletBalance>> {
+  ): Promise<BybitResponse<BybitWalletBalanceRaw>> {
     return this.authenticatedGet('/v5/account/wallet-balance', { accountType });
   }
 

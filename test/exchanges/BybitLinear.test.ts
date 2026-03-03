@@ -2,6 +2,7 @@ import axios from 'axios';
 import { BybitLinear } from '../../src/exchanges/BybitLinear';
 import { createMockLogger } from '../fixtures/mockLogger';
 import { BYBIT_RAW_POSITION } from '../fixtures/bybitRaw';
+import { MarketType, OrderType, OrderSide, PositionSide } from '../../src/types/common';
 
 jest.mock('axios');
 jest.mock('../../src/ws/BybitPublicStream');
@@ -9,7 +10,7 @@ jest.mock('../../src/ws/BybitTradeStream');
 
 const mockedAxios = axios as jest.Mocked<typeof axios>;
 
-function createClient(demoMode = false) {
+function createClient(isDemoMode = false) {
   const mockInstance: Record<string, jest.Mock> = {
     get: jest.fn().mockResolvedValue({ data: {} }),
     post: jest.fn().mockResolvedValue({ data: {} }),
@@ -19,7 +20,7 @@ function createClient(demoMode = false) {
   mockedAxios.create.mockReturnValue(mockInstance as any);
 
   const client = new BybitLinear({
-    config: { apiKey: 'testKey', secret: 'testSecret', demoMode },
+    config: { apiKey: 'testKey', secret: 'testSecret', isDemoMode },
     logger: createMockLogger(),
   });
 
@@ -39,7 +40,7 @@ describe('BybitLinear', () => {
     );
   });
 
-  it('uses demo URL when demoMode is true', () => {
+  it('uses demo URL when isDemoMode is true', () => {
     createClient(true);
 
     expect(mockedAxios.create).toHaveBeenCalledWith(
@@ -47,12 +48,12 @@ describe('BybitLinear', () => {
     );
   });
 
-  describe('createOrderWs (demo mode — REST fallback)', () => {
+  describe('createOrderWebSocket (demo mode — REST fallback)', () => {
     it('falls back to REST in demo mode and returns order', async () => {
       const { client, mockInstance } = createClient(true);
       const mockMarket = {
         symbol: 'BTCUSDT', baseAsset: 'BTC', quoteAsset: 'USDT', settle: 'USDT',
-        active: true, type: 'swap' as const, linear: true, contractSize: 1,
+        isActive: true, type: MarketType.Swap, isLinear: true, contractSize: 1,
         filter: { tickSize: '0.10', stepSize: '0.001', minQty: '0.001', maxQty: '1000', minNotional: '5' },
       };
       client.markets.set('BTCUSDT', mockMarket);
@@ -73,10 +74,10 @@ describe('BybitLinear', () => {
         },
       });
 
-      const order = await client.createOrderWs({
+      const order = await client.createOrderWebSocket({
         symbol: 'BTCUSDT',
-        type: 'market',
-        side: 'buy',
+        type: OrderType.Market,
+        side: OrderSide.Buy,
         amount: 0.001,
         price: 0,
       });
@@ -91,7 +92,7 @@ describe('BybitLinear', () => {
       const { client, mockInstance } = createClient(true);
       client.markets.set('BTCUSDT', {
         symbol: 'BTCUSDT', baseAsset: 'BTC', quoteAsset: 'USDT', settle: 'USDT',
-        active: true, type: 'swap', linear: true, contractSize: 1,
+        isActive: true, type: MarketType.Swap, isLinear: true, contractSize: 1,
         filter: { tickSize: '0.10', stepSize: '0.001', minQty: '0.001', maxQty: '1000', minNotional: '5' },
       });
 
@@ -99,7 +100,7 @@ describe('BybitLinear', () => {
         data: { retCode: 0, result: { orderId: '1', symbol: 'BTCUSDT', side: 'Buy', orderType: 'Market', qty: '0.001', price: '0', orderStatus: 'New', createdTime: '1700000000000' } },
       });
 
-      await client.createOrderWs({ symbol: 'BTCUSDT', type: 'market', side: 'buy', amount: 0.001, price: 0 });
+      await client.createOrderWebSocket({ symbol: 'BTCUSDT', type: OrderType.Market, side: OrderSide.Buy, amount: 0.001, price: 0 });
 
       const [, body] = mockInstance.post.mock.calls[0];
 
@@ -111,7 +112,7 @@ describe('BybitLinear', () => {
       const { client, mockInstance } = createClient(true);
       client.markets.set('BTCUSDT', {
         symbol: 'BTCUSDT', baseAsset: 'BTC', quoteAsset: 'USDT', settle: 'USDT',
-        active: true, type: 'swap', linear: true, contractSize: 1,
+        isActive: true, type: MarketType.Swap, isLinear: true, contractSize: 1,
         filter: { tickSize: '0.10', stepSize: '0.001', minQty: '0.001', maxQty: '1000', minNotional: '5' },
       });
 
@@ -119,7 +120,7 @@ describe('BybitLinear', () => {
         data: { retCode: 0, result: { orderId: '1', symbol: 'BTCUSDT', side: 'Sell', orderType: 'Limit', qty: '0.001', price: '65000', orderStatus: 'New', createdTime: '1700000000000' } },
       });
 
-      await client.createOrderWs({ symbol: 'BTCUSDT', type: 'limit', side: 'sell', amount: 0.001, price: 65000 });
+      await client.createOrderWebSocket({ symbol: 'BTCUSDT', type: OrderType.Limit, side: OrderSide.Sell, amount: 0.001, price: 65000 });
 
       const [, body] = mockInstance.post.mock.calls[0];
 
@@ -138,7 +139,7 @@ describe('BybitLinear', () => {
       const position = await client.fetchPosition('BTCUSDT');
 
       expect(position.symbol).toBe('BTCUSDT');
-      expect(position.side).toBe('long');
+      expect(position.side).toBe(PositionSide.Long);
     });
 
     it('throws when position list is empty', async () => {

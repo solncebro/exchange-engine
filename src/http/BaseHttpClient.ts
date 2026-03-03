@@ -60,6 +60,7 @@ export abstract class BaseHttpClient {
       try {
         this.logger.debug(`GET ${url} with params: ${JSON.stringify(params)}`);
         const response = await this.axiosInstance.get<T>(url, { params, headers });
+
         return response.data;
       } catch (error) {
         const axiosError = error as AxiosError;
@@ -86,9 +87,11 @@ export abstract class BaseHttpClient {
     try {
       this.logger.debug(`POST ${url} with data: ${JSON.stringify(data)}`);
       const response = await this.axiosInstance.post<T>(url, data, { headers });
+
       return response.data;
     } catch (error) {
       this.handleError(error as AxiosError);
+
       throw error;
     }
   }
@@ -101,9 +104,11 @@ export abstract class BaseHttpClient {
     try {
       this.logger.debug(`POST ${url} with params: ${JSON.stringify(params)}`);
       const response = await this.axiosInstance.post<T>(url, null, { params, headers });
+
       return response.data;
     } catch (error) {
       this.handleError(error as AxiosError);
+
       throw error;
     }
   }
@@ -116,9 +121,11 @@ export abstract class BaseHttpClient {
     try {
       this.logger.debug(`PUT ${url} with data: ${JSON.stringify(data)}`);
       const response = await this.axiosInstance.put<T>(url, data, { headers });
+
       return response.data;
     } catch (error) {
       this.handleError(error as AxiosError);
+
       throw error;
     }
   }
@@ -131,9 +138,11 @@ export abstract class BaseHttpClient {
     try {
       this.logger.debug(`PUT ${url} with params: ${JSON.stringify(params)}`);
       const response = await this.axiosInstance.put<T>(url, null, { params, headers });
+
       return response.data;
     } catch (error) {
       this.handleError(error as AxiosError);
+
       throw error;
     }
   }
@@ -146,9 +155,11 @@ export abstract class BaseHttpClient {
     try {
       this.logger.debug(`DELETE ${url} with params: ${JSON.stringify(params)}`);
       const response = await this.axiosInstance.delete<T>(url, { params, headers });
+
       return response.data;
     } catch (error) {
       this.handleError(error as AxiosError);
+
       throw error;
     }
   }

@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { BybitSpot } from '../../src/exchanges/BybitSpot';
 import { createMockLogger } from '../fixtures/mockLogger';
+import { MarketType, OrderType, OrderSide, MarginMode } from '../../src/types/common';
 
 jest.mock('axios');
 jest.mock('../../src/ws/BybitPublicStream');
@@ -29,12 +30,12 @@ describe('BybitSpot', () => {
     jest.spyOn(Date, 'now').mockReturnValue(1700000000000);
   });
 
-  describe('createOrderWs', () => {
+  describe('createOrderWebSocket', () => {
     it('adds marketUnit=baseCoin for market orders', async () => {
       const { client, mockInstance } = createClient();
       client.markets.set('BTCUSDT', {
         symbol: 'BTCUSDT', baseAsset: 'BTC', quoteAsset: 'USDT', settle: '',
-        active: true, type: 'spot', linear: false, contractSize: 1,
+        isActive: true, type: MarketType.Spot, isLinear: false, contractSize: 1,
         filter: { tickSize: '0.01', stepSize: '0.001', minQty: '0.001', maxQty: '1000', minNotional: '5' },
       });
 
@@ -45,7 +46,7 @@ describe('BybitSpot', () => {
         },
       });
 
-      await client.createOrderWs({ symbol: 'BTCUSDT', type: 'market', side: 'buy', amount: 0.001, price: 0 });
+      await client.createOrderWebSocket({ symbol: 'BTCUSDT', type: OrderType.Market, side: OrderSide.Buy, amount: 0.001, price: 0 });
 
       const [, body] = mockInstance.post.mock.calls[0];
 
@@ -56,7 +57,7 @@ describe('BybitSpot', () => {
       const { client, mockInstance } = createClient();
       client.markets.set('BTCUSDT', {
         symbol: 'BTCUSDT', baseAsset: 'BTC', quoteAsset: 'USDT', settle: '',
-        active: true, type: 'spot', linear: false, contractSize: 1,
+        isActive: true, type: MarketType.Spot, isLinear: false, contractSize: 1,
         filter: { tickSize: '0.01', stepSize: '0.001', minQty: '0.001', maxQty: '1000', minNotional: '5' },
       });
 
@@ -67,7 +68,7 @@ describe('BybitSpot', () => {
         },
       });
 
-      await client.createOrderWs({ symbol: 'BTCUSDT', type: 'limit', side: 'buy', amount: 0.001, price: 65000 });
+      await client.createOrderWebSocket({ symbol: 'BTCUSDT', type: OrderType.Limit, side: OrderSide.Buy, amount: 0.001, price: 65000 });
 
       const [, body] = mockInstance.post.mock.calls[0];
 
@@ -90,6 +91,6 @@ describe('BybitSpot', () => {
   it('throws "Not supported" for setMarginMode', async () => {
     const { client } = createClient();
 
-    await expect(client.setMarginMode('isolated', 'BTCUSDT')).rejects.toThrow('Not supported for spot market');
+    await expect(client.setMarginMode(MarginMode.Isolated, 'BTCUSDT')).rejects.toThrow('Not supported for spot market');
   });
 });

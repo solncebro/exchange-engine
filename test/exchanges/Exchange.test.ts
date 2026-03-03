@@ -1,5 +1,6 @@
 import { Exchange } from '../../src/exchanges/Exchange';
 import { createMockLogger } from '../fixtures/mockLogger';
+import { ExchangeName } from '../../src/types/common';
 
 jest.mock('../../src/exchanges/BinanceFutures');
 jest.mock('../../src/exchanges/BinanceSpot');
@@ -12,30 +13,30 @@ const mockArgs = {
 };
 
 describe('Exchange', () => {
-  it('creates BinanceFutures and BinanceSpot for "binance"', () => {
-    const exchange = new Exchange('binance', mockArgs);
+  it('creates BinanceFutures and BinanceSpot for binance', () => {
+    const exchange = new Exchange(ExchangeName.Binance, mockArgs);
 
     expect(exchange.futures).toBeDefined();
     expect(exchange.spot).toBeDefined();
   });
 
-  it('creates BybitLinear and BybitSpot for "bybit"', () => {
-    const exchange = new Exchange('bybit', mockArgs);
+  it('creates BybitLinear and BybitSpot for bybit', () => {
+    const exchange = new Exchange(ExchangeName.Bybit, mockArgs);
 
     expect(exchange.futures).toBeDefined();
     expect(exchange.spot).toBeDefined();
   });
 
   it('preserves exchange name', () => {
-    const binance = new Exchange('binance', mockArgs);
-    const bybit = new Exchange('bybit', mockArgs);
+    const binance = new Exchange(ExchangeName.Binance, mockArgs);
+    const bybit = new Exchange(ExchangeName.Bybit, mockArgs);
 
-    expect(binance.name).toBe('binance');
-    expect(bybit.name).toBe('bybit');
+    expect(binance.name).toBe(ExchangeName.Binance);
+    expect(bybit.name).toBe(ExchangeName.Bybit);
   });
 
   it('close() calls close on both futures and spot', async () => {
-    const exchange = new Exchange('binance', mockArgs);
+    const exchange = new Exchange(ExchangeName.Binance, mockArgs);
     (exchange.futures.close as jest.Mock).mockResolvedValue(undefined);
     (exchange.spot.close as jest.Mock).mockResolvedValue(undefined);
 

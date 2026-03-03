@@ -23,7 +23,7 @@ export type {
 
 export type {
   ExchangeArgs,
-  CreateOrderWsArgs,
+  CreateOrderWebSocketArgs,
   FetchKlinesArgs,
   SubscribeKlinesArgs,
   ExchangeClient,

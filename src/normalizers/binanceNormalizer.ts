@@ -5,14 +5,14 @@ import type {
   Market,
   MarketBySymbol,
   Position,
-  PositionSide,
-  MarginMode,
   Order,
   Balance,
   BalanceByAsset,
 } from '../types/common';
+import { MarketType, PositionSide, MarginMode } from '../types/common';
+import { BINANCE_POSITION_SIDE, BINANCE_ORDER_SIDE, BINANCE_ORDER_TYPE } from '../constants/mappings';
 
-interface BinanceRawFilter {
+interface BinanceFilterRaw {
   filterType: string;
   tickSize?: string;
   stepSize?: string;
@@ -22,28 +22,28 @@ interface BinanceRawFilter {
   notional?: string;
 }
 
-interface BinanceRawSymbol {
+interface BinanceSymbolRaw {
   symbol: string;
   status: string;
   baseAsset: string;
   quoteAsset: string;
   contractType?: string;
   marginAsset?: string;
-  filters: BinanceRawFilter[];
+  filters: BinanceFilterRaw[];
 }
 
-export interface BinanceRawExchangeInfo {
-  symbols: BinanceRawSymbol[];
+export interface BinanceExchangeInfoRaw {
+  symbols: BinanceSymbolRaw[];
 }
 
-export interface BinanceRawTicker24hr {
+export interface BinanceTicker24hrRaw {
   symbol: string;
   lastPrice: string;
   priceChangePercent: string;
   time: number;
 }
 
-export interface BinanceRawWsKline {
+export interface BinanceWebSocketKlineRaw {
   t: number;
   o: string;
   h: string;
@@ -55,7 +55,7 @@ export interface BinanceRawWsKline {
   n: number;
 }
 
-export interface BinanceRawPositionRisk {
+export interface BinancePositionRiskRaw {
   symbol: string;
   positionSide: string;
   positionAmt: string;
@@ -70,7 +70,7 @@ export interface BinanceRawPositionRisk {
   [key: string]: unknown;
 }
 
-export interface BinanceRawOrderResponse {
+export interface BinanceOrderResponseRaw {
   orderId: number;
   symbol: string;
   side: string;
@@ -81,21 +81,21 @@ export interface BinanceRawOrderResponse {
   updateTime: number;
 }
 
-interface BinanceRawBalance {
+interface BinanceBalanceRaw {
   asset: string;
   free: string;
   locked: string;
 }
 
-export interface BinanceRawAccount {
-  balances: BinanceRawBalance[];
+export interface BinanceAccountRaw {
+  balances: BinanceBalanceRaw[];
 }
 
-function extractFilter(filterList: BinanceRawFilter[], filterType: string): BinanceRawFilter | undefined {
+function extractFilter(filterList: BinanceFilterRaw[], filterType: string): BinanceFilterRaw | undefined {
   return filterList.find((filter) => filter.filterType === filterType);
 }
 
-export function normalizeBinanceMarkets(raw: BinanceRawExchangeInfo): MarketBySymbol {
+export function normalizeBinanceMarkets(raw: BinanceExchangeInfoRaw): MarketBySymbol {
   const result = new Map<string, Market>();
 
   for (const symbol of raw.symbols) {
@@ -107,14 +107,23 @@ export function normalizeBinanceMarkets(raw: BinanceRawExchangeInfo): MarketBySy
 
     const isPerp = symbol.contractType === 'PERPETUAL';
     const isSpot = symbol.contractType === undefined || symbol.contractType === '';
+
+    let marketType: MarketType = MarketType.Future;
+
+    if (isPerp) {
+      marketType = MarketType.Swap;
+    } else if (isSpot) {
+      marketType = MarketType.Spot;
+    }
+
     const market: Market = {
       symbol: symbol.symbol,
       baseAsset: symbol.baseAsset,
       quoteAsset: symbol.quoteAsset,
       settle: isPerp ? 'USDT' : '',
-      active: symbol.status === 'TRADING',
-      type: isPerp ? 'swap' : isSpot ? 'spot' : 'future',
-      linear: isPerp,
+      isActive: symbol.status === 'TRADING',
+      type: marketType,
+      isLinear: isPerp,
       contractSize: 1,
       filter: {
         tickSize: priceFilter?.tickSize ?? '0',
@@ -133,7 +142,7 @@ export function normalizeBinanceMarkets(raw: BinanceRawExchangeInfo): MarketBySy
   return result;
 }
 
-export function normalizeBinanceTickers(rawList: BinanceRawTicker24hr[]): TickerBySymbol {
+export function normalizeBinanceTickers(rawList: BinanceTicker24hrRaw[]): TickerBySymbol {
   const result = new Map<string, Ticker>();
 
   for (const raw of rawList) {
@@ -164,7 +173,7 @@ export function normalizeBinanceKlines(rawList: unknown[][]): Kline[] {
   }));
 }
 
-export function normalizeBinanceKlineWsMessage(raw: BinanceRawWsKline): Kline {
+export function normalizeBinanceKlineWebSocketMessage(raw: BinanceWebSocketKlineRaw): Kline {
   return {
     openTimestamp: raw.t,
     open: parseFloat(raw.o),
@@ -178,15 +187,9 @@ export function normalizeBinanceKlineWsMessage(raw: BinanceRawWsKline): Kline {
   };
 }
 
-export function normalizeBinancePosition(raw: BinanceRawPositionRisk): Position {
-  const sideMap: Record<string, PositionSide> = {
-    LONG: 'long',
-    SHORT: 'short',
-    BOTH: 'both',
-  };
-
-  const side: PositionSide = sideMap[raw.positionSide] ?? 'both';
-  const marginMode: MarginMode = raw.marginType === 'ISOLATED' ? 'isolated' : 'cross';
+export function normalizeBinancePosition(raw: BinancePositionRiskRaw): Position {
+  const side = BINANCE_POSITION_SIDE[raw.positionSide] ?? PositionSide.Both;
+  const marginMode: MarginMode = raw.marginType === 'ISOLATED' ? MarginMode.Isolated : MarginMode.Cross;
   const liquidationPriceRaw = parseFloat(raw.liquidationPrice);
 
   return {
@@ -203,12 +206,12 @@ export function normalizeBinancePosition(raw: BinanceRawPositionRisk): Position 
   };
 }
 
-export function normalizeBinanceOrder(raw: BinanceRawOrderResponse): Order {
+export function normalizeBinanceOrder(raw: BinanceOrderResponseRaw): Order {
   return {
     id: String(raw.orderId),
     symbol: raw.symbol,
-    side: raw.side.toLowerCase() as Order['side'],
-    type: raw.type.toLowerCase() as Order['type'],
+    side: BINANCE_ORDER_SIDE[raw.side],
+    type: BINANCE_ORDER_TYPE[raw.type],
     amount: parseFloat(raw.origQty),
     price: parseFloat(raw.price),
     status: raw.status.toLowerCase(),
@@ -216,7 +219,7 @@ export function normalizeBinanceOrder(raw: BinanceRawOrderResponse): Order {
   };
 }
 
-export function normalizeBinanceBalance(raw: BinanceRawAccount): BalanceByAsset {
+export function normalizeBinanceBalance(raw: BinanceAccountRaw): BalanceByAsset {
   const result = new Map<string, Balance>();
 
   for (const entry of raw.balances) {

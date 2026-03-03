@@ -1,13 +1,13 @@
 import type {
-  BinanceRawExchangeInfo,
-  BinanceRawTicker24hr,
-  BinanceRawWsKline,
-  BinanceRawPositionRisk,
-  BinanceRawOrderResponse,
-  BinanceRawAccount,
+  BinanceExchangeInfoRaw,
+  BinanceTicker24hrRaw,
+  BinanceWebSocketKlineRaw,
+  BinancePositionRiskRaw,
+  BinanceOrderResponseRaw,
+  BinanceAccountRaw,
 } from '../../src/normalizers/binanceNormalizer';
 
-export const BINANCE_RAW_EXCHANGE_INFO: BinanceRawExchangeInfo = {
+export const BINANCE_RAW_EXCHANGE_INFO: BinanceExchangeInfoRaw = {
   symbols: [
     {
       symbol: 'BTCUSDT',
@@ -36,7 +36,7 @@ export const BINANCE_RAW_EXCHANGE_INFO: BinanceRawExchangeInfo = {
   ],
 };
 
-export const BINANCE_RAW_TICKER_LIST: BinanceRawTicker24hr[] = [
+export const BINANCE_RAW_TICKER_LIST: BinanceTicker24hrRaw[] = [
   { symbol: 'BTCUSDT', lastPrice: '65432.10', priceChangePercent: '2.35', time: 1700000000000 },
   { symbol: 'ETHUSDT', lastPrice: '3456.78', priceChangePercent: '-1.20', time: 1700000000000 },
 ];
@@ -46,7 +46,7 @@ export const BINANCE_RAW_KLINE_LIST: unknown[][] = [
   [1700003600000, '65500.00', '67000.00', '65000.00', '66800.00', '2345.67', 1700007200000, '155000000.00', 8000],
 ];
 
-export const BINANCE_RAW_WS_KLINE: BinanceRawWsKline = {
+export const BINANCE_RAW_WEBSOCKET_KLINE: BinanceWebSocketKlineRaw = {
   t: 1700000000000,
   o: '65000.00',
   h: '66000.00',
@@ -58,7 +58,7 @@ export const BINANCE_RAW_WS_KLINE: BinanceRawWsKline = {
   n: 5000,
 };
 
-export const BINANCE_RAW_POSITION_RISK: BinanceRawPositionRisk = {
+export const BINANCE_RAW_POSITION_RISK: BinancePositionRiskRaw = {
   symbol: 'BTCUSDT',
   positionSide: 'LONG',
   positionAmt: '0.100',
@@ -72,7 +72,7 @@ export const BINANCE_RAW_POSITION_RISK: BinanceRawPositionRisk = {
   isolatedMargin: '655.00',
 };
 
-export const BINANCE_RAW_ORDER_RESPONSE: BinanceRawOrderResponse = {
+export const BINANCE_RAW_ORDER_RESPONSE: BinanceOrderResponseRaw = {
   orderId: 123456789,
   symbol: 'BTCUSDT',
   side: 'BUY',
@@ -83,7 +83,7 @@ export const BINANCE_RAW_ORDER_RESPONSE: BinanceRawOrderResponse = {
   updateTime: 1700000000000,
 };
 
-export const BINANCE_RAW_ACCOUNT: BinanceRawAccount = {
+export const BINANCE_RAW_ACCOUNT: BinanceAccountRaw = {
   balances: [
     { asset: 'USDT', free: '1000.50', locked: '200.00' },
     { asset: 'BTC', free: '0.5', locked: '0.1' },

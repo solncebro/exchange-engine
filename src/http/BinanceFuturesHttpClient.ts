@@ -1,4 +1,4 @@
-import type { BinanceRawPositionRisk } from '../normalizers/binanceNormalizer';
+import type { BinancePositionRiskRaw } from '../normalizers/binanceNormalizer';
 import type { FetchKlinesArgs } from '../types/exchange';
 import { buildBinanceSignedParams } from '../auth/binanceAuth';
 import { applyTimeRangeOptions } from '../utils/httpParams';
@@ -106,14 +106,14 @@ export class BinanceFuturesHttpClient extends BinanceBaseHttpClient {
     );
   }
 
-  async fetchPositionRisk(symbol?: string): Promise<BinanceRawPositionRisk[]> {
+  async fetchPositionRisk(symbol?: string): Promise<BinancePositionRiskRaw[]> {
     const params: Record<string, string | number | boolean> = {};
 
     if (symbol !== undefined) {
       params.symbol = symbol;
     }
 
-    return this.signedGet<BinanceRawPositionRisk[]>('/fapi/v2/positionRisk', params);
+    return this.signedGet<BinancePositionRiskRaw[]>('/fapi/v2/positionRisk', params);
   }
 
   async fetchCommissionRate(symbol: string): Promise<Record<string, unknown>> {

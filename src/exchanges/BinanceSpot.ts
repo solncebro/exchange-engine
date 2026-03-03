@@ -1,12 +1,13 @@
 import type { ExchangeArgs } from '../types/exchange';
-import type { Position, MarginMode } from '../types/common';
+import type { Position } from '../types/common';
+import { MarginMode } from '../types/common';
 import { BinanceSpotHttpClient } from '../http/BinanceSpotHttpClient';
 import { BinanceSpotPublicStream } from '../ws/BinanceSpotPublicStream';
 import {
   BINANCE_KLINE_LIMIT_SPOT,
   BINANCE_SPOT_BASE_URL,
   BINANCE_DEMO_SPOT_BASE_URL,
-  BINANCE_SPOT_WS_STREAM_URL,
+  BINANCE_SPOT_WEBSOCKET_STREAM_URL,
 } from '../constants/binance';
 import { BinanceBaseClient } from './BinanceBaseClient';
 
@@ -15,7 +16,7 @@ class BinanceSpot extends BinanceBaseClient<BinanceSpotHttpClient> {
   protected readonly klineLimit = BINANCE_KLINE_LIMIT_SPOT;
 
   constructor(args: ExchangeArgs) {
-    const baseUrl = args.config.demoMode === true
+    const baseUrl = args.config.isDemoMode === true
       ? BINANCE_DEMO_SPOT_BASE_URL
       : BINANCE_SPOT_BASE_URL;
 
@@ -26,7 +27,7 @@ class BinanceSpot extends BinanceBaseClient<BinanceSpotHttpClient> {
       logger: args.logger,
     });
 
-    const publicStream = new BinanceSpotPublicStream(BINANCE_SPOT_WS_STREAM_URL, args.logger, args.onNotify);
+    const publicStream = new BinanceSpotPublicStream(BINANCE_SPOT_WEBSOCKET_STREAM_URL, args.logger, args.onNotify);
 
     super(args, httpClient, publicStream);
   }

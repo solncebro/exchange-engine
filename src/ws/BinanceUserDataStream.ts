@@ -5,7 +5,7 @@ import type { ExchangeLogger } from '../types/common';
 
 interface BinanceUserDataStreamArgs {
   listenKey: string;
-  baseWsUrl: string;
+  baseWebSocketUrl: string;
   logger: ExchangeLogger;
   onNotify?: (message: string) => void | Promise<void>;
   onMessage: (event: Record<string, unknown>) => void;
@@ -19,14 +19,14 @@ class BinanceUserDataStream {
   private webSocket: ReliableWebSocket<Record<string, unknown>> | null = null;
   private readonly logger: ExchangeLogger;
   private readonly listenKey: string;
-  private readonly baseWsUrl: string;
+  private readonly baseWebSocketUrl: string;
   private readonly onNotify?: (message: string) => void | Promise<void>;
   private readonly onMessageHandler: (event: Record<string, unknown>) => void;
 
   constructor(args: BinanceUserDataStreamArgs) {
     this.logger = args.logger;
     this.listenKey = args.listenKey;
-    this.baseWsUrl = args.baseWsUrl;
+    this.baseWebSocketUrl = args.baseWebSocketUrl;
     this.onNotify = args.onNotify;
     this.onMessageHandler = args.onMessage;
   }
@@ -36,7 +36,7 @@ class BinanceUserDataStream {
       return;
     }
 
-    const url = `${this.baseWsUrl}/${this.listenKey}`;
+    const url = `${this.baseWebSocketUrl}/${this.listenKey}`;
 
     this.webSocket = new ReliableWebSocket<Record<string, unknown>>({
       label: 'BinanceUserDataStream',

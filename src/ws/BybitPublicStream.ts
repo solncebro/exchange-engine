@@ -3,19 +3,19 @@ import { ReliableWebSocket } from '@solncebro/websocket-engine';
 
 import type { ExchangeLogger, Kline, KlineInterval, TickerBySymbol } from '../types/common';
 import type { KlineHandler } from '../types/exchange';
-import { normalizeBybitKlineWsMessage, normalizeBybitTickers } from '../normalizers/bybitNormalizer';
-import type { BybitRawTicker, BybitRawWsKline } from '../normalizers/bybitNormalizer';
+import { normalizeBybitKlineWebSocketMessage, normalizeBybitTickers } from '../normalizers/bybitNormalizer';
+import type { BybitTickerRaw, BybitWebSocketKlineRaw } from '../normalizers/bybitNormalizer';
 import { BYBIT_KLINE_INTERVAL } from '../constants/bybit';
-import { isBybitPongResponse, BYBIT_HEARTBEAT_CONFIG, BYBIT_PING_INTERVAL } from './bybitWsUtils';
-import type { BybitBaseWsMessage } from './bybitWsUtils';
+import { isBybitPongResponse, BYBIT_HEARTBEAT_CONFIG, BYBIT_PING_INTERVAL } from './bybitWebSocketUtils';
+import type { BybitBaseWebSocketMessage } from './bybitWebSocketUtils';
 
-interface BybitWsMessage extends BybitBaseWsMessage {
+interface BybitWebSocketMessage extends BybitBaseWebSocketMessage {
   topic?: string;
   ret_code?: number;
 }
 
-function parseBybitMessage(rawData: RawData): BybitWsMessage {
-  return JSON.parse(rawData.toString()) as BybitWsMessage;
+function parseBybitMessage(rawData: RawData): BybitWebSocketMessage {
+  return JSON.parse(rawData.toString()) as BybitWebSocketMessage;
 }
 
 function resolveUnifiedInterval(bybitInterval: string): KlineInterval {
@@ -29,7 +29,7 @@ function resolveUnifiedInterval(bybitInterval: string): KlineInterval {
 }
 
 class BybitPublicStream {
-  private webSocket: ReliableWebSocket<BybitWsMessage> | null = null;
+  private webSocket: ReliableWebSocket<BybitWebSocketMessage> | null = null;
   private readonly url: string;
   private readonly logger: ExchangeLogger;
   private readonly onNotify?: (message: string) => void | Promise<void>;
@@ -115,7 +115,7 @@ class BybitPublicStream {
       return;
     }
 
-    this.webSocket = new ReliableWebSocket<BybitWsMessage>({
+    this.webSocket = new ReliableWebSocket<BybitWebSocketMessage>({
       label: 'BybitPublicStream',
       url: this.url,
       logger: this.logger,
@@ -132,7 +132,7 @@ class BybitPublicStream {
     this.resubscribeAll();
   }
 
-  private handleMessage(message: BybitWsMessage): void {
+  private handleMessage(message: BybitWebSocketMessage): void {
     if (message.op === 'subscribe' || message.op === 'unsubscribe') {
       if (message.success) {
         this.logger.debug(`Bybit subscription successful: ${message.op}`);
@@ -150,7 +150,7 @@ class BybitPublicStream {
     const topic = message.topic;
 
     if (topic.startsWith('tickers.')) {
-      const tickers = normalizeBybitTickers(message.data as BybitRawTicker[]);
+      const tickers = normalizeBybitTickers(message.data as BybitTickerRaw[]);
 
       for (const handler of this.tickerHandlerSet) {
         handler(tickers);
@@ -160,11 +160,11 @@ class BybitPublicStream {
     }
 
     if (topic.startsWith('kline.')) {
-      this.handleKlineMessage(topic, message.data as BybitRawWsKline[]);
+      this.handleKlineMessage(topic, message.data as BybitWebSocketKlineRaw[]);
     }
   }
 
-  private handleKlineMessage(topic: string, dataList: BybitRawWsKline[]): void {
+  private handleKlineMessage(topic: string, dataList: BybitWebSocketKlineRaw[]): void {
     const partList = topic.split('.');
 
     if (partList.length < 3) {
@@ -181,7 +181,7 @@ class BybitPublicStream {
       return;
     }
 
-    const kline = normalizeBybitKlineWsMessage(dataList[0]);
+    const kline = normalizeBybitKlineWebSocketMessage(dataList[0]);
 
     for (const handler of handlerSet) {
       handler(symbol, kline);

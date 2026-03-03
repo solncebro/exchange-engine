@@ -1,4 +1,4 @@
-import type { CreateOrderWsArgs, ExchangeArgs, FetchKlinesArgs } from '../types/exchange';
+import type { CreateOrderWebSocketArgs, ExchangeArgs, FetchKlinesArgs } from '../types/exchange';
 import type {
   Kline,
   KlineInterval,
@@ -7,8 +7,8 @@ import type {
   BalanceByAsset,
   Position,
   Order,
-  MarginMode,
 } from '../types/common';
+import { OrderType, OrderSide, MarginMode } from '../types/common';
 import type { PublicStreamLike } from '../types/stream';
 import { BybitHttpClient } from '../http/BybitHttpClient';
 import {
@@ -23,8 +23,8 @@ import {
   BYBIT_KLINE_INTERVAL,
   BYBIT_BASE_URL,
   BYBIT_DEMO_BASE_URL,
-  BYBIT_PUBLIC_SPOT_WS_URL,
-  BYBIT_DEMO_PUBLIC_SPOT_WS_URL,
+  BYBIT_PUBLIC_SPOT_WEBSOCKET_URL,
+  BYBIT_DEMO_PUBLIC_SPOT_WEBSOCKET_URL,
 } from '../constants/bybit';
 import { BaseExchangeClient } from './BaseExchangeClient';
 
@@ -38,9 +38,9 @@ class BybitSpot extends BaseExchangeClient {
   constructor(args: ExchangeArgs) {
     super(args);
 
-    const demo = args.config.demoMode === true;
-    const baseUrl = demo ? BYBIT_DEMO_BASE_URL : BYBIT_BASE_URL;
-    const publicWsUrl = demo ? BYBIT_DEMO_PUBLIC_SPOT_WS_URL : BYBIT_PUBLIC_SPOT_WS_URL;
+    const isDemoMode = args.config.isDemoMode === true;
+    const baseUrl = isDemoMode ? BYBIT_DEMO_BASE_URL : BYBIT_BASE_URL;
+    const publicWebSocketUrl = isDemoMode ? BYBIT_DEMO_PUBLIC_SPOT_WEBSOCKET_URL : BYBIT_PUBLIC_SPOT_WEBSOCKET_URL;
 
     this.httpClient = new BybitHttpClient({
       baseUrl,
@@ -50,7 +50,7 @@ class BybitSpot extends BaseExchangeClient {
     });
 
     this.publicStream = new BybitPublicStream(
-      publicWsUrl,
+      publicWebSocketUrl,
       args.logger,
       args.onNotify,
     );
@@ -94,16 +94,16 @@ class BybitSpot extends BaseExchangeClient {
     return normalizeBybitBalance(raw.result);
   }
 
-  async createOrderWs(args: CreateOrderWsArgs): Promise<Order> {
+  async createOrderWebSocket(args: CreateOrderWebSocketArgs): Promise<Order> {
     this.logger.debug(`Creating order via REST: ${args.symbol}`);
 
-    const isMarket = args.type === 'market';
+    const isMarket = args.type === OrderType.Market;
 
     const orderParams: Record<string, unknown> = {
       category: 'spot',
       symbol: args.symbol,
       orderType: isMarket ? 'Market' : 'Limit',
-      side: args.side === 'buy' ? 'Buy' : 'Sell',
+      side: args.side === OrderSide.Buy ? 'Buy' : 'Sell',
       qty: this.amountToPrecision(args.symbol, args.amount),
       ...args.params,
     };

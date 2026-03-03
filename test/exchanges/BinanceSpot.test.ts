@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { BinanceSpot } from '../../src/exchanges/BinanceSpot';
 import { createMockLogger } from '../fixtures/mockLogger';
+import { MarginMode } from '../../src/types/common';
 
 jest.mock('axios');
 jest.mock('../../src/ws/BinanceSpotPublicStream');
@@ -40,6 +41,6 @@ describe('BinanceSpot', () => {
   it('throws "Not supported" for setMarginMode', async () => {
     const { client } = createClient();
 
-    await expect(client.setMarginMode('isolated', 'BTCUSDT')).rejects.toThrow('Not supported for spot market');
+    await expect(client.setMarginMode(MarginMode.Isolated, 'BTCUSDT')).rejects.toThrow('Not supported for spot market');
   });
 });

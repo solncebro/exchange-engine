@@ -2,17 +2,17 @@ import type { WebSocketOpenContext } from '@solncebro/websocket-engine';
 import { ReliableWebSocket } from '@solncebro/websocket-engine';
 import type { RawData } from 'ws';
 
-import type { BybitRawOrderResponse } from '../normalizers/bybitNormalizer';
+import type { BybitOrderResponseRaw } from '../normalizers/bybitNormalizer';
 import { normalizeBybitOrder } from '../normalizers/bybitNormalizer';
 import type { ExchangeLogger, Order } from '../types/common';
-import type { BybitBaseWsMessage } from './bybitWsUtils';
+import type { BybitBaseWebSocketMessage } from './bybitWebSocketUtils';
 import {
   BYBIT_HEARTBEAT_CONFIG,
   BYBIT_PING_INTERVAL,
-  authenticateBybitWs
-} from './bybitWsUtils';
+  authenticateBybitWebSocket
+} from './bybitWebSocketUtils';
 
-interface BybitTradeMessage extends BybitBaseWsMessage {
+interface BybitTradeMessage extends BybitBaseWebSocketMessage {
   reason?: string;
   reqId?: string;
 }
@@ -116,7 +116,7 @@ class BybitTradeStream {
 
   private initConnection(): Promise<void> {
     return new Promise<void>((resolve, reject) => {
-      let resolved = false;
+      let isResolved = false;
 
       this.webSocket = new ReliableWebSocket<BybitTradeMessage>({
         label: 'BybitTradeStream',
@@ -127,11 +127,11 @@ class BybitTradeStream {
         onOpen: async (context) => {
           try {
             await this.authenticate(context);
-            resolved = true;
+            isResolved = true;
             resolve();
           } catch (error) {
-            if (!resolved) {
-              resolved = true;
+            if (!isResolved) {
+              isResolved = true;
               reject(error);
             }
           }
@@ -146,7 +146,7 @@ class BybitTradeStream {
   }
 
   private async authenticate(context: WebSocketOpenContext<BybitTradeMessage>): Promise<void> {
-    await authenticateBybitWs({ context, apiKey: this.apiKey, secret: this.secret, label: 'BybitTradeStream', logger: this.logger });
+    await authenticateBybitWebSocket({ context, apiKey: this.apiKey, secret: this.secret, label: 'BybitTradeStream', logger: this.logger });
   }
 
   private handleMessage(message: BybitTradeMessage): void {
@@ -165,7 +165,7 @@ class BybitTradeStream {
       this.pendingRequestByRequestId.delete(message.reqId);
 
       if (message.success && message.data) {
-        const order = normalizeBybitOrder(message.data as BybitRawOrderResponse);
+        const order = normalizeBybitOrder(message.data as BybitOrderResponseRaw);
         pending.resolve(order);
       } else {
         pending.reject(new Error(message.reason ?? message.ret_msg ?? 'Order creation failed'));

@@ -3,10 +3,9 @@ import { ReliableWebSocket } from '@solncebro/websocket-engine';
 
 import type { ExchangeLogger, Kline, KlineInterval, TickerBySymbol } from '../types/common';
 import type { KlineHandler } from '../types/exchange';
-import { normalizeBinanceKlineWsMessage, normalizeBinanceTickers } from '../normalizers/binanceNormalizer';
-import type { BinanceRawTicker24hr, BinanceRawWsKline } from '../normalizers/binanceNormalizer';
-import { BINANCE_KLINE_INTERVAL } from '../constants/binance';
-import { resolveUnifiedBinanceInterval } from './binanceWsUtils';
+import { normalizeBinanceKlineWebSocketMessage, normalizeBinanceTickers } from '../normalizers/binanceNormalizer';
+import type { BinanceTicker24hrRaw, BinanceWebSocketKlineRaw } from '../normalizers/binanceNormalizer';
+import { resolveUnifiedBinanceInterval } from './binanceWebSocketUtils';
 
 const MAX_STREAMS_PER_CONNECTION = 200;
 
@@ -18,7 +17,7 @@ interface BinanceCombinedMessage {
 interface FuturesConnection {
   webSocket: ReliableWebSocket<BinanceCombinedMessage>;
   label: string;
-  streams: string[];
+  streamList: string[];
 }
 
 function parseBinanceCombinedMessage(rawData: RawData): BinanceCombinedMessage {
@@ -32,7 +31,7 @@ function buildKlineStreamList(klineHandlerByKey: Map<string, Set<KlineHandler>>)
     const separatorIndex = key.lastIndexOf('_');
     const symbol = key.slice(0, separatorIndex);
     const interval = key.slice(separatorIndex + 1);
-    const binanceInterval = BINANCE_KLINE_INTERVAL[interval];
+    const binanceInterval = interval;
     streamList.push(`${symbol.toLowerCase()}_perpetual@continuousKline_${binanceInterval}`);
   }
 
@@ -40,17 +39,17 @@ function buildKlineStreamList(klineHandlerByKey: Map<string, Set<KlineHandler>>)
 }
 
 class BinanceFuturesPublicStream {
-  private readonly wsCombinedUrl: string;
+  private readonly webSocketCombinedUrl: string;
   private readonly logger: ExchangeLogger;
   private readonly onNotify?: (message: string) => void | Promise<void>;
   private readonly tickerHandlerSet: Set<(tickers: TickerBySymbol) => void> = new Set();
   private readonly klineHandlerByKey: Map<string, Set<KlineHandler>> = new Map();
-  private readonly connections: FuturesConnection[] = [];
-  private connectScheduled = false;
+  private readonly connectionList: FuturesConnection[] = [];
+  private isConnectScheduled = false;
   private subscriptionIdCounter = 1;
 
-  constructor(wsCombinedUrl: string, logger: ExchangeLogger, onNotify?: (message: string) => void | Promise<void>) {
-    this.wsCombinedUrl = wsCombinedUrl;
+  constructor(webSocketCombinedUrl: string, logger: ExchangeLogger, onNotify?: (message: string) => void | Promise<void>) {
+    this.webSocketCombinedUrl = webSocketCombinedUrl;
     this.logger = logger;
     this.onNotify = onNotify;
   }
@@ -73,8 +72,8 @@ class BinanceFuturesPublicStream {
 
     this.klineHandlerByKey.get(key)!.add(handler);
 
-    if (this.connections.length > 0) {
-      const binanceInterval = BINANCE_KLINE_INTERVAL[interval];
+    if (this.connectionList.length > 0) {
+      const binanceInterval = interval;
       const stream = `${symbol.toLowerCase()}_perpetual@continuousKline_${binanceInterval}`;
       this.addStreamToConnection(stream);
     } else {
@@ -95,56 +94,56 @@ class BinanceFuturesPublicStream {
     if (handlerSet.size === 0) {
       this.klineHandlerByKey.delete(key);
 
-      const binanceInterval = BINANCE_KLINE_INTERVAL[interval];
+      const binanceInterval = interval;
       const stream = `${symbol.toLowerCase()}_perpetual@continuousKline_${binanceInterval}`;
       this.removeStreamFromConnection(stream);
     }
   }
 
   close(): void {
-    for (const connection of this.connections) {
+    for (const connection of this.connectionList) {
       connection.webSocket.close();
     }
 
-    this.connections.length = 0;
+    this.connectionList.length = 0;
   }
 
   private scheduleConnect(): void {
-    if (this.connectScheduled || this.connections.length > 0) {
+    if (this.isConnectScheduled || this.connectionList.length > 0) {
       return;
     }
 
-    this.connectScheduled = true;
+    this.isConnectScheduled = true;
 
     queueMicrotask(() => {
-      this.connectScheduled = false;
+      this.isConnectScheduled = false;
       this.createConnections();
     });
   }
 
   private createConnections(): void {
-    const tickerStreams = this.tickerHandlerSet.size > 0 ? ['!miniTicker@arr'] : [];
-    const klineStreams = buildKlineStreamList(this.klineHandlerByKey);
-    const allStreams = [...tickerStreams, ...klineStreams];
+    const tickerStreamList = this.tickerHandlerSet.size > 0 ? ['!miniTicker@arr'] : [];
+    const klineStreamList = buildKlineStreamList(this.klineHandlerByKey);
+    const allStreamList = [...tickerStreamList, ...klineStreamList];
 
-    if (allStreams.length === 0) {
+    if (allStreamList.length === 0) {
       return;
     }
 
-    for (let i = 0; i < allStreams.length; i += MAX_STREAMS_PER_CONNECTION) {
-      const chunk = allStreams.slice(i, i + MAX_STREAMS_PER_CONNECTION);
-      this.createConnection(chunk, this.connections.length);
+    for (let i = 0; i < allStreamList.length; i += MAX_STREAMS_PER_CONNECTION) {
+      const streamChunk = allStreamList.slice(i, i + MAX_STREAMS_PER_CONNECTION);
+      this.createConnection(streamChunk, this.connectionList.length);
     }
 
     this.logger.info(
-      `BinanceFuturesPublicStream: created ${this.connections.length} connection(s) for ${allStreams.length} streams`
+      `BinanceFuturesPublicStream: created ${this.connectionList.length} connection(s) for ${allStreamList.length} streams`
     );
   }
 
-  private createConnection(streams: string[], index: number): void {
+  private createConnection(streamList: string[], index: number): void {
     const label = `BinanceFuturesPublicStream-${index}`;
-    const url = `${this.wsCombinedUrl}?streams=${streams.join('/')}`;
-    const connection: FuturesConnection = { webSocket: null!, label, streams };
+    const url = `${this.webSocketCombinedUrl}?streams=${streamList.join('/')}`;
+    const connection: FuturesConnection = { webSocket: null!, label, streamList };
 
     connection.webSocket = new ReliableWebSocket<BinanceCombinedMessage>({
       label,
@@ -158,20 +157,20 @@ class BinanceFuturesPublicStream {
       },
     });
 
-    this.connections.push(connection);
+    this.connectionList.push(connection);
   }
 
   private addStreamToConnection(stream: string): void {
-    let targetConnection = this.connections.find(
-      (connection) => connection.streams.length < MAX_STREAMS_PER_CONNECTION
+    let targetConnection = this.connectionList.find(
+      (connection) => connection.streamList.length < MAX_STREAMS_PER_CONNECTION
     );
 
     if (!targetConnection) {
-      this.createConnection([stream], this.connections.length);
+      this.createConnection([stream], this.connectionList.length);
       return;
     }
 
-    targetConnection.streams.push(stream);
+    targetConnection.streamList.push(stream);
 
     try {
       targetConnection.webSocket.sendToConnectedSocket({
@@ -180,15 +179,16 @@ class BinanceFuturesPublicStream {
         id: this.subscriptionIdCounter++,
       });
     } catch {
+      this.logger.warn('BinanceFuturesPublicStream: failed to subscribe, socket not connected');
     }
   }
 
   private removeStreamFromConnection(stream: string): void {
-    for (const connection of this.connections) {
-      const index = connection.streams.indexOf(stream);
+    for (const connection of this.connectionList) {
+      const index = connection.streamList.indexOf(stream);
 
       if (index !== -1) {
-        connection.streams.splice(index, 1);
+        connection.streamList.splice(index, 1);
 
         try {
           connection.webSocket.sendToConnectedSocket({
@@ -197,6 +197,7 @@ class BinanceFuturesPublicStream {
             id: this.subscriptionIdCounter++,
           });
         } catch {
+          this.logger.warn('BinanceFuturesPublicStream: failed to unsubscribe, socket not connected');
         }
 
         break;
@@ -210,7 +211,7 @@ class BinanceFuturesPublicStream {
     }
 
     if (Array.isArray(message.data)) {
-      const tickers = normalizeBinanceTickers(message.data as BinanceRawTicker24hr[]);
+      const tickers = normalizeBinanceTickers(message.data as BinanceTicker24hrRaw[]);
 
       for (const handler of this.tickerHandlerSet) {
         handler(tickers);
@@ -220,13 +221,13 @@ class BinanceFuturesPublicStream {
     }
 
     if (message.stream && message.stream.includes('@continuousKline_')) {
-      const klineRaw = (message.data as Record<string, unknown>)['k'] as BinanceRawWsKline;
+      const klineRaw = (message.data as Record<string, unknown>)['k'] as BinanceWebSocketKlineRaw;
 
       if (!klineRaw) {
         return;
       }
 
-      const kline = normalizeBinanceKlineWsMessage(klineRaw);
+      const kline = normalizeBinanceKlineWebSocketMessage(klineRaw);
       const continuousKlineIndex = message.stream.indexOf('@continuousKline_');
       const symbolLower = message.stream.slice(0, continuousKlineIndex).replace(/_perpetual$/, '');
       const symbol = symbolLower.toUpperCase();

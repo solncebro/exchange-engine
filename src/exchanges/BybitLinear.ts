@@ -1,4 +1,4 @@
-import type { CreateOrderWsArgs, ExchangeArgs, FetchKlinesArgs } from '../types/exchange';
+import type { CreateOrderWebSocketArgs, ExchangeArgs, FetchKlinesArgs } from '../types/exchange';
 import type {
   Kline,
   KlineInterval,
@@ -7,8 +7,8 @@ import type {
   BalanceByAsset,
   Position,
   Order,
-  MarginMode,
 } from '../types/common';
+import { MarginMode, OrderType, OrderSide } from '../types/common';
 import type { PublicStreamLike } from '../types/stream';
 import { BybitHttpClient } from '../http/BybitHttpClient';
 import {
@@ -25,9 +25,9 @@ import {
   BYBIT_KLINE_INTERVAL,
   BYBIT_BASE_URL,
   BYBIT_DEMO_BASE_URL,
-  BYBIT_PUBLIC_LINEAR_WS_URL,
-  BYBIT_DEMO_PUBLIC_LINEAR_WS_URL,
-  BYBIT_TRADE_WS_URL,
+  BYBIT_PUBLIC_LINEAR_WEBSOCKET_URL,
+  BYBIT_DEMO_PUBLIC_LINEAR_WEBSOCKET_URL,
+  BYBIT_TRADE_WEBSOCKET_URL,
 } from '../constants/bybit';
 import { BaseExchangeClient } from './BaseExchangeClient';
 
@@ -35,7 +35,7 @@ class BybitLinear extends BaseExchangeClient {
   protected readonly marketLabel = 'linear';
   protected readonly klineLimit = 200;
 
-  private readonly demoMode: boolean;
+  private readonly isDemoMode: boolean;
   private readonly httpClient: BybitHttpClient;
   private readonly publicStream: BybitPublicStream;
   private readonly tradeStream: BybitTradeStream | null;
@@ -43,10 +43,10 @@ class BybitLinear extends BaseExchangeClient {
   constructor(args: ExchangeArgs) {
     super(args);
 
-    const demo = args.config.demoMode === true;
-    this.demoMode = demo;
-    const baseUrl = demo ? BYBIT_DEMO_BASE_URL : BYBIT_BASE_URL;
-    const publicWsUrl = demo ? BYBIT_DEMO_PUBLIC_LINEAR_WS_URL : BYBIT_PUBLIC_LINEAR_WS_URL;
+    const isDemoMode = args.config.isDemoMode === true;
+    this.isDemoMode = isDemoMode;
+    const baseUrl = isDemoMode ? BYBIT_DEMO_BASE_URL : BYBIT_BASE_URL;
+    const publicWebSocketUrl = isDemoMode ? BYBIT_DEMO_PUBLIC_LINEAR_WEBSOCKET_URL : BYBIT_PUBLIC_LINEAR_WEBSOCKET_URL;
 
     this.httpClient = new BybitHttpClient({
       baseUrl,
@@ -56,16 +56,16 @@ class BybitLinear extends BaseExchangeClient {
     });
 
     this.publicStream = new BybitPublicStream(
-      publicWsUrl,
+      publicWebSocketUrl,
       args.logger,
       args.onNotify,
     );
 
-    if (demo) {
+    if (isDemoMode) {
       this.tradeStream = null;
     } else {
       this.tradeStream = new BybitTradeStream({
-        url: BYBIT_TRADE_WS_URL,
+        url: BYBIT_TRADE_WEBSOCKET_URL,
         apiKey: args.config.apiKey,
         secret: args.config.secret,
         logger: args.logger,
@@ -112,12 +112,12 @@ class BybitLinear extends BaseExchangeClient {
     return normalizeBybitBalance(raw.result);
   }
 
-  async createOrderWs(args: CreateOrderWsArgs): Promise<Order> {
+  async createOrderWebSocket(args: CreateOrderWebSocketArgs): Promise<Order> {
     const orderParams: Record<string, unknown> = {
       category: 'linear',
       symbol: args.symbol,
-      orderType: args.type === 'market' ? 'Market' : 'Limit',
-      side: args.side === 'buy' ? 'Buy' : 'Sell',
+      orderType: args.type === OrderType.Market ? 'Market' : 'Limit',
+      side: args.side === OrderSide.Buy ? 'Buy' : 'Sell',
       qty: this.amountToPrecision(args.symbol, args.amount),
       ...args.params,
     };
@@ -127,7 +127,8 @@ class BybitLinear extends BaseExchangeClient {
     }
 
     if (this.tradeStream !== null) {
-      this.logger.debug(`Creating order via WS: ${args.symbol}`);
+      this.logger.debug(`Creating order via WebSocket: ${args.symbol}`);
+
       return this.tradeStream.createOrder(orderParams);
     }
 
@@ -156,7 +157,7 @@ class BybitLinear extends BaseExchangeClient {
 
   async setMarginMode(marginMode: MarginMode, symbol: string): Promise<void> {
     this.logger.info(`Setting margin mode to ${marginMode} for ${symbol}`);
-    const tradeMode = marginMode === 'isolated' ? 1 : 0;
+    const tradeMode = marginMode === MarginMode.Isolated ? 1 : 0;
     const defaultLeverage = 10;
 
     await this.httpClient.switchIsolated({

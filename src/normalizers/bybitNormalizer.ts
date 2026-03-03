@@ -5,15 +5,15 @@ import type {
   Market,
   MarketBySymbol,
   Position,
-  PositionSide,
-  MarginMode,
   Order,
   Balance,
   BalanceByAsset,
 } from '../types/common';
-import type { CreateOrderWsArgs } from '../types/exchange';
+import { MarketType, PositionSide, MarginMode } from '../types/common';
+import { BYBIT_POSITION_SIDE, BYBIT_ORDER_STATUS, BYBIT_ORDER_SIDE, BYBIT_ORDER_TYPE } from '../constants/mappings';
+import type { CreateOrderWebSocketArgs } from '../types/exchange';
 
-interface BybitRawLotSizeFilter {
+interface BybitLotSizeFilterRaw {
   basePrecision?: string;
   qtyStep?: string;
   minOrderQty?: string;
@@ -22,11 +22,11 @@ interface BybitRawLotSizeFilter {
   minOrderAmt?: string;
 }
 
-interface BybitRawPriceFilter {
+interface BybitPriceFilterRaw {
   tickSize?: string;
 }
 
-export interface BybitRawInstrumentInfo {
+export interface BybitInstrumentInfoRaw {
   symbol: string;
   status: string;
   baseCoin: string;
@@ -34,18 +34,18 @@ export interface BybitRawInstrumentInfo {
   settleCoin?: string;
   contractType?: string;
   contractSize?: string;
-  lotSizeFilter?: BybitRawLotSizeFilter;
-  priceFilter?: BybitRawPriceFilter;
+  lotSizeFilter?: BybitLotSizeFilterRaw;
+  priceFilter?: BybitPriceFilterRaw;
 }
 
-export interface BybitRawTicker {
+export interface BybitTickerRaw {
   symbol: string;
   lastPrice: string;
   price24hPcnt: string;
   time?: number;
 }
 
-export interface BybitRawWsKline {
+export interface BybitWebSocketKlineRaw {
   start: number;
   open: string;
   high: string;
@@ -57,7 +57,7 @@ export interface BybitRawWsKline {
   timestamp: number;
 }
 
-export interface BybitRawPosition {
+export interface BybitPositionRaw {
   symbol: string;
   side: string;
   size: string;
@@ -71,7 +71,7 @@ export interface BybitRawPosition {
   [key: string]: unknown;
 }
 
-export interface BybitRawOrderResponse {
+export interface BybitOrderResponseRaw {
   orderId: string;
   symbol: string;
   side: string;
@@ -82,7 +82,7 @@ export interface BybitRawOrderResponse {
   createdTime: string;
 }
 
-interface BybitRawCoin {
+interface BybitCoinRaw {
   coin: string;
   availableToWithdraw?: string;
   walletBalance?: string;
@@ -91,26 +91,35 @@ interface BybitRawCoin {
   frozenAmount?: string;
 }
 
-export interface BybitRawWalletBalance {
-  list: BybitRawCoin[];
+export interface BybitWalletBalanceRaw {
+  list: BybitCoinRaw[];
 }
 
 const LINEAR_CONTRACT_TYPES = new Set(['LinearPerpetual', 'LinearFutures']);
 
-export function normalizeBybitMarkets(rawList: BybitRawInstrumentInfo[]): MarketBySymbol {
+export function normalizeBybitMarkets(rawList: BybitInstrumentInfoRaw[]): MarketBySymbol {
   const result = new Map<string, Market>();
 
   for (const raw of rawList) {
     const isLinear = LINEAR_CONTRACT_TYPES.has(raw.contractType ?? '');
     const isSpot = raw.contractType === undefined || raw.contractType === '';
+
+    let marketType: MarketType = MarketType.Future;
+
+    if (isLinear) {
+      marketType = MarketType.Swap;
+    } else if (isSpot) {
+      marketType = MarketType.Spot;
+    }
+
     const market: Market = {
       symbol: raw.symbol,
       baseAsset: raw.baseCoin,
       quoteAsset: raw.quoteCoin,
       settle: isLinear ? (raw.settleCoin ?? 'USDT') : '',
-      active: raw.status === 'Trading',
-      type: isLinear ? 'swap' : isSpot ? 'spot' : 'future',
-      linear: isLinear,
+      isActive: raw.status === 'Trading',
+      type: marketType,
+      isLinear,
       contractSize: parseFloat(raw.contractSize ?? '1'),
       filter: {
         tickSize: raw.priceFilter?.tickSize ?? '0',
@@ -129,7 +138,7 @@ export function normalizeBybitMarkets(rawList: BybitRawInstrumentInfo[]): Market
   return result;
 }
 
-export function normalizeBybitTickers(rawList: BybitRawTicker[]): TickerBySymbol {
+export function normalizeBybitTickers(rawList: BybitTickerRaw[]): TickerBySymbol {
   const result = new Map<string, Ticker>();
 
   for (const raw of rawList) {
@@ -160,7 +169,7 @@ export function normalizeBybitKlines(rawList: string[][]): Kline[] {
   }));
 }
 
-export function normalizeBybitKlineWsMessage(raw: BybitRawWsKline): Kline {
+export function normalizeBybitKlineWebSocketMessage(raw: BybitWebSocketKlineRaw): Kline {
   return {
     openTimestamp: raw.start,
     open: parseFloat(raw.open),
@@ -174,14 +183,9 @@ export function normalizeBybitKlineWsMessage(raw: BybitRawWsKline): Kline {
   };
 }
 
-export function normalizeBybitPosition(raw: BybitRawPosition): Position {
-  const sideMap: Record<string, PositionSide> = {
-    Buy: 'long',
-    Sell: 'short',
-  };
-
-  const side: PositionSide = sideMap[raw.side] ?? 'both';
-  const marginMode: MarginMode = raw.tradeMode === 0 ? 'cross' : 'isolated';
+export function normalizeBybitPosition(raw: BybitPositionRaw): Position {
+  const side = BYBIT_POSITION_SIDE[raw.side] ?? PositionSide.Both;
+  const marginMode: MarginMode = raw.tradeMode === 0 ? MarginMode.Cross : MarginMode.Isolated;
   const liquidationPriceRaw = parseFloat(raw.liqPrice);
 
   return {
@@ -198,25 +202,14 @@ export function normalizeBybitPosition(raw: BybitRawPosition): Position {
   };
 }
 
-const BYBIT_ORDER_STATUS_MAP: Record<string, string> = {
-  New: 'open',
-  PartiallyFilled: 'open',
-  Untriggered: 'open',
-  Filled: 'closed',
-  Cancelled: 'canceled',
-  PartiallyFilledCanceled: 'canceled',
-  Rejected: 'rejected',
-  Deactivated: 'canceled',
-};
-
-export function normalizeBybitOrder(raw: BybitRawOrderResponse): Order {
-  const status = BYBIT_ORDER_STATUS_MAP[raw.orderStatus] ?? raw.orderStatus.toLowerCase();
+export function normalizeBybitOrder(raw: BybitOrderResponseRaw): Order {
+  const status = BYBIT_ORDER_STATUS[raw.orderStatus] ?? raw.orderStatus.toLowerCase();
 
   return {
     id: raw.orderId,
     symbol: raw.symbol,
-    side: raw.side.toLowerCase() as Order['side'],
-    type: raw.orderType.toLowerCase() as Order['type'],
+    side: BYBIT_ORDER_SIDE[raw.side],
+    type: BYBIT_ORDER_TYPE[raw.orderType],
     amount: parseFloat(raw.qty),
     price: parseFloat(raw.price),
     status,
@@ -224,7 +217,7 @@ export function normalizeBybitOrder(raw: BybitRawOrderResponse): Order {
   };
 }
 
-export function buildBybitOrderFromCreateResponse(args: CreateOrderWsArgs, orderId: string): Order {
+export function buildBybitOrderFromCreateResponse(args: CreateOrderWebSocketArgs, orderId: string): Order {
   return {
     id: orderId,
     symbol: args.symbol,
@@ -237,7 +230,7 @@ export function buildBybitOrderFromCreateResponse(args: CreateOrderWsArgs, order
   };
 }
 
-export function normalizeBybitBalance(raw: BybitRawWalletBalance): BalanceByAsset {
+export function normalizeBybitBalance(raw: BybitWalletBalanceRaw): BalanceByAsset {
   const result = new Map<string, Balance>();
 
   for (const coin of raw.list) {

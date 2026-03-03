@@ -1,4 +1,4 @@
-import { isBybitPongResponse } from '../../src/ws/bybitWsUtils';
+import { isBybitPongResponse } from '../../src/ws/bybitWebSocketUtils';
 
 describe('isBybitPongResponse', () => {
   it('returns true when op is "pong"', () => {

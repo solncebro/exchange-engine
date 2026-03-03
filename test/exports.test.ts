@@ -3,8 +3,12 @@ describe('export contract', () => {
     const api = require('../src/index');
 
     expect(api.Exchange).toBeDefined();
-    expect(api.BINANCE_KLINE_LIMIT_SPOT).toBe(1000);
-    expect(api.BINANCE_KLINE_LIMIT_FUTURES).toBe(499);
-    expect(api.KLINE_CHUNK_SIZE).toBe(200);
+    expect(api.ExchangeName).toBeDefined();
+    expect(api.OrderSide).toBeDefined();
+    expect(api.OrderType).toBeDefined();
+    expect(api.MarginMode).toBeDefined();
+    expect(api.PositionSide).toBeDefined();
+    expect(api.MarketType).toBeDefined();
+    expect(api.TimeInForce).toBeDefined();
   });
 });

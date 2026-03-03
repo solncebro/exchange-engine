@@ -1,9 +1,9 @@
 import type { ExchangeLogger } from '../types/common';
 import type {
-  BinanceRawExchangeInfo,
-  BinanceRawTicker24hr,
-  BinanceRawOrderResponse,
-  BinanceRawAccount,
+  BinanceExchangeInfoRaw,
+  BinanceTicker24hrRaw,
+  BinanceOrderResponseRaw,
+  BinanceAccountRaw,
 } from '../normalizers/binanceNormalizer';
 import type { FetchKlinesArgs } from '../types/exchange';
 import { buildBinanceSignedParams, buildBinanceAuthHeaders } from '../auth/binanceAuth';
@@ -76,12 +76,12 @@ abstract class BinanceBaseHttpClient extends BaseHttpClient {
     return buildBinanceAuthHeaders(this.apiKey);
   }
 
-  async fetchExchangeInfo(): Promise<BinanceRawExchangeInfo> {
-    return this.get<BinanceRawExchangeInfo>(this.endpoints.exchangeInfo);
+  async fetchExchangeInfo(): Promise<BinanceExchangeInfoRaw> {
+    return this.get<BinanceExchangeInfoRaw>(this.endpoints.exchangeInfo);
   }
 
-  async fetchTickers(): Promise<BinanceRawTicker24hr[]> {
-    return this.get<BinanceRawTicker24hr[]>(this.endpoints.ticker24hr);
+  async fetchTickers(): Promise<BinanceTicker24hrRaw[]> {
+    return this.get<BinanceTicker24hrRaw[]>(this.endpoints.ticker24hr);
   }
 
   async fetchOrderBook(symbol: string, limit?: number): Promise<Record<string, unknown>> {
@@ -115,8 +115,8 @@ abstract class BinanceBaseHttpClient extends BaseHttpClient {
     return this.get<Record<string, unknown>[]>(this.endpoints.trades, params);
   }
 
-  async createOrder(params: Record<string, unknown>): Promise<BinanceRawOrderResponse> {
-    return this.signedPost<BinanceRawOrderResponse>(
+  async createOrder(params: Record<string, unknown>): Promise<BinanceOrderResponseRaw> {
+    return this.signedPost<BinanceOrderResponseRaw>(
       this.endpoints.order,
       params as Record<string, string | number | boolean>,
     );
@@ -140,8 +140,8 @@ abstract class BinanceBaseHttpClient extends BaseHttpClient {
     return this.signedGet<Record<string, unknown>[]>(this.endpoints.openOrders, params);
   }
 
-  async fetchAccount(): Promise<BinanceRawAccount> {
-    return this.signedGet<BinanceRawAccount>(this.endpoints.account);
+  async fetchAccount(): Promise<BinanceAccountRaw> {
+    return this.signedGet<BinanceAccountRaw>(this.endpoints.account);
   }
 
   async createListenKey(): Promise<BinanceListenKeyResponse> {

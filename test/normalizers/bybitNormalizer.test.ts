@@ -2,17 +2,18 @@ import {
   normalizeBybitMarkets,
   normalizeBybitTickers,
   normalizeBybitKlines,
-  normalizeBybitKlineWsMessage,
+  normalizeBybitKlineWebSocketMessage,
   normalizeBybitPosition,
   normalizeBybitOrder,
   buildBybitOrderFromCreateResponse,
   normalizeBybitBalance,
 } from '../../src/normalizers/bybitNormalizer';
+import { MarketType, PositionSide, MarginMode, OrderSide, OrderType } from '../../src/types/common';
 import {
   BYBIT_RAW_INSTRUMENT_LIST,
   BYBIT_RAW_TICKER_LIST,
   BYBIT_RAW_KLINE_LIST,
-  BYBIT_RAW_WS_KLINE,
+  BYBIT_RAW_WEBSOCKET_KLINE,
   BYBIT_RAW_POSITION,
   BYBIT_RAW_ORDER_RESPONSE,
   BYBIT_RAW_WALLET_BALANCE,
@@ -35,8 +36,8 @@ describe('normalizeBybitMarkets', () => {
     const result = normalizeBybitMarkets(BYBIT_RAW_INSTRUMENT_LIST);
     const btc = result.get('BTCUSDT')!;
 
-    expect(btc.type).toBe('swap');
-    expect(btc.linear).toBe(true);
+    expect(btc.type).toBe(MarketType.Swap);
+    expect(btc.isLinear).toBe(true);
   });
 
   it('uses settleCoin from raw data', () => {
@@ -56,22 +57,22 @@ describe('normalizeBybitMarkets', () => {
     const result = normalizeBybitMarkets(BYBIT_RAW_INSTRUMENT_LIST);
     const eth = result.get('ETHBTC')!;
 
-    expect(eth.type).toBe('spot');
-    expect(eth.linear).toBe(false);
+    expect(eth.type).toBe(MarketType.Spot);
+    expect(eth.isLinear).toBe(false);
     expect(eth.settle).toBe('');
   });
 
-  it('sets active=true for Trading status', () => {
+  it('sets isActive=true for Trading status', () => {
     const result = normalizeBybitMarkets(BYBIT_RAW_INSTRUMENT_LIST);
 
-    expect(result.get('BTCUSDT')!.active).toBe(true);
+    expect(result.get('BTCUSDT')!.isActive).toBe(true);
   });
 
-  it('sets active=false for non-Trading status', () => {
+  it('sets isActive=false for non-Trading status', () => {
     const rawList = [{ ...BYBIT_RAW_INSTRUMENT_LIST[0], status: 'Closed' }];
     const result = normalizeBybitMarkets(rawList);
 
-    expect(result.get('BTCUSDT')!.active).toBe(false);
+    expect(result.get('BTCUSDT')!.isActive).toBe(false);
   });
 
   it('parses contractSize', () => {
@@ -177,9 +178,9 @@ describe('normalizeBybitKlines', () => {
   });
 });
 
-describe('normalizeBybitKlineWsMessage', () => {
-  it('maps WS kline fields to Kline', () => {
-    const result = normalizeBybitKlineWsMessage(BYBIT_RAW_WS_KLINE);
+describe('normalizeBybitKlineWebSocketMessage', () => {
+  it('maps WebSocket kline fields to Kline', () => {
+    const result = normalizeBybitKlineWebSocketMessage(BYBIT_RAW_WEBSOCKET_KLINE);
 
     expect(result.openTimestamp).toBe(1700000000000);
     expect(result.open).toBe(65000);
@@ -197,34 +198,34 @@ describe('normalizeBybitPosition', () => {
   it('maps Buy to long', () => {
     const result = normalizeBybitPosition(BYBIT_RAW_POSITION);
 
-    expect(result.side).toBe('long');
+    expect(result.side).toBe(PositionSide.Long);
   });
 
   it('maps Sell to short', () => {
     const raw = { ...BYBIT_RAW_POSITION, side: 'Sell' };
     const result = normalizeBybitPosition(raw);
 
-    expect(result.side).toBe('short');
+    expect(result.side).toBe(PositionSide.Short);
   });
 
   it('falls back to both for unknown side', () => {
     const raw = { ...BYBIT_RAW_POSITION, side: 'None' };
     const result = normalizeBybitPosition(raw);
 
-    expect(result.side).toBe('both');
+    expect(result.side).toBe(PositionSide.Both);
   });
 
   it('maps tradeMode 0 to cross', () => {
     const raw = { ...BYBIT_RAW_POSITION, tradeMode: 0 };
     const result = normalizeBybitPosition(raw);
 
-    expect(result.marginMode).toBe('cross');
+    expect(result.marginMode).toBe(MarginMode.Cross);
   });
 
   it('maps tradeMode 1 to isolated', () => {
     const result = normalizeBybitPosition(BYBIT_RAW_POSITION);
 
-    expect(result.marginMode).toBe('isolated');
+    expect(result.marginMode).toBe(MarginMode.Isolated);
   });
 
   it('parses numeric fields', () => {
@@ -324,14 +325,14 @@ describe('buildBybitOrderFromCreateResponse', () => {
     jest.spyOn(Date, 'now').mockReturnValue(1700000000000);
 
     const result = buildBybitOrderFromCreateResponse(
-      { symbol: 'BTCUSDT', type: 'limit', side: 'buy', amount: 0.1, price: 65000 },
+      { symbol: 'BTCUSDT', type: OrderType.Limit, side: OrderSide.Buy, amount: 0.1, price: 65000 },
       'order-123',
     );
 
     expect(result.id).toBe('order-123');
     expect(result.symbol).toBe('BTCUSDT');
-    expect(result.side).toBe('buy');
-    expect(result.type).toBe('limit');
+    expect(result.side).toBe(OrderSide.Buy);
+    expect(result.type).toBe(OrderType.Limit);
     expect(result.amount).toBe(0.1);
     expect(result.price).toBe(65000);
     expect(result.status).toBe('open');

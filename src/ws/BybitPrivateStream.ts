@@ -3,15 +3,15 @@ import { ReliableWebSocket } from '@solncebro/websocket-engine';
 import type { WebSocketOpenContext } from '@solncebro/websocket-engine';
 
 import type { ExchangeLogger } from '../types/common';
-import { BYBIT_PRIVATE_WS_URL } from '../constants/bybit';
+import { BYBIT_PRIVATE_WEBSOCKET_URL } from '../constants/bybit';
 import {
   BYBIT_HEARTBEAT_CONFIG,
   BYBIT_PING_INTERVAL,
-  authenticateBybitWs,
-} from './bybitWsUtils';
-import type { BybitBaseWsMessage } from './bybitWsUtils';
+  authenticateBybitWebSocket,
+} from './bybitWebSocketUtils';
+import type { BybitBaseWebSocketMessage } from './bybitWebSocketUtils';
 
-interface BybitPrivateMessage extends BybitBaseWsMessage {
+interface BybitPrivateMessage extends BybitBaseWebSocketMessage {
   topic?: string;
 }
 
@@ -50,7 +50,7 @@ class BybitPrivateStream {
 
     this.webSocket = new ReliableWebSocket<BybitPrivateMessage>({
       label: 'BybitPrivateStream',
-      url: BYBIT_PRIVATE_WS_URL,
+      url: BYBIT_PRIVATE_WEBSOCKET_URL,
       logger: this.logger,
       parseMessage: parseBybitPrivateMessage,
       onMessage: (message) => this.handleMessage(message),
@@ -75,7 +75,7 @@ class BybitPrivateStream {
   }
 
   private async authenticate(context: WebSocketOpenContext<BybitPrivateMessage>): Promise<void> {
-    await authenticateBybitWs({ context, apiKey: this.apiKey, secret: this.secret, label: 'BybitPrivateStream', logger: this.logger });
+    await authenticateBybitWebSocket({ context, apiKey: this.apiKey, secret: this.secret, label: 'BybitPrivateStream', logger: this.logger });
   }
 
   private handleMessage(message: BybitPrivateMessage): void {

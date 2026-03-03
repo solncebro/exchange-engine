@@ -3,15 +3,13 @@ import type {
   ExchangeLogger,
   KlineInterval,
   Kline,
-  MarginMode,
   MarketBySymbol,
   Order,
-  OrderSide,
-  OrderType,
   TickerBySymbol,
   BalanceByAsset,
   Position,
 } from './common';
+import { MarginMode, OrderSide, OrderType } from './common';
 
 export interface ExchangeArgs {
   config: ExchangeConfig;
@@ -19,7 +17,7 @@ export interface ExchangeArgs {
   onNotify?: (message: string) => void | Promise<void>;
 }
 
-export interface CreateOrderWsArgs {
+export interface CreateOrderWebSocketArgs {
   symbol: string;
   type: OrderType;
   side: OrderSide;
@@ -46,7 +44,7 @@ export interface ExchangeClient {
   readonly apiKey: string;
   readonly markets: MarketBySymbol;
 
-  loadMarkets(reload?: boolean): Promise<MarketBySymbol>;
+  loadMarkets(shouldReload?: boolean): Promise<MarketBySymbol>;
   fetchTickers(): Promise<TickerBySymbol>;
   fetchKlines(symbol: string, interval: KlineInterval, options?: FetchKlinesArgs): Promise<Kline[]>;
   fetchAllKlines(symbolList: string[], interval: KlineInterval): Promise<Map<string, Kline[]>>;
@@ -58,7 +56,7 @@ export interface ExchangeClient {
   priceToPrecision(symbol: string, price: number): string;
   getMinOrderQty(symbol: string): number;
   getMinNotional(symbol: string): number;
-  createOrderWs(args: CreateOrderWsArgs): Promise<Order>;
+  createOrderWebSocket(args: CreateOrderWebSocketArgs): Promise<Order>;
   close(): Promise<void>;
 
   watchTickers(): AsyncGenerator<TickerBySymbol>;

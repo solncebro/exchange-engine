@@ -1,5 +1,6 @@
 import type { ExchangeArgs } from '../types/exchange';
-import type { Position, MarginMode } from '../types/common';
+import type { Position } from '../types/common';
+import { MarginMode } from '../types/common';
 import { BinanceFuturesHttpClient } from '../http/BinanceFuturesHttpClient';
 import { normalizeBinancePosition } from '../normalizers/binanceNormalizer';
 import { BinanceFuturesPublicStream } from '../ws/BinanceFuturesPublicStream';
@@ -7,8 +8,8 @@ import {
   BINANCE_KLINE_LIMIT_FUTURES,
   BINANCE_FUTURES_BASE_URL,
   BINANCE_DEMO_FUTURES_BASE_URL,
-  BINANCE_FUTURES_WS_COMBINED_URL,
-  BINANCE_DEMO_FUTURES_WS_COMBINED_URL,
+  BINANCE_FUTURES_WEBSOCKET_COMBINED_URL,
+  BINANCE_DEMO_FUTURES_WEBSOCKET_COMBINED_URL,
 } from '../constants/binance';
 import { BinanceBaseClient } from './BinanceBaseClient';
 
@@ -17,13 +18,13 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
   protected readonly klineLimit = BINANCE_KLINE_LIMIT_FUTURES;
 
   constructor(args: ExchangeArgs) {
-    const baseUrl = args.config.demoMode === true
+    const baseUrl = args.config.isDemoMode === true
       ? BINANCE_DEMO_FUTURES_BASE_URL
       : BINANCE_FUTURES_BASE_URL;
 
-    const wsCombinedUrl = args.config.demoMode === true
-      ? BINANCE_DEMO_FUTURES_WS_COMBINED_URL
-      : BINANCE_FUTURES_WS_COMBINED_URL;
+    const webSocketCombinedUrl = args.config.isDemoMode === true
+      ? BINANCE_DEMO_FUTURES_WEBSOCKET_COMBINED_URL
+      : BINANCE_FUTURES_WEBSOCKET_COMBINED_URL;
 
     const httpClient = new BinanceFuturesHttpClient({
       baseUrl,
@@ -32,7 +33,7 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
       logger: args.logger,
     });
 
-    const publicStream = new BinanceFuturesPublicStream(wsCombinedUrl, args.logger, args.onNotify);
+    const publicStream = new BinanceFuturesPublicStream(webSocketCombinedUrl, args.logger, args.onNotify);
 
     super(args, httpClient, publicStream);
   }
@@ -56,7 +57,7 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
 
   async setMarginMode(marginMode: MarginMode, symbol: string): Promise<void> {
     this.logger.info(`Setting margin mode to ${marginMode} for ${symbol}`);
-    const marginType = marginMode === 'isolated' ? 'ISOLATED' : 'CROSSED';
+    const marginType = marginMode === MarginMode.Isolated ? 'ISOLATED' : 'CROSSED';
     await this.httpClient.setMarginType(symbol, marginType);
   }
 }

@@ -1,4 +1,4 @@
-import type { CreateOrderWsArgs, ExchangeArgs, FetchKlinesArgs } from '../types/exchange';
+import type { CreateOrderWebSocketArgs, ExchangeArgs, FetchKlinesArgs } from '../types/exchange';
 import type {
   Kline,
   KlineInterval,
@@ -7,6 +7,7 @@ import type {
   BalanceByAsset,
   Order,
 } from '../types/common';
+import { OrderType, TimeInForce } from '../types/common';
 import type { PublicStreamLike } from '../types/stream';
 import type { BinanceBaseHttpClient } from '../http/BinanceBaseHttpClient';
 import {
@@ -17,7 +18,6 @@ import {
   normalizeBinanceBalance,
 } from '../normalizers/binanceNormalizer';
 import { BinanceUserDataStream } from '../ws/BinanceUserDataStream';
-import { BINANCE_KLINE_INTERVAL } from '../constants/binance';
 import { BaseExchangeClient } from './BaseExchangeClient';
 
 abstract class BinanceBaseClient<T extends BinanceBaseHttpClient> extends BaseExchangeClient {
@@ -53,8 +53,7 @@ abstract class BinanceBaseClient<T extends BinanceBaseHttpClient> extends BaseEx
     interval: KlineInterval,
     options?: FetchKlinesArgs,
   ): Promise<Kline[]> {
-    const binanceInterval = BINANCE_KLINE_INTERVAL[interval];
-    const rawKlineList = await this.httpClient.fetchKlines(symbol, binanceInterval, options);
+    const rawKlineList = await this.httpClient.fetchKlines(symbol, interval, options);
 
     return normalizeBinanceKlines(rawKlineList);
   }
@@ -65,7 +64,7 @@ abstract class BinanceBaseClient<T extends BinanceBaseHttpClient> extends BaseEx
     return normalizeBinanceBalance(raw);
   }
 
-  async createOrderWs(args: CreateOrderWsArgs): Promise<Order> {
+  async createOrderWebSocket(args: CreateOrderWebSocketArgs): Promise<Order> {
     this.logger.debug(`Creating order via REST: ${args.symbol}`);
 
     const orderParams: Record<string, unknown> = {
@@ -76,13 +75,13 @@ abstract class BinanceBaseClient<T extends BinanceBaseHttpClient> extends BaseEx
       ...args.params,
     };
 
-    if (args.type === 'limit') {
+    if (args.type === OrderType.Limit) {
       if (args.price > 0) {
         orderParams.price = this.priceToPrecision(args.symbol, args.price);
       }
 
       if (orderParams.timeInForce === undefined) {
-        orderParams.timeInForce = 'GTC';
+        orderParams.timeInForce = TimeInForce.Gtc;
       }
     }
 

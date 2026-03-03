@@ -5,6 +5,7 @@
 
 import {
   Exchange,
+  ExchangeName,
   ExchangeClient,
   ExchangeArgs,
   Kline,
@@ -14,9 +15,13 @@ import {
   Balance,
   ExchangeConfig,
   ExchangeLogger,
-  CreateOrderWsArgs,
+  CreateOrderWebSocketArgs,
   FetchKlinesArgs,
   SubscribeKlinesArgs,
+  PositionSide,
+  MarginMode,
+  OrderSide,
+  OrderType,
 } from '../dist/index';
 
 // --- Verify core export is a constructor ---
@@ -51,8 +56,8 @@ const mockArgs: ExchangeArgs = {
 
 // --- Instantiation (no real connections made at construction time) ---
 
-const binance = new Exchange('binance', mockArgs);
-const bybit   = new Exchange('bybit',   mockArgs);
+const binance = new Exchange(ExchangeName.Binance, mockArgs);
+const bybit   = new Exchange(ExchangeName.Bybit,   mockArgs);
 
 // --- Structural checks: futures and spot must satisfy ExchangeClient ---
 
@@ -67,7 +72,7 @@ function assertExchangeClient(client: ExchangeClient, label: string): void {
     'setMarginMode',
     'amountToPrecision',
     'priceToPrecision',
-    'createOrderWs',
+    'createOrderWebSocket',
     'close',
     'watchTickers',
     'subscribeKlines',
@@ -116,7 +121,7 @@ type _CheckTicker            = AssertAssignable<Ticker>;
 type _CheckPosition          = AssertAssignable<Position>;
 type _CheckOrder             = AssertAssignable<Order>;
 type _CheckBalance           = AssertAssignable<Balance>;
-type _CheckCreateOrderWsArgs = AssertAssignable<CreateOrderWsArgs>;
+type _CheckCreateOrderWebSocketArgs = AssertAssignable<CreateOrderWebSocketArgs>;
 type _CheckFetchKlinesArgs   = AssertAssignable<FetchKlinesArgs>;
 type _CheckSubscribeKlines   = AssertAssignable<SubscribeKlinesArgs>;
 
@@ -142,13 +147,13 @@ const _ticker: Ticker = {
 
 const _position: Position = {
   symbol:           'BTCUSDT',
-  side:             'long',
+  side:             PositionSide.Long,
   contracts:        0,
   entryPrice:       0,
   markPrice:        0,
   unrealizedPnl:    0,
   leverage:         1,
-  marginMode:       'isolated',
+  marginMode:       MarginMode.Isolated,
   liquidationPrice: 0,
   info:             {},
 };
@@ -156,8 +161,8 @@ const _position: Position = {
 const _order: Order = {
   id:        '1',
   symbol:    'BTCUSDT',
-  side:      'buy',
-  type:      'market',
+  side:      OrderSide.Buy,
+  type:      OrderType.Market,
   amount:    0,
   price:     0,
   status:    'open',

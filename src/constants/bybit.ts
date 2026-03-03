@@ -2,13 +2,13 @@ export const BYBIT_BASE_URL = 'https://api.bybit.com';
 
 export const BYBIT_DEMO_BASE_URL = 'https://api-demo.bybit.com';
 
-export const BYBIT_PUBLIC_LINEAR_WS_URL = 'wss://stream.bybit.com/v5/public/linear';
-export const BYBIT_PUBLIC_SPOT_WS_URL = 'wss://stream.bybit.com/v5/public/spot';
-export const BYBIT_PRIVATE_WS_URL = 'wss://stream.bybit.com/v5/private';
-export const BYBIT_TRADE_WS_URL = 'wss://stream.bybit.com/v5/trade';
+export const BYBIT_PUBLIC_LINEAR_WEBSOCKET_URL = 'wss://stream.bybit.com/v5/public/linear';
+export const BYBIT_PUBLIC_SPOT_WEBSOCKET_URL = 'wss://stream.bybit.com/v5/public/spot';
+export const BYBIT_PRIVATE_WEBSOCKET_URL = 'wss://stream.bybit.com/v5/private';
+export const BYBIT_TRADE_WEBSOCKET_URL = 'wss://stream.bybit.com/v5/trade';
 
-export const BYBIT_DEMO_PUBLIC_LINEAR_WS_URL = 'wss://stream-demo.bybit.com/v5/public/linear';
-export const BYBIT_DEMO_PUBLIC_SPOT_WS_URL = 'wss://stream-demo.bybit.com/v5/public/spot';
+export const BYBIT_DEMO_PUBLIC_LINEAR_WEBSOCKET_URL = 'wss://stream-demo.bybit.com/v5/public/linear';
+export const BYBIT_DEMO_PUBLIC_SPOT_WEBSOCKET_URL = 'wss://stream-demo.bybit.com/v5/public/spot';
 
 export const BYBIT_RECV_WINDOW = 7000;
 export const BYBIT_REQUEST_TIMEOUT = 30000;

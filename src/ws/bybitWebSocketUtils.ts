@@ -1,7 +1,8 @@
 import type { WebSocketOpenContext } from '@solncebro/websocket-engine';
+import type { ExchangeLogger } from '../types/common';
 import { hmacSha256 } from '../utils/crypto';
 
-interface BybitBaseWsMessage {
+interface BybitBaseWebSocketMessage {
   op?: string;
   data?: unknown;
   success?: boolean;
@@ -11,7 +12,7 @@ interface BybitBaseWsMessage {
 
 const BYBIT_PING_INTERVAL = 20000;
 
-function isBybitPongResponse(message: BybitBaseWsMessage): boolean {
+function isBybitPongResponse(message: BybitBaseWebSocketMessage): boolean {
   return message.op === 'pong' || message.ret_msg === 'pong';
 }
 
@@ -20,15 +21,15 @@ const BYBIT_HEARTBEAT_CONFIG = {
   isResponse: isBybitPongResponse,
 };
 
-interface AuthenticateBybitWsArgs {
-  context: WebSocketOpenContext<BybitBaseWsMessage>;
+interface AuthenticateBybitWebSocketArgs {
+  context: WebSocketOpenContext<BybitBaseWebSocketMessage>;
   apiKey: string;
   secret: string;
   label: string;
-  logger: { info(message: string, ...args: unknown[]): void };
+  logger: ExchangeLogger;
 }
 
-async function authenticateBybitWs(args: AuthenticateBybitWsArgs): Promise<void> {
+async function authenticateBybitWebSocket(args: AuthenticateBybitWebSocketArgs): Promise<void> {
   const { context, apiKey, secret, label, logger } = args;
   const timestamp = Date.now();
   const payload = `GET/realtime${timestamp}`;
@@ -51,6 +52,6 @@ export {
   isBybitPongResponse,
   BYBIT_HEARTBEAT_CONFIG,
   BYBIT_PING_INTERVAL,
-  authenticateBybitWs,
+  authenticateBybitWebSocket,
 };
-export type { BybitBaseWsMessage, AuthenticateBybitWsArgs };
+export type { BybitBaseWebSocketMessage, AuthenticateBybitWebSocketArgs };

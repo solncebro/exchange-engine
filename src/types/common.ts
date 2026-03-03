@@ -1,16 +1,41 @@
-export type ExchangeName = 'binance' | 'bybit';
+export enum ExchangeName {
+  Binance = 'binance',
+  Bybit = 'bybit',
+}
 
-export type OrderSide = 'buy' | 'sell';
+export enum OrderSide {
+  Buy = 'buy',
+  Sell = 'sell',
+}
 
-export type OrderType = 'market' | 'limit';
+export enum OrderType {
+  Market = 'market',
+  Limit = 'limit',
+}
 
-export type MarginMode = 'isolated' | 'cross';
+export enum MarginMode {
+  Isolated = 'isolated',
+  Cross = 'cross',
+}
 
-export type PositionSide = 'long' | 'short' | 'both';
+export enum PositionSide {
+  Long = 'long',
+  Short = 'short',
+  Both = 'both',
+}
 
-export type MarketType = 'spot' | 'swap' | 'future';
+export enum MarketType {
+  Spot = 'spot',
+  Swap = 'swap',
+  Future = 'future',
+}
 
-export type TimeInForce = 'GTC' | 'IOC' | 'FOK' | 'PostOnly';
+export enum TimeInForce {
+  Gtc = 'GTC',
+  Ioc = 'IOC',
+  Fok = 'FOK',
+  PostOnly = 'PostOnly',
+}
 
 export type KlineInterval =
   | '1m'
@@ -32,7 +57,7 @@ export interface ExchangeConfig {
   apiKey: string;
   secret: string;
   recvWindow?: number;
-  demoMode?: boolean;
+  isDemoMode?: boolean;
 }
 
 export interface ExchangeLogger {
@@ -77,9 +102,9 @@ export interface Market {
   baseAsset: string;
   quoteAsset: string;
   settle: string;
-  active: boolean;
+  isActive: boolean;
   type: MarketType;
-  linear: boolean;
+  isLinear: boolean;
   contractSize: number;
   filter: MarketFilter;
 }

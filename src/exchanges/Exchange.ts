@@ -1,5 +1,5 @@
 import type { ExchangeClient, ExchangeArgs } from '../types/exchange';
-import type { ExchangeName } from '../types/common';
+import { ExchangeName } from '../types/common';
 import { BinanceFutures } from './BinanceFutures';
 import { BinanceSpot } from './BinanceSpot';
 import { BybitLinear } from './BybitLinear';
@@ -13,10 +13,10 @@ class Exchange {
   constructor(name: ExchangeName, args: ExchangeArgs) {
     this.name = name;
 
-    if (name === 'binance') {
+    if (name === ExchangeName.Binance) {
       this.futures = new BinanceFutures(args);
       this.spot = new BinanceSpot(args);
-    } else if (name === 'bybit') {
+    } else if (name === ExchangeName.Bybit) {
       this.futures = new BybitLinear(args);
       this.spot = new BybitSpot(args);
     } else {
