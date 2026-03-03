@@ -37,7 +37,7 @@ await exchange.futures.loadMarkets();
 
 // Fetch historical klines
 const klines = await exchange.futures.fetchKlines('BTCUSDT', '1h', { limit: 100 });
-console.log(klines[0]); // { openTime, open, high, low, close, volume, ... }
+console.log(klines[0]); // { openTimestamp, open, high, low, close, volume, ... }
 
 // Get current tickers
 const tickers = await exchange.futures.fetchTickers();
@@ -47,7 +47,7 @@ exchange.futures.subscribeKlines({
   symbol: 'BTCUSDT',
   interval: '1m',
   handler: (kline) => {
-    console.log(`[${kline.openTime}] ${kline.close}`);
+    console.log(`[${kline.openTimestamp}] ${kline.close}`);
   },
 });
 
@@ -102,7 +102,7 @@ All four classes (BinanceFutures, BinanceSpot, BybitLinear, BybitSpot) implement
 await client.loadMarkets(reload?: boolean): Promise<MarketBySymbol>;
 
 // Get all markets (already loaded)
-const markets = client.markets; // Record<string, Market>
+const markets = client.markets; // Map<string, Market>
 
 // Fetch current ticker prices
 await client.fetchTickers(): Promise<TickerBySymbol>;
@@ -111,7 +111,7 @@ await client.fetchTickers(): Promise<TickerBySymbol>;
 await client.fetchKlines(
   symbol: string,
   interval: KlineInterval,
-  opts?: { limit?: number; startTime?: number; endTime?: number }
+  options?: FetchKlinesArgs
 ): Promise<Kline[]>;
 
 // Get account balance
@@ -176,13 +176,13 @@ All types are normalized across exchanges. No raw exchange formats leak out.
 ```typescript
 // Candlestick
 interface Kline {
-  openTime: number;
+  openTimestamp: number;
   open: number;
   high: number;
   low: number;
   close: number;
   volume: number;
-  closeTime: number;
+  closeTimestamp: number;
   quoteVolume: number;
   trades: number;
 }
@@ -314,7 +314,7 @@ These differences are transparent — the same code works for both.
 2. **Reuse markets** — call `loadMarkets()` once at startup
    ```typescript
    await client.loadMarkets();
-   const symbols = Object.keys(client.markets);
+   const symbols = [...client.markets.keys()];
    ```
 
 3. **Limit historical data** — fetch only needed range

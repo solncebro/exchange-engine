@@ -4,6 +4,13 @@
   "description": "Universal TypeScript client library for Binance and Bybit with unified API, type safety, and WebSocket support",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "sideEffects": false,
   "files": [
     "dist",
     "README.md",
@@ -13,9 +20,12 @@
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.json",
     "build:watch": "tsc -p tsconfig.json --watch",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
     "test:smoke": "ts-node --project test/tsconfig.json test/smoke.test.ts",
     "type-check": "tsc -p tsconfig.json --noEmit",
-    "prepublishOnly": "npm run build && npm run type-check"
+    "prepublishOnly": "npm run test && npm run build && npm run type-check"
   },
   "keywords": [
     "exchange",
@@ -51,8 +61,12 @@
     "axios": "^1.7.7"
   },
   "devDependencies": {
+    "@types/jest": "^30.0.0",
     "@types/node": "^22.0.0",
     "@types/ws": "^8.18.1",
+    "jest": "^30.2.0",
+    "ts-jest": "^29.4.6",
+    "ts-node": "^10.9.2",
     "typescript": "^5.7.0"
   }
 }

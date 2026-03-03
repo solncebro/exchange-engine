@@ -3,7 +3,8 @@
   "compilerOptions": {
     "rootDir": ".",
     "outDir": "./out",
-    "noEmit": true
+    "noEmit": true,
+    "types": ["jest"]
   },
   "include": ["./**/*.ts"],
   "exclude": ["node_modules"]
