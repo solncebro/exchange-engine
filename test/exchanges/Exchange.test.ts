@@ -35,6 +35,10 @@ describe('Exchange', () => {
     expect(bybit.name).toBe(ExchangeName.Bybit);
   });
 
+  it('throws on unknown exchange name', () => {
+    expect(() => new Exchange('unknown' as any, mockArgs)).toThrow('Unknown exchange: unknown');
+  });
+
   it('close() calls close on both futures and spot', async () => {
     const exchange = new Exchange(ExchangeName.Binance, mockArgs);
     (exchange.futures.close as jest.Mock).mockResolvedValue(undefined);

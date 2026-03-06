@@ -4,7 +4,7 @@ export type {
   OrderType,
   MarginMode,
   PositionSide,
-  MarketType,
+  TradeSymbolType,
   TimeInForce,
   KlineInterval,
   ExchangeConfig,
@@ -12,19 +12,20 @@ export type {
   Ticker,
   TickerBySymbol,
   Kline,
-  MarketFilter,
-  Market,
-  MarketBySymbol,
+  TradeSymbolFilter,
+  TradeSymbol,
+  TradeSymbolBySymbol,
   Position,
   Order,
   Balance,
   BalanceByAsset,
+  FundingRateHistory,
 } from './common';
 
 export type {
   ExchangeArgs,
   CreateOrderWebSocketArgs,
-  FetchKlinesArgs,
+  FetchPageWithLimitArgs,
   SubscribeKlinesArgs,
   ExchangeClient,
 } from './exchange';

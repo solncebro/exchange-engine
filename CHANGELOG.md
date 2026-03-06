@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-03-06
+
+### Breaking Changes
+- Renamed `Market` → `TradeSymbol`, `MarketBySymbol` → `TradeSymbolBySymbol`, `MarketFilter` → `TradeSymbolFilter`, `MarketType` → `TradeSymbolType`
+- Renamed `loadMarkets()` → `loadTradeSymbols()`, property `markets` → `tradeSymbols`
+- Renamed `FetchKlinesArgs` → `FetchPageWithLimitArgs`
+- Renamed Kline fields: `open` → `openPrice`, `high` → `highPrice`, `low` → `lowPrice`, `close` → `closePrice`, `quoteVolume` → `quoteAssetVolume`, `trades` → `numberOfTrades`
+- Added Kline fields: `takerBuyBaseAssetVolume`, `takerBuyQuoteAssetVolume`
+
+### Added
+- `FundingRateHistory` type and `fetchFundingRateHistory()` method (Binance Futures)
+- `BinanceFundingRateHistoryRaw` type and `normalizeBinanceFundingRateHistory()` normalizer
+- ESLint integration with TypeScript support (`eslint.config.mjs`)
+- `yarn lint` script — runs ESLint on `src/` and `test/`
+- ESLint check added to `prepublishOnly` pipeline
+
+### Fixed
+- Unused imports in WebSocket streams (`Kline`, `isBybitPongResponse`)
+- `test/tsconfig.json`: added `"node"` to `types` for `console` support in smoke tests
+
+### Internal
+- Code style alignment across all source and test files
+- All abbreviations expanded (`opts` → `options`, etc.)
+
 ## [0.1.2] - 2026-03-03
 
 ### Added
@@ -67,5 +91,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Private endpoints (balance, position, orders) require valid credentials
 - WebSocket subscriptions are stateless and can be re-established on reconnect
 
+[0.2.0]: https://github.com/solncebro/exchange-engine/releases/tag/v0.2.0
 [0.1.2]: https://github.com/solncebro/exchange-engine/releases/tag/v0.1.2
 [0.1.0]: https://github.com/solncebro/exchange-engine/releases/tag/v0.1.0

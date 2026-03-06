@@ -2,14 +2,15 @@ import type {
   Ticker,
   TickerBySymbol,
   Kline,
-  Market,
-  MarketBySymbol,
+  TradeSymbol,
+  TradeSymbolBySymbol,
   Position,
   Order,
   Balance,
   BalanceByAsset,
+  FundingRateHistory,
 } from '../types/common';
-import { MarketType, PositionSide, MarginMode } from '../types/common';
+import { TradeSymbolType, PositionSide, MarginMode } from '../types/common';
 import { BINANCE_POSITION_SIDE, BINANCE_ORDER_SIDE, BINANCE_ORDER_TYPE } from '../constants/mappings';
 
 interface BinanceFilterRaw {
@@ -53,6 +54,8 @@ export interface BinanceWebSocketKlineRaw {
   T: number;
   q: string;
   n: number;
+  V: string;
+  Q: string;
 }
 
 export interface BinancePositionRiskRaw {
@@ -95,8 +98,8 @@ function extractFilter(filterList: BinanceFilterRaw[], filterType: string): Bina
   return filterList.find((filter) => filter.filterType === filterType);
 }
 
-export function normalizeBinanceMarkets(raw: BinanceExchangeInfoRaw): MarketBySymbol {
-  const result = new Map<string, Market>();
+export function normalizeBinanceTradeSymbols(raw: BinanceExchangeInfoRaw): TradeSymbolBySymbol {
+  const result = new Map<string, TradeSymbol>();
 
   for (const symbol of raw.symbols) {
     const priceFilter = extractFilter(symbol.filters, 'PRICE_FILTER');
@@ -108,21 +111,21 @@ export function normalizeBinanceMarkets(raw: BinanceExchangeInfoRaw): MarketBySy
     const isPerp = symbol.contractType === 'PERPETUAL';
     const isSpot = symbol.contractType === undefined || symbol.contractType === '';
 
-    let marketType: MarketType = MarketType.Future;
+    let tradeSymbolType: TradeSymbolType = TradeSymbolType.Future;
 
     if (isPerp) {
-      marketType = MarketType.Swap;
+      tradeSymbolType = TradeSymbolType.Swap;
     } else if (isSpot) {
-      marketType = MarketType.Spot;
+      tradeSymbolType = TradeSymbolType.Spot;
     }
 
-    const market: Market = {
+    const tradeSymbol: TradeSymbol = {
       symbol: symbol.symbol,
       baseAsset: symbol.baseAsset,
       quoteAsset: symbol.quoteAsset,
       settle: isPerp ? 'USDT' : '',
       isActive: symbol.status === 'TRADING',
-      type: marketType,
+      type: tradeSymbolType,
       isLinear: isPerp,
       contractSize: 1,
       filter: {
@@ -136,7 +139,7 @@ export function normalizeBinanceMarkets(raw: BinanceExchangeInfoRaw): MarketBySy
       },
     };
 
-    result.set(symbol.symbol, market);
+    result.set(symbol.symbol, tradeSymbol);
   }
 
   return result;
@@ -162,28 +165,32 @@ export function normalizeBinanceTickers(rawList: BinanceTicker24hrRaw[]): Ticker
 export function normalizeBinanceKlines(rawList: unknown[][]): Kline[] {
   return rawList.map((row) => ({
     openTimestamp: row[0] as number,
-    open: parseFloat(row[1] as string),
-    high: parseFloat(row[2] as string),
-    low: parseFloat(row[3] as string),
-    close: parseFloat(row[4] as string),
+    openPrice: parseFloat(row[1] as string),
+    highPrice: parseFloat(row[2] as string),
+    lowPrice: parseFloat(row[3] as string),
+    closePrice: parseFloat(row[4] as string),
     volume: parseFloat(row[5] as string),
     closeTimestamp: row[6] as number,
-    quoteVolume: parseFloat(row[7] as string),
-    trades: row[8] as number,
+    quoteAssetVolume: parseFloat(row[7] as string),
+    numberOfTrades: row[8] as number,
+    takerBuyBaseAssetVolume: parseFloat(row[9] as string),
+    takerBuyQuoteAssetVolume: parseFloat(row[10] as string),
   }));
 }
 
 export function normalizeBinanceKlineWebSocketMessage(raw: BinanceWebSocketKlineRaw): Kline {
   return {
     openTimestamp: raw.t,
-    open: parseFloat(raw.o),
-    high: parseFloat(raw.h),
-    low: parseFloat(raw.l),
-    close: parseFloat(raw.c),
+    openPrice: parseFloat(raw.o),
+    highPrice: parseFloat(raw.h),
+    lowPrice: parseFloat(raw.l),
+    closePrice: parseFloat(raw.c),
     volume: parseFloat(raw.v),
     closeTimestamp: raw.T,
-    quoteVolume: parseFloat(raw.q),
-    trades: raw.n,
+    quoteAssetVolume: parseFloat(raw.q),
+    numberOfTrades: raw.n,
+    takerBuyBaseAssetVolume: parseFloat(raw.V),
+    takerBuyQuoteAssetVolume: parseFloat(raw.Q),
   };
 }
 
@@ -241,4 +248,22 @@ export function normalizeBinanceBalance(raw: BinanceAccountRaw): BalanceByAsset 
   }
 
   return result;
+}
+
+export interface BinanceFundingRateHistoryRaw {
+  symbol: string;
+  fundingRate: string;
+  fundingTime: number;
+  markPrice: string;
+}
+
+export function normalizeBinanceFundingRateHistory(
+  rawList: BinanceFundingRateHistoryRaw[],
+): FundingRateHistory[] {
+  return rawList.map((raw) => ({
+    symbol: raw.symbol,
+    fundingRate: parseFloat(raw.fundingRate),
+    fundingTime: raw.fundingTime,
+    markPrice: raw.markPrice !== '' ? parseFloat(raw.markPrice) : null,
+  }));
 }

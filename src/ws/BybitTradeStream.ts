@@ -73,7 +73,14 @@ class BybitTradeStream {
       }, ORDER_TIMEOUT_MS);
 
       this.pendingRequestByRequestId.set(requestId, { resolve, reject, timeout });
-      this.webSocket!.sendToConnectedSocket(request);
+
+      if (this.webSocket === null) {
+        reject(new Error('WebSocket is not connected'));
+
+        return;
+      }
+
+      this.webSocket.sendToConnectedSocket(request);
     });
   }
 

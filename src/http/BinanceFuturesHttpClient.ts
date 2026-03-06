@@ -1,5 +1,5 @@
-import type { BinancePositionRiskRaw } from '../normalizers/binanceNormalizer';
-import type { FetchKlinesArgs } from '../types/exchange';
+import type { BinancePositionRiskRaw, BinanceFundingRateHistoryRaw } from '../normalizers/binanceNormalizer';
+import type { FetchPageWithLimitArgs } from '../types/exchange';
 import { buildBinanceSignedParams } from '../auth/binanceAuth';
 import { applyTimeRangeOptions } from '../utils/httpParams';
 import type { BinanceEndpoints, BinanceHttpClientArgs } from './BinanceBaseHttpClient';
@@ -38,19 +38,14 @@ export class BinanceFuturesHttpClient extends BinanceBaseHttpClient {
     );
   }
 
-  async fetchFundingRate(
-    symbol?: string,
-    options?: FetchKlinesArgs,
-  ): Promise<Array<Record<string, unknown>>> {
-    const params: Record<string, string | number | boolean> = {};
-
-    if (symbol !== undefined) {
-      params.symbol = symbol;
-    }
-
+  async fetchFundingRateHistory(
+    symbol: string,
+    options?: FetchPageWithLimitArgs,
+  ): Promise<BinanceFundingRateHistoryRaw[]> {
+    const params: Record<string, string | number | boolean> = { symbol };
     applyTimeRangeOptions(params, options);
 
-    return this.get<Array<Record<string, unknown>>>('/fapi/v1/fundingRate', params);
+    return this.get<BinanceFundingRateHistoryRaw[]>('/fapi/v1/fundingRate', params);
   }
 
   async fetchOpenInterest(symbol: string): Promise<Record<string, unknown>> {
@@ -79,7 +74,7 @@ export class BinanceFuturesHttpClient extends BinanceBaseHttpClient {
 
   async getAllOrders(
     symbol: string,
-    options?: FetchKlinesArgs,
+    options?: FetchPageWithLimitArgs,
   ): Promise<Array<Record<string, unknown>>> {
     const params: Record<string, string | number | boolean> = { symbol };
     applyTimeRangeOptions(params, options);
@@ -121,7 +116,7 @@ export class BinanceFuturesHttpClient extends BinanceBaseHttpClient {
   }
 
   async fetchIncome(
-    options?: FetchKlinesArgs,
+    options?: FetchPageWithLimitArgs,
   ): Promise<Array<Record<string, unknown>>> {
     const params: Record<string, string | number | boolean> = {};
     applyTimeRangeOptions(params, options);

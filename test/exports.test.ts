@@ -8,7 +8,7 @@ describe('export contract', () => {
     expect(api.OrderType).toBeDefined();
     expect(api.MarginMode).toBeDefined();
     expect(api.PositionSide).toBeDefined();
-    expect(api.MarketType).toBeDefined();
+    expect(api.TradeSymbolType).toBeDefined();
     expect(api.TimeInForce).toBeDefined();
   });
 });

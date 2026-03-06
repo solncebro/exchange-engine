@@ -80,4 +80,142 @@ describe('BinanceFuturesHttpClient', () => {
       expect(options.params.marginType).toBe('ISOLATED');
     });
   });
+
+  describe('fetchMarkPrice', () => {
+    it('calls GET /fapi/v1/premiumIndex without symbol', async () => {
+      await client.fetchMarkPrice();
+
+      const [url, options] = mockInstance.get.mock.calls[0];
+
+      expect(url).toBe('/fapi/v1/premiumIndex');
+      expect(options.params.symbol).toBeUndefined();
+    });
+
+    it('includes symbol when provided', async () => {
+      await client.fetchMarkPrice('BTCUSDT');
+
+      const [, options] = mockInstance.get.mock.calls[0];
+
+      expect(options.params.symbol).toBe('BTCUSDT');
+    });
+  });
+
+  describe('fetchOpenInterest', () => {
+    it('calls GET /fapi/v1/openInterest with symbol', async () => {
+      await client.fetchOpenInterest('BTCUSDT');
+
+      const [url, options] = mockInstance.get.mock.calls[0];
+
+      expect(url).toBe('/fapi/v1/openInterest');
+      expect(options.params.symbol).toBe('BTCUSDT');
+    });
+  });
+
+  describe('cancelAllOrders', () => {
+    it('calls signedDelete /fapi/v1/allOpenOrders', async () => {
+      await client.cancelAllOrders('BTCUSDT');
+
+      const [url, options] = mockInstance.delete.mock.calls[0];
+
+      expect(url).toBe('/fapi/v1/allOpenOrders');
+      expect(options.params.symbol).toBe('BTCUSDT');
+      expect(options.params.signature).toBeDefined();
+    });
+  });
+
+  describe('getAllOrders', () => {
+    it('calls signedGet /fapi/v1/allOrders with symbol', async () => {
+      await client.getAllOrders('BTCUSDT');
+
+      const [url, options] = mockInstance.get.mock.calls[0];
+
+      expect(url).toBe('/fapi/v1/allOrders');
+      expect(options.params.symbol).toBe('BTCUSDT');
+      expect(options.params.signature).toBeDefined();
+    });
+
+    it('applies time range options', async () => {
+      await client.getAllOrders('BTCUSDT', { startTime: 1000, endTime: 2000, limit: 100 });
+
+      const [, options] = mockInstance.get.mock.calls[0];
+
+      expect(options.params.startTime).toBe(1000);
+      expect(options.params.endTime).toBe(2000);
+      expect(options.params.limit).toBe(100);
+    });
+  });
+
+  describe('createBatchOrders', () => {
+    it('calls signedPost /fapi/v1/batchOrders with stringified order list', async () => {
+      const orders = [{ symbol: 'BTCUSDT', side: 'BUY' }];
+      await client.createBatchOrders(orders);
+
+      const [url, , options] = mockInstance.post.mock.calls[0];
+
+      expect(url).toBe('/fapi/v1/batchOrders');
+      expect(options.params.batchOrders).toBe(JSON.stringify(orders));
+      expect(options.params.signature).toBeDefined();
+    });
+  });
+
+  describe('cancelBatchOrders', () => {
+    it('calls signedDelete /fapi/v1/batchOrders with stringified order ids', async () => {
+      const orderIds = ['111', '222'];
+      await client.cancelBatchOrders('BTCUSDT', orderIds);
+
+      const [url, options] = mockInstance.delete.mock.calls[0];
+
+      expect(url).toBe('/fapi/v1/batchOrders');
+      expect(options.params.symbol).toBe('BTCUSDT');
+      expect(options.params.orderIdList).toBe(JSON.stringify(orderIds));
+      expect(options.params.signature).toBeDefined();
+    });
+  });
+
+  describe('fetchIncome', () => {
+    it('calls signedGet /fapi/v1/income', async () => {
+      await client.fetchIncome();
+
+      const [url, options] = mockInstance.get.mock.calls[0];
+
+      expect(url).toBe('/fapi/v1/income');
+      expect(options.params.signature).toBeDefined();
+    });
+
+    it('applies time range options', async () => {
+      await client.fetchIncome({ startTime: 1000, endTime: 2000, limit: 50 });
+
+      const [, options] = mockInstance.get.mock.calls[0];
+
+      expect(options.params.startTime).toBe(1000);
+      expect(options.params.endTime).toBe(2000);
+      expect(options.params.limit).toBe(50);
+    });
+  });
+
+  describe('setPositionMode', () => {
+    it('calls signedPost /fapi/v1/positionSide/dual', async () => {
+      await client.setPositionMode(true);
+
+      const [url, , options] = mockInstance.post.mock.calls[0];
+
+      expect(url).toBe('/fapi/v1/positionSide/dual');
+      expect(options.params.dualSidePosition).toBe(true);
+      expect(options.params.signature).toBeDefined();
+    });
+  });
+
+  describe('modifyPositionMargin', () => {
+    it('calls signedPost /fapi/v1/positionMargin', async () => {
+      await client.modifyPositionMargin('BTCUSDT', 100, 1);
+
+      const [url, , options] = mockInstance.post.mock.calls[0];
+
+      expect(url).toBe('/fapi/v1/positionMargin');
+      expect(options.params.symbol).toBe('BTCUSDT');
+      expect(options.params.amount).toBe(100);
+      expect(options.params.type).toBe(1);
+      expect(options.params.signature).toBeDefined();
+    });
+  });
 });

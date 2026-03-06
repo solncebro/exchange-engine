@@ -2,7 +2,7 @@ import type { RawData } from 'ws';
 import { ReliableWebSocket } from '@solncebro/websocket-engine';
 import type { WebSocketOpenContext } from '@solncebro/websocket-engine';
 
-import type { ExchangeLogger, Kline, KlineInterval, TickerBySymbol } from '../types/common';
+import type { ExchangeLogger, KlineInterval, TickerBySymbol } from '../types/common';
 import type { KlineHandler } from '../types/exchange';
 import { normalizeBinanceKlineWebSocketMessage, normalizeBinanceTickers } from '../normalizers/binanceNormalizer';
 import type { BinanceTicker24hrRaw, BinanceWebSocketKlineRaw } from '../normalizers/binanceNormalizer';
@@ -46,11 +46,9 @@ class BinanceSpotPublicStream {
   subscribeKlines(symbol: string, interval: KlineInterval, handler: KlineHandler): void {
     const key = `${symbol}_${interval}`;
 
-    if (!this.klineHandlerByKey.has(key)) {
-      this.klineHandlerByKey.set(key, new Set());
-    }
-
-    this.klineHandlerByKey.get(key)!.add(handler);
+    const handlerSet = this.klineHandlerByKey.get(key) ?? new Set<KlineHandler>();
+    handlerSet.add(handler);
+    this.klineHandlerByKey.set(key, handlerSet);
 
     if (this.webSocket !== null) {
       const binanceInterval = interval;
@@ -199,7 +197,7 @@ class BinanceSpotPublicStream {
 
   private sendSubscribe(streamList: string[]): void {
     try {
-      this.webSocket!.sendToConnectedSocket({
+      this.webSocket?.sendToConnectedSocket({
         method: 'SUBSCRIBE',
         params: streamList,
         id: this.subscriptionIdCounter++,
@@ -211,7 +209,7 @@ class BinanceSpotPublicStream {
 
   private sendUnsubscribe(streamList: string[]): void {
     try {
-      this.webSocket!.sendToConnectedSocket({
+      this.webSocket?.sendToConnectedSocket({
         method: 'UNSUBSCRIBE',
         params: streamList,
         id: this.subscriptionIdCounter++,

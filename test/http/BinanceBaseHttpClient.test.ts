@@ -138,9 +138,151 @@ describe('BinanceBaseHttpClient', () => {
     it('sends POST with auth headers', async () => {
       await client.createListenKey();
 
-      const [url, body, options] = mockInstance.post.mock.calls[0];
+      const [url, , options] = mockInstance.post.mock.calls[0];
 
       expect(url).toBe('/test/listenKey');
+      expect(options.headers['X-MBX-APIKEY']).toBe('testKey');
+    });
+  });
+
+  describe('fetchOrderBook', () => {
+    it('calls GET on depth endpoint with symbol', async () => {
+      await client.fetchOrderBook('BTCUSDT');
+
+      const [url, options] = mockInstance.get.mock.calls[0];
+
+      expect(url).toBe('/test/depth');
+      expect(options.params.symbol).toBe('BTCUSDT');
+    });
+
+    it('includes limit when provided', async () => {
+      await client.fetchOrderBook('BTCUSDT', 20);
+
+      const [, options] = mockInstance.get.mock.calls[0];
+
+      expect(options.params.limit).toBe(20);
+    });
+  });
+
+  describe('fetchKlines', () => {
+    it('calls GET on klines endpoint with symbol and interval', async () => {
+      await client.fetchKlines('BTCUSDT', '1h');
+
+      const [url, options] = mockInstance.get.mock.calls[0];
+
+      expect(url).toBe('/test/klines');
+      expect(options.params.symbol).toBe('BTCUSDT');
+      expect(options.params.interval).toBe('1h');
+    });
+
+    it('applies time range options', async () => {
+      await client.fetchKlines('BTCUSDT', '1h', { startTime: 1000, endTime: 2000, limit: 500 });
+
+      const [, options] = mockInstance.get.mock.calls[0];
+
+      expect(options.params.startTime).toBe(1000);
+      expect(options.params.endTime).toBe(2000);
+      expect(options.params.limit).toBe(500);
+    });
+  });
+
+  describe('fetchTrades', () => {
+    it('calls GET on trades endpoint with symbol', async () => {
+      await client.fetchTrades('BTCUSDT');
+
+      const [url, options] = mockInstance.get.mock.calls[0];
+
+      expect(url).toBe('/test/trades');
+      expect(options.params.symbol).toBe('BTCUSDT');
+    });
+
+    it('includes limit when provided', async () => {
+      await client.fetchTrades('BTCUSDT', 50);
+
+      const [, options] = mockInstance.get.mock.calls[0];
+
+      expect(options.params.limit).toBe(50);
+    });
+  });
+
+  describe('cancelOrder', () => {
+    it('calls signedDelete on order endpoint', async () => {
+      await client.cancelOrder('BTCUSDT', '12345');
+
+      const [url, options] = mockInstance.delete.mock.calls[0];
+
+      expect(url).toBe('/test/order');
+      expect(options.params.symbol).toBe('BTCUSDT');
+      expect(options.params.orderId).toBe('12345');
+      expect(options.params.signature).toBeDefined();
+    });
+  });
+
+  describe('getOrder', () => {
+    it('calls signedGet on order endpoint', async () => {
+      await client.getOrder('BTCUSDT', '12345');
+
+      const [url, options] = mockInstance.get.mock.calls[0];
+
+      expect(url).toBe('/test/order');
+      expect(options.params.symbol).toBe('BTCUSDT');
+      expect(options.params.orderId).toBe('12345');
+      expect(options.params.signature).toBeDefined();
+    });
+  });
+
+  describe('getOpenOrders', () => {
+    it('calls signedGet on openOrders endpoint', async () => {
+      await client.getOpenOrders('BTCUSDT');
+
+      const [url, options] = mockInstance.get.mock.calls[0];
+
+      expect(url).toBe('/test/openOrders');
+      expect(options.params.symbol).toBe('BTCUSDT');
+      expect(options.params.signature).toBeDefined();
+    });
+
+    it('omits symbol when not provided', async () => {
+      await client.getOpenOrders();
+
+      const [url, options] = mockInstance.get.mock.calls[0];
+
+      expect(url).toBe('/test/openOrders');
+      expect(options.params.symbol).toBeUndefined();
+    });
+  });
+
+  describe('fetchAccount', () => {
+    it('calls signedGet on account endpoint', async () => {
+      await client.fetchAccount();
+
+      const [url, options] = mockInstance.get.mock.calls[0];
+
+      expect(url).toBe('/test/account');
+      expect(options.params.signature).toBeDefined();
+    });
+  });
+
+  describe('keepAliveListenKey', () => {
+    it('sends PUT with listenKey and auth headers', async () => {
+      await client.keepAliveListenKey('testListenKey');
+
+      const [url, body, options] = mockInstance.put.mock.calls[0];
+
+      expect(url).toBe('/test/listenKey');
+      expect(body).toEqual({ listenKey: 'testListenKey' });
+      expect(options.headers['X-MBX-APIKEY']).toBe('testKey');
+    });
+  });
+
+  describe('deleteListenKey', () => {
+    it('sends DELETE with listenKey and auth headers', async () => {
+      await client.deleteListenKey('testListenKey');
+
+      const [url, options] = mockInstance.delete.mock.calls[0];
+
+      expect(url).toBe('/test/listenKey');
+      expect(options.params.listenKey).toBe('testListenKey');
       expect(options.headers['X-MBX-APIKEY']).toBe('testKey');
     });
   });

@@ -5,6 +5,7 @@ import type {
   BinancePositionRiskRaw,
   BinanceOrderResponseRaw,
   BinanceAccountRaw,
+  BinanceFundingRateHistoryRaw,
 } from '../../src/normalizers/binanceNormalizer';
 
 export const BINANCE_RAW_EXCHANGE_INFO: BinanceExchangeInfoRaw = {
@@ -42,8 +43,8 @@ export const BINANCE_RAW_TICKER_LIST: BinanceTicker24hrRaw[] = [
 ];
 
 export const BINANCE_RAW_KLINE_LIST: unknown[][] = [
-  [1700000000000, '65000.00', '66000.00', '64000.00', '65500.00', '1234.56', 1700003600000, '80500000.00', 5000],
-  [1700003600000, '65500.00', '67000.00', '65000.00', '66800.00', '2345.67', 1700007200000, '155000000.00', 8000],
+  [1700000000000, '65000.00', '66000.00', '64000.00', '65500.00', '1234.56', 1700003600000, '80500000.00', 5000, '600.00', '39000000.00'],
+  [1700003600000, '65500.00', '67000.00', '65000.00', '66800.00', '2345.67', 1700007200000, '155000000.00', 8000, '1100.00', '73000000.00'],
 ];
 
 export const BINANCE_RAW_WEBSOCKET_KLINE: BinanceWebSocketKlineRaw = {
@@ -56,6 +57,8 @@ export const BINANCE_RAW_WEBSOCKET_KLINE: BinanceWebSocketKlineRaw = {
   T: 1700003600000,
   q: '80500000.00',
   n: 5000,
+  V: '600.00',
+  Q: '39000000.00',
 };
 
 export const BINANCE_RAW_POSITION_RISK: BinancePositionRiskRaw = {
@@ -90,3 +93,8 @@ export const BINANCE_RAW_ACCOUNT: BinanceAccountRaw = {
     { asset: 'DOGE', free: '0', locked: '0' },
   ],
 };
+
+export const BINANCE_RAW_FUNDING_RATE_HISTORY: BinanceFundingRateHistoryRaw[] = [
+  { symbol: 'BTCUSDT', fundingRate: '0.00010000', fundingTime: 1700006400000, markPrice: '65500.00' },
+  { symbol: 'BTCUSDT', fundingRate: '-0.00005000', fundingTime: 1700035200000, markPrice: '' },
+];

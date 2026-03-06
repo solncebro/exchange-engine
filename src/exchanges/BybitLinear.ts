@@ -1,18 +1,19 @@
-import type { CreateOrderWebSocketArgs, ExchangeArgs, FetchKlinesArgs } from '../types/exchange';
+import type { CreateOrderWebSocketArgs, ExchangeArgs, FetchPageWithLimitArgs } from '../types/exchange';
 import type {
   Kline,
   KlineInterval,
-  MarketBySymbol,
+  TradeSymbolBySymbol,
   TickerBySymbol,
   BalanceByAsset,
   Position,
   Order,
+  FundingRateHistory,
 } from '../types/common';
 import { MarginMode, OrderType, OrderSide } from '../types/common';
 import type { PublicStreamLike } from '../types/stream';
 import { BybitHttpClient } from '../http/BybitHttpClient';
 import {
-  normalizeBybitMarkets,
+  normalizeBybitTradeSymbols,
   normalizeBybitTickers,
   normalizeBybitKlines,
   normalizeBybitPosition,
@@ -78,10 +79,10 @@ class BybitLinear extends BaseExchangeClient {
     return this.publicStream;
   }
 
-  protected async fetchAndNormalizeMarkets(): Promise<MarketBySymbol> {
+  protected async fetchAndNormalizeTradeSymbols(): Promise<TradeSymbolBySymbol> {
     const raw = await this.httpClient.fetchInstrumentsInfo('linear');
 
-    return normalizeBybitMarkets(raw.result.list);
+    return normalizeBybitTradeSymbols(raw.result.list);
   }
 
   protected async fetchAndNormalizeTickers(): Promise<TickerBySymbol> {
@@ -93,7 +94,7 @@ class BybitLinear extends BaseExchangeClient {
   protected async fetchAndNormalizeKlines(
     symbol: string,
     interval: KlineInterval,
-    options?: FetchKlinesArgs,
+    options?: FetchPageWithLimitArgs,
   ): Promise<Kline[]> {
     const bybitInterval = BYBIT_KLINE_INTERVAL[interval];
     const raw = await this.httpClient.fetchKline({
@@ -136,6 +137,10 @@ class BybitLinear extends BaseExchangeClient {
     const raw = await this.httpClient.createOrder(orderParams);
 
     return buildBybitOrderFromCreateResponse(args, raw.result.orderId);
+  }
+
+  async fetchFundingRateHistory(): Promise<FundingRateHistory[]> {
+    throw new Error('Not implemented for Bybit');
   }
 
   async fetchPosition(symbol: string): Promise<Position> {

@@ -1,7 +1,13 @@
 import axios from 'axios';
 import { BybitSpot } from '../../src/exchanges/BybitSpot';
 import { createMockLogger } from '../fixtures/mockLogger';
-import { MarketType, OrderType, OrderSide, MarginMode } from '../../src/types/common';
+import {
+  BYBIT_RAW_INSTRUMENT_LIST,
+  BYBIT_RAW_TICKER_LIST,
+  BYBIT_RAW_KLINE_LIST,
+  BYBIT_RAW_WALLET_BALANCE,
+} from '../fixtures/bybitRaw';
+import { TradeSymbolType, OrderType, OrderSide, MarginMode } from '../../src/types/common';
 
 jest.mock('axios');
 jest.mock('../../src/ws/BybitPublicStream');
@@ -33,9 +39,9 @@ describe('BybitSpot', () => {
   describe('createOrderWebSocket', () => {
     it('adds marketUnit=baseCoin for market orders', async () => {
       const { client, mockInstance } = createClient();
-      client.markets.set('BTCUSDT', {
+      client.tradeSymbols.set('BTCUSDT', {
         symbol: 'BTCUSDT', baseAsset: 'BTC', quoteAsset: 'USDT', settle: '',
-        isActive: true, type: MarketType.Spot, isLinear: false, contractSize: 1,
+        isActive: true, type: TradeSymbolType.Spot, isLinear: false, contractSize: 1,
         filter: { tickSize: '0.01', stepSize: '0.001', minQty: '0.001', maxQty: '1000', minNotional: '5' },
       });
 
@@ -55,9 +61,9 @@ describe('BybitSpot', () => {
 
     it('does not add marketUnit for limit orders', async () => {
       const { client, mockInstance } = createClient();
-      client.markets.set('BTCUSDT', {
+      client.tradeSymbols.set('BTCUSDT', {
         symbol: 'BTCUSDT', baseAsset: 'BTC', quoteAsset: 'USDT', settle: '',
-        isActive: true, type: MarketType.Spot, isLinear: false, contractSize: 1,
+        isActive: true, type: TradeSymbolType.Spot, isLinear: false, contractSize: 1,
         filter: { tickSize: '0.01', stepSize: '0.001', minQty: '0.001', maxQty: '1000', minNotional: '5' },
       });
 
@@ -76,6 +82,12 @@ describe('BybitSpot', () => {
     });
   });
 
+  it('throws "Not supported" for fetchFundingRateHistory', async () => {
+    const { client } = createClient();
+
+    await expect(client.fetchFundingRateHistory()).rejects.toThrow('Not supported for spot market');
+  });
+
   it('throws "Not supported" for fetchPosition', async () => {
     const { client } = createClient();
 
@@ -92,5 +104,77 @@ describe('BybitSpot', () => {
     const { client } = createClient();
 
     await expect(client.setMarginMode(MarginMode.Isolated, 'BTCUSDT')).rejects.toThrow('Not supported for spot market');
+  });
+
+  describe('loadTradeSymbols', () => {
+    it('fetches and normalizes spot trade symbols', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({
+        data: { result: { list: BYBIT_RAW_INSTRUMENT_LIST } },
+      });
+
+      const tradeSymbols = await client.loadTradeSymbols();
+
+      expect(tradeSymbols.size).toBeGreaterThan(0);
+      expect(tradeSymbols.get('ETHBTC')).toBeDefined();
+      expect(tradeSymbols.get('ETHBTC')!.baseAsset).toBe('ETH');
+    });
+  });
+
+  describe('fetchTickers', () => {
+    it('fetches and normalizes spot tickers', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({
+        data: { result: { list: BYBIT_RAW_TICKER_LIST } },
+      });
+
+      const tickers = await client.fetchTickers();
+
+      expect(tickers.size).toBeGreaterThan(0);
+      expect(tickers.get('BTCUSDT')).toBeDefined();
+      expect(tickers.get('BTCUSDT')!.close).toBe(65432.1);
+    });
+  });
+
+  describe('fetchKlines', () => {
+    it('fetches and normalizes klines', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({
+        data: { result: { list: BYBIT_RAW_KLINE_LIST } },
+      });
+
+      const klines = await client.fetchKlines('BTCUSDT', '1h');
+
+      expect(klines).toHaveLength(2);
+      expect(klines[0].openTimestamp).toBe(1700000000000);
+      expect(klines[0].openPrice).toBe(65000);
+    });
+  });
+
+  describe('fetchBalance', () => {
+    it('fetches and normalizes wallet balance', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({
+        data: { result: BYBIT_RAW_WALLET_BALANCE },
+      });
+
+      const balance = await client.fetchBalance();
+
+      expect(balance.size).toBeGreaterThan(0);
+      expect(balance.get('USDT')).toBeDefined();
+      expect(balance.get('BTC')).toBeDefined();
+    });
+  });
+
+  describe('close', () => {
+    it('calls publicStream.close', async () => {
+      const { client } = createClient();
+
+      await client.close();
+
+      const publicStream = (client as any).publicStream;
+
+      expect(publicStream.close).toHaveBeenCalled();
+    });
   });
 });

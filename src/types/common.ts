@@ -24,7 +24,7 @@ export enum PositionSide {
   Both = 'both',
 }
 
-export enum MarketType {
+export enum TradeSymbolType {
   Spot = 'spot',
   Swap = 'swap',
   Future = 'future',
@@ -79,17 +79,19 @@ export type TickerBySymbol = Map<string, Ticker>;
 
 export interface Kline {
   openTimestamp: number;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
+  openPrice: number;
+  highPrice: number;
+  lowPrice: number;
+  closePrice: number;
   volume: number;
   closeTimestamp: number;
-  quoteVolume: number;
-  trades: number;
+  quoteAssetVolume: number;
+  numberOfTrades: number;
+  takerBuyBaseAssetVolume: number;
+  takerBuyQuoteAssetVolume: number;
 }
 
-export interface MarketFilter {
+export interface TradeSymbolFilter {
   tickSize: string;
   stepSize: string;
   minQty: string;
@@ -97,19 +99,19 @@ export interface MarketFilter {
   minNotional: string;
 }
 
-export interface Market {
+export interface TradeSymbol {
   symbol: string;
   baseAsset: string;
   quoteAsset: string;
   settle: string;
   isActive: boolean;
-  type: MarketType;
+  type: TradeSymbolType;
   isLinear: boolean;
   contractSize: number;
-  filter: MarketFilter;
+  filter: TradeSymbolFilter;
 }
 
-export type MarketBySymbol = Map<string, Market>;
+export type TradeSymbolBySymbol = Map<string, TradeSymbol>;
 
 export interface Position {
   symbol: string;
@@ -143,3 +145,10 @@ export interface Balance {
 }
 
 export type BalanceByAsset = Map<string, Balance>;
+
+export interface FundingRateHistory {
+  symbol: string;
+  fundingRate: number;
+  fundingTime: number;
+  markPrice: number | null;
+}

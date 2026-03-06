@@ -1,5 +1,5 @@
 import {
-  normalizeBybitMarkets,
+  normalizeBybitTradeSymbols,
   normalizeBybitTickers,
   normalizeBybitKlines,
   normalizeBybitKlineWebSocketMessage,
@@ -8,7 +8,7 @@ import {
   buildBybitOrderFromCreateResponse,
   normalizeBybitBalance,
 } from '../../src/normalizers/bybitNormalizer';
-import { MarketType, PositionSide, MarginMode, OrderSide, OrderType } from '../../src/types/common';
+import { TradeSymbolType, PositionSide, MarginMode, OrderSide, OrderType } from '../../src/types/common';
 import {
   BYBIT_RAW_INSTRUMENT_LIST,
   BYBIT_RAW_TICKER_LIST,
@@ -19,94 +19,94 @@ import {
   BYBIT_RAW_WALLET_BALANCE,
 } from '../fixtures/bybitRaw';
 
-describe('normalizeBybitMarkets', () => {
+describe('normalizeBybitTradeSymbols', () => {
   it('returns a Map', () => {
-    const result = normalizeBybitMarkets(BYBIT_RAW_INSTRUMENT_LIST);
+    const result = normalizeBybitTradeSymbols(BYBIT_RAW_INSTRUMENT_LIST);
 
     expect(result).toBeInstanceOf(Map);
   });
 
   it('contains correct number of symbols', () => {
-    const result = normalizeBybitMarkets(BYBIT_RAW_INSTRUMENT_LIST);
+    const result = normalizeBybitTradeSymbols(BYBIT_RAW_INSTRUMENT_LIST);
 
     expect(result.size).toBe(2);
   });
 
   it('marks LinearPerpetual as swap/linear', () => {
-    const result = normalizeBybitMarkets(BYBIT_RAW_INSTRUMENT_LIST);
+    const result = normalizeBybitTradeSymbols(BYBIT_RAW_INSTRUMENT_LIST);
     const btc = result.get('BTCUSDT')!;
 
-    expect(btc.type).toBe(MarketType.Swap);
+    expect(btc.type).toBe(TradeSymbolType.Swap);
     expect(btc.isLinear).toBe(true);
   });
 
   it('uses settleCoin from raw data', () => {
-    const result = normalizeBybitMarkets(BYBIT_RAW_INSTRUMENT_LIST);
+    const result = normalizeBybitTradeSymbols(BYBIT_RAW_INSTRUMENT_LIST);
 
     expect(result.get('BTCUSDT')!.settle).toBe('USDT');
   });
 
   it('falls back settleCoin to USDT when missing', () => {
     const rawList = [{ ...BYBIT_RAW_INSTRUMENT_LIST[0], settleCoin: undefined }];
-    const result = normalizeBybitMarkets(rawList);
+    const result = normalizeBybitTradeSymbols(rawList);
 
     expect(result.get('BTCUSDT')!.settle).toBe('USDT');
   });
 
   it('marks spot symbol correctly', () => {
-    const result = normalizeBybitMarkets(BYBIT_RAW_INSTRUMENT_LIST);
+    const result = normalizeBybitTradeSymbols(BYBIT_RAW_INSTRUMENT_LIST);
     const eth = result.get('ETHBTC')!;
 
-    expect(eth.type).toBe(MarketType.Spot);
+    expect(eth.type).toBe(TradeSymbolType.Spot);
     expect(eth.isLinear).toBe(false);
     expect(eth.settle).toBe('');
   });
 
   it('sets isActive=true for Trading status', () => {
-    const result = normalizeBybitMarkets(BYBIT_RAW_INSTRUMENT_LIST);
+    const result = normalizeBybitTradeSymbols(BYBIT_RAW_INSTRUMENT_LIST);
 
     expect(result.get('BTCUSDT')!.isActive).toBe(true);
   });
 
   it('sets isActive=false for non-Trading status', () => {
     const rawList = [{ ...BYBIT_RAW_INSTRUMENT_LIST[0], status: 'Closed' }];
-    const result = normalizeBybitMarkets(rawList);
+    const result = normalizeBybitTradeSymbols(rawList);
 
     expect(result.get('BTCUSDT')!.isActive).toBe(false);
   });
 
   it('parses contractSize', () => {
-    const result = normalizeBybitMarkets(BYBIT_RAW_INSTRUMENT_LIST);
+    const result = normalizeBybitTradeSymbols(BYBIT_RAW_INSTRUMENT_LIST);
 
     expect(result.get('BTCUSDT')!.contractSize).toBe(0.01);
   });
 
   it('defaults contractSize to 1 when missing', () => {
-    const result = normalizeBybitMarkets(BYBIT_RAW_INSTRUMENT_LIST);
+    const result = normalizeBybitTradeSymbols(BYBIT_RAW_INSTRUMENT_LIST);
 
     expect(result.get('ETHBTC')!.contractSize).toBe(1);
   });
 
   it('extracts qtyStep as stepSize for linear', () => {
-    const result = normalizeBybitMarkets(BYBIT_RAW_INSTRUMENT_LIST);
+    const result = normalizeBybitTradeSymbols(BYBIT_RAW_INSTRUMENT_LIST);
 
     expect(result.get('BTCUSDT')!.filter.stepSize).toBe('0.001');
   });
 
   it('falls back to basePrecision for spot stepSize', () => {
-    const result = normalizeBybitMarkets(BYBIT_RAW_INSTRUMENT_LIST);
+    const result = normalizeBybitTradeSymbols(BYBIT_RAW_INSTRUMENT_LIST);
 
     expect(result.get('ETHBTC')!.filter.stepSize).toBe('0.01');
   });
 
   it('extracts minNotionalValue for linear', () => {
-    const result = normalizeBybitMarkets(BYBIT_RAW_INSTRUMENT_LIST);
+    const result = normalizeBybitTradeSymbols(BYBIT_RAW_INSTRUMENT_LIST);
 
     expect(result.get('BTCUSDT')!.filter.minNotional).toBe('5');
   });
 
   it('falls back to minOrderAmt for spot', () => {
-    const result = normalizeBybitMarkets(BYBIT_RAW_INSTRUMENT_LIST);
+    const result = normalizeBybitTradeSymbols(BYBIT_RAW_INSTRUMENT_LIST);
 
     expect(result.get('ETHBTC')!.filter.minNotional).toBe('0.0001');
   });
@@ -157,12 +157,14 @@ describe('normalizeBybitKlines', () => {
     const [kline] = normalizeBybitKlines(BYBIT_RAW_KLINE_LIST);
 
     expect(kline.openTimestamp).toBe(1700000000000);
-    expect(kline.open).toBe(65000);
-    expect(kline.high).toBe(66000);
-    expect(kline.low).toBe(64000);
-    expect(kline.close).toBe(65500);
+    expect(kline.openPrice).toBe(65000);
+    expect(kline.highPrice).toBe(66000);
+    expect(kline.lowPrice).toBe(64000);
+    expect(kline.closePrice).toBe(65500);
     expect(kline.volume).toBe(1234.56);
-    expect(kline.quoteVolume).toBe(80500000);
+    expect(kline.quoteAssetVolume).toBe(80500000);
+    expect(kline.takerBuyBaseAssetVolume).toBe(0);
+    expect(kline.takerBuyQuoteAssetVolume).toBe(0);
   });
 
   it('sets closeTimestamp to 0', () => {
@@ -171,10 +173,10 @@ describe('normalizeBybitKlines', () => {
     expect(kline.closeTimestamp).toBe(0);
   });
 
-  it('sets trades to 0', () => {
+  it('sets numberOfTrades to 0', () => {
     const [kline] = normalizeBybitKlines(BYBIT_RAW_KLINE_LIST);
 
-    expect(kline.trades).toBe(0);
+    expect(kline.numberOfTrades).toBe(0);
   });
 });
 
@@ -183,14 +185,16 @@ describe('normalizeBybitKlineWebSocketMessage', () => {
     const result = normalizeBybitKlineWebSocketMessage(BYBIT_RAW_WEBSOCKET_KLINE);
 
     expect(result.openTimestamp).toBe(1700000000000);
-    expect(result.open).toBe(65000);
-    expect(result.high).toBe(66000);
-    expect(result.low).toBe(64000);
-    expect(result.close).toBe(65500);
+    expect(result.openPrice).toBe(65000);
+    expect(result.highPrice).toBe(66000);
+    expect(result.lowPrice).toBe(64000);
+    expect(result.closePrice).toBe(65500);
     expect(result.volume).toBe(1234.56);
     expect(result.closeTimestamp).toBe(1700003600000);
-    expect(result.quoteVolume).toBe(80500000);
-    expect(result.trades).toBe(0);
+    expect(result.quoteAssetVolume).toBe(80500000);
+    expect(result.numberOfTrades).toBe(0);
+    expect(result.takerBuyBaseAssetVolume).toBe(0);
+    expect(result.takerBuyQuoteAssetVolume).toBe(0);
   });
 });
 

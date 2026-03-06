@@ -16,12 +16,15 @@ import {
   ExchangeConfig,
   ExchangeLogger,
   CreateOrderWebSocketArgs,
-  FetchKlinesArgs,
+  FetchPageWithLimitArgs,
   SubscribeKlinesArgs,
   PositionSide,
   MarginMode,
   OrderSide,
   OrderType,
+  FundingRateHistory,
+  TradeSymbol,
+  TradeSymbolType,
 } from '../dist/index';
 
 // --- Verify core export is a constructor ---
@@ -63,10 +66,11 @@ const bybit   = new Exchange(ExchangeName.Bybit,   mockArgs);
 
 function assertExchangeClient(client: ExchangeClient, label: string): void {
   const requiredMethods: Array<keyof ExchangeClient> = [
-    'loadMarkets',
+    'loadTradeSymbols',
     'fetchTickers',
     'fetchKlines',
     'fetchBalance',
+    'fetchFundingRateHistory',
     'fetchPosition',
     'setLeverage',
     'setMarginMode',
@@ -92,8 +96,8 @@ function assertExchangeClient(client: ExchangeClient, label: string): void {
   );
 
   console.assert(
-    typeof client.markets === 'object' && client.markets !== null,
-    `${label}.markets must be an object`,
+    typeof client.tradeSymbols === 'object' && client.tradeSymbols !== null,
+    `${label}.tradeSymbols must be an object`,
   );
 
   console.log(`  [OK] ${label} implements ExchangeClient`);
@@ -122,20 +126,25 @@ type _CheckPosition          = AssertAssignable<Position>;
 type _CheckOrder             = AssertAssignable<Order>;
 type _CheckBalance           = AssertAssignable<Balance>;
 type _CheckCreateOrderWebSocketArgs = AssertAssignable<CreateOrderWebSocketArgs>;
-type _CheckFetchKlinesArgs   = AssertAssignable<FetchKlinesArgs>;
+type _CheckFetchPageWithLimitArgs = AssertAssignable<FetchPageWithLimitArgs>;
 type _CheckSubscribeKlines   = AssertAssignable<SubscribeKlinesArgs>;
+type _CheckFundingRateHistory = AssertAssignable<FundingRateHistory>;
+type _CheckTradeSymbol       = AssertAssignable<TradeSymbol>;
+type _CheckTradeSymbolType   = AssertAssignable<TradeSymbolType>;
 
 // Use types in object literals so tsc doesn't tree-shake them
 const _kline: Kline = {
-  openTime:    0,
-  open:        0,
-  high:        0,
-  low:         0,
-  close:       0,
-  volume:      0,
-  closeTime:   0,
-  quoteVolume: 0,
-  trades:      0,
+  openTimestamp:              0,
+  openPrice:                  0,
+  highPrice:                  0,
+  lowPrice:                   0,
+  closePrice:                 0,
+  volume:                     0,
+  closeTimestamp:              0,
+  quoteAssetVolume:           0,
+  numberOfTrades:             0,
+  takerBuyBaseAssetVolume:    0,
+  takerBuyQuoteAssetVolume:   0,
 };
 
 const _ticker: Ticker = {

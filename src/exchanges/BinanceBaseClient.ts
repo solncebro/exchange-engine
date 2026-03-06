@@ -1,8 +1,8 @@
-import type { CreateOrderWebSocketArgs, ExchangeArgs, FetchKlinesArgs } from '../types/exchange';
+import type { CreateOrderWebSocketArgs, ExchangeArgs, FetchPageWithLimitArgs } from '../types/exchange';
 import type {
   Kline,
   KlineInterval,
-  MarketBySymbol,
+  TradeSymbolBySymbol,
   TickerBySymbol,
   BalanceByAsset,
   Order,
@@ -11,7 +11,7 @@ import { OrderType, TimeInForce } from '../types/common';
 import type { PublicStreamLike } from '../types/stream';
 import type { BinanceBaseHttpClient } from '../http/BinanceBaseHttpClient';
 import {
-  normalizeBinanceMarkets,
+  normalizeBinanceTradeSymbols,
   normalizeBinanceTickers,
   normalizeBinanceKlines,
   normalizeBinanceOrder,
@@ -36,10 +36,10 @@ abstract class BinanceBaseClient<T extends BinanceBaseHttpClient> extends BaseEx
     return this.publicStream;
   }
 
-  protected async fetchAndNormalizeMarkets(): Promise<MarketBySymbol> {
+  protected async fetchAndNormalizeTradeSymbols(): Promise<TradeSymbolBySymbol> {
     const raw = await this.httpClient.fetchExchangeInfo();
 
-    return normalizeBinanceMarkets(raw);
+    return normalizeBinanceTradeSymbols(raw);
   }
 
   protected async fetchAndNormalizeTickers(): Promise<TickerBySymbol> {
@@ -51,7 +51,7 @@ abstract class BinanceBaseClient<T extends BinanceBaseHttpClient> extends BaseEx
   protected async fetchAndNormalizeKlines(
     symbol: string,
     interval: KlineInterval,
-    options?: FetchKlinesArgs,
+    options?: FetchPageWithLimitArgs,
   ): Promise<Kline[]> {
     const rawKlineList = await this.httpClient.fetchKlines(symbol, interval, options);
 

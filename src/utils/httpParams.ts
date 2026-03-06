@@ -1,8 +1,8 @@
-import type { FetchKlinesArgs } from '../types/exchange';
+import type { FetchPageWithLimitArgs } from '../types/exchange';
 
 export function applyTimeRangeOptions(
   params: Record<string, string | number | boolean>,
-  options?: FetchKlinesArgs,
+  options?: FetchPageWithLimitArgs,
 ): void {
   if (options?.startTime !== undefined) {
     params.startTime = options.startTime;

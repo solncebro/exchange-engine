@@ -2,14 +2,14 @@ import type {
   Ticker,
   TickerBySymbol,
   Kline,
-  Market,
-  MarketBySymbol,
+  TradeSymbol,
+  TradeSymbolBySymbol,
   Position,
   Order,
   Balance,
   BalanceByAsset,
 } from '../types/common';
-import { MarketType, PositionSide, MarginMode } from '../types/common';
+import { TradeSymbolType, PositionSide, MarginMode } from '../types/common';
 import { BYBIT_POSITION_SIDE, BYBIT_ORDER_STATUS, BYBIT_ORDER_SIDE, BYBIT_ORDER_TYPE } from '../constants/mappings';
 import type { CreateOrderWebSocketArgs } from '../types/exchange';
 
@@ -97,28 +97,28 @@ export interface BybitWalletBalanceRaw {
 
 const LINEAR_CONTRACT_TYPES = new Set(['LinearPerpetual', 'LinearFutures']);
 
-export function normalizeBybitMarkets(rawList: BybitInstrumentInfoRaw[]): MarketBySymbol {
-  const result = new Map<string, Market>();
+export function normalizeBybitTradeSymbols(rawList: BybitInstrumentInfoRaw[]): TradeSymbolBySymbol {
+  const result = new Map<string, TradeSymbol>();
 
   for (const raw of rawList) {
     const isLinear = LINEAR_CONTRACT_TYPES.has(raw.contractType ?? '');
     const isSpot = raw.contractType === undefined || raw.contractType === '';
 
-    let marketType: MarketType = MarketType.Future;
+    let tradeSymbolType: TradeSymbolType = TradeSymbolType.Future;
 
     if (isLinear) {
-      marketType = MarketType.Swap;
+      tradeSymbolType = TradeSymbolType.Swap;
     } else if (isSpot) {
-      marketType = MarketType.Spot;
+      tradeSymbolType = TradeSymbolType.Spot;
     }
 
-    const market: Market = {
+    const tradeSymbol: TradeSymbol = {
       symbol: raw.symbol,
       baseAsset: raw.baseCoin,
       quoteAsset: raw.quoteCoin,
       settle: isLinear ? (raw.settleCoin ?? 'USDT') : '',
       isActive: raw.status === 'Trading',
-      type: marketType,
+      type: tradeSymbolType,
       isLinear,
       contractSize: parseFloat(raw.contractSize ?? '1'),
       filter: {
@@ -132,7 +132,7 @@ export function normalizeBybitMarkets(rawList: BybitInstrumentInfoRaw[]): Market
       },
     };
 
-    result.set(raw.symbol, market);
+    result.set(raw.symbol, tradeSymbol);
   }
 
   return result;
@@ -158,28 +158,32 @@ export function normalizeBybitTickers(rawList: BybitTickerRaw[]): TickerBySymbol
 export function normalizeBybitKlines(rawList: string[][]): Kline[] {
   return rawList.map((row) => ({
     openTimestamp: parseFloat(row[0]),
-    open: parseFloat(row[1]),
-    high: parseFloat(row[2]),
-    low: parseFloat(row[3]),
-    close: parseFloat(row[4]),
+    openPrice: parseFloat(row[1]),
+    highPrice: parseFloat(row[2]),
+    lowPrice: parseFloat(row[3]),
+    closePrice: parseFloat(row[4]),
     volume: parseFloat(row[5]),
     closeTimestamp: 0,
-    quoteVolume: parseFloat(row[6]),
-    trades: 0,
+    quoteAssetVolume: parseFloat(row[6]),
+    numberOfTrades: 0,
+    takerBuyBaseAssetVolume: 0,
+    takerBuyQuoteAssetVolume: 0,
   }));
 }
 
 export function normalizeBybitKlineWebSocketMessage(raw: BybitWebSocketKlineRaw): Kline {
   return {
     openTimestamp: raw.start,
-    open: parseFloat(raw.open),
-    high: parseFloat(raw.high),
-    low: parseFloat(raw.low),
-    close: parseFloat(raw.close),
+    openPrice: parseFloat(raw.open),
+    highPrice: parseFloat(raw.high),
+    lowPrice: parseFloat(raw.low),
+    closePrice: parseFloat(raw.close),
     volume: parseFloat(raw.volume),
     closeTimestamp: raw.timestamp,
-    quoteVolume: parseFloat(raw.turnover),
-    trades: 0,
+    quoteAssetVolume: parseFloat(raw.turnover),
+    numberOfTrades: 0,
+    takerBuyBaseAssetVolume: 0,
+    takerBuyQuoteAssetVolume: 0,
   };
 }
 

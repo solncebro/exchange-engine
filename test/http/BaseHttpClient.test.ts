@@ -25,6 +25,10 @@ class TestHttpClient extends BaseHttpClient {
     return this.put<T>(url, data, headers);
   }
 
+  testPutWithParams<T>(url: string, params?: Record<string, string | number | boolean>, headers?: Record<string, string>) {
+    return this.putWithParams<T>(url, params, headers);
+  }
+
   testDelete<T>(url: string, params?: Record<string, string | number | boolean>, headers?: Record<string, string>) {
     return this.delete<T>(url, params, headers);
   }
@@ -203,6 +207,13 @@ describe('BaseHttpClient', () => {
         headers: { 'X-Key': 'val' },
       });
     });
+
+    it('does not retry on error', async () => {
+      mockInstance.post.mockRejectedValue(createAxiosError(500));
+
+      await expect(client.testPostWithParams('/test')).rejects.toThrow();
+      expect(mockInstance.post).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe('put', () => {
@@ -213,6 +224,33 @@ describe('BaseHttpClient', () => {
 
       expect(result).toBe('updated');
     });
+
+    it('does not retry on error', async () => {
+      mockInstance.put.mockRejectedValue(createAxiosError(500));
+
+      await expect(client.testPut('/test')).rejects.toThrow();
+      expect(mockInstance.put).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('putWithParams', () => {
+    it('sends params as query, not body', async () => {
+      mockInstance.put.mockResolvedValue({ data: 'ok' });
+
+      await client.testPutWithParams('/test', { symbol: 'BTCUSDT' }, { 'X-Key': 'val' });
+
+      expect(mockInstance.put).toHaveBeenCalledWith('/test', null, {
+        params: { symbol: 'BTCUSDT' },
+        headers: { 'X-Key': 'val' },
+      });
+    });
+
+    it('does not retry on error', async () => {
+      mockInstance.put.mockRejectedValue(createAxiosError(500));
+
+      await expect(client.testPutWithParams('/test')).rejects.toThrow();
+      expect(mockInstance.put).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe('delete', () => {
@@ -222,6 +260,13 @@ describe('BaseHttpClient', () => {
       const result = await client.testDelete('/test', { id: 1 });
 
       expect(result).toBe('deleted');
+    });
+
+    it('does not retry on error', async () => {
+      mockInstance.delete.mockRejectedValue(createAxiosError(500));
+
+      await expect(client.testDelete('/test')).rejects.toThrow();
+      expect(mockInstance.delete).toHaveBeenCalledTimes(1);
     });
   });
 

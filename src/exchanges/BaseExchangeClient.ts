@@ -1,14 +1,14 @@
 import type {
   ExchangeClient,
   ExchangeArgs,
-  FetchKlinesArgs,
+  FetchPageWithLimitArgs,
   SubscribeKlinesArgs,
 } from '../types/exchange';
 import type {
   ExchangeLogger,
   Kline,
   KlineInterval,
-  MarketBySymbol,
+  TradeSymbolBySymbol,
   TickerBySymbol,
   BalanceByAsset,
 } from '../types/common';
@@ -18,7 +18,7 @@ import { amountToPrecision, priceToPrecision } from '../precision/precision';
 
 abstract class BaseExchangeClient implements ExchangeClient {
   readonly apiKey: string;
-  readonly markets: MarketBySymbol = new Map();
+  readonly tradeSymbols: TradeSymbolBySymbol = new Map();
 
   protected readonly logger: ExchangeLogger;
   protected readonly onNotify?: (message: string) => void | Promise<void>;
@@ -33,31 +33,31 @@ abstract class BaseExchangeClient implements ExchangeClient {
   }
 
   protected abstract getPublicStream(): PublicStreamLike;
-  protected abstract fetchAndNormalizeMarkets(): Promise<MarketBySymbol>;
+  protected abstract fetchAndNormalizeTradeSymbols(): Promise<TradeSymbolBySymbol>;
   protected abstract fetchAndNormalizeTickers(): Promise<TickerBySymbol>;
   protected abstract fetchAndNormalizeKlines(
     symbol: string,
     interval: KlineInterval,
-    options?: FetchKlinesArgs,
+    options?: FetchPageWithLimitArgs,
   ): Promise<Kline[]>;
   protected abstract fetchAndNormalizeBalance(): Promise<BalanceByAsset>;
 
-  async loadMarkets(shouldReload: boolean = false): Promise<MarketBySymbol> {
-    if (!shouldReload && this.markets.size > 0) {
-      return this.markets;
+  async loadTradeSymbols(shouldReload: boolean = false): Promise<TradeSymbolBySymbol> {
+    if (!shouldReload && this.tradeSymbols.size > 0) {
+      return this.tradeSymbols;
     }
 
-    this.logger.info(`Loading ${this.marketLabel} markets`);
+    this.logger.info(`Loading ${this.marketLabel} trade symbols`);
 
-    const normalized = await this.fetchAndNormalizeMarkets();
+    const normalized = await this.fetchAndNormalizeTradeSymbols();
 
-    for (const [symbol, market] of normalized) {
-      this.markets.set(symbol, market);
+    for (const [symbol, tradeSymbol] of normalized) {
+      this.tradeSymbols.set(symbol, tradeSymbol);
     }
 
-    this.logger.info(`Loaded ${this.markets.size} ${this.marketLabel} markets`);
+    this.logger.info(`Loaded ${this.tradeSymbols.size} ${this.marketLabel} trade symbols`);
 
-    return this.markets;
+    return this.tradeSymbols;
   }
 
   async fetchTickers(): Promise<TickerBySymbol> {
@@ -69,7 +69,7 @@ abstract class BaseExchangeClient implements ExchangeClient {
   async fetchKlines(
     symbol: string,
     interval: KlineInterval,
-    options?: FetchKlinesArgs,
+    options?: FetchPageWithLimitArgs,
   ): Promise<Kline[]> {
     this.logger.debug(`Fetching klines for ${symbol} ${interval}`);
 
@@ -108,54 +108,55 @@ abstract class BaseExchangeClient implements ExchangeClient {
   }
 
   amountToPrecision(symbol: string, amount: number): string {
-    const market = this.markets.get(symbol);
+    const tradeSymbol = this.tradeSymbols.get(symbol);
 
-    if (!market) {
-      this.logger.warn(`Market ${symbol} not found, using raw amount`);
+    if (!tradeSymbol) {
+      this.logger.warn(`TradeSymbol ${symbol} not found, using raw amount`);
 
       return String(amount);
     }
 
-    return amountToPrecision(market, amount);
+    return amountToPrecision(tradeSymbol, amount);
   }
 
   priceToPrecision(symbol: string, price: number): string {
-    const market = this.markets.get(symbol);
+    const tradeSymbol = this.tradeSymbols.get(symbol);
 
-    if (!market) {
-      this.logger.warn(`Market ${symbol} not found, using raw price`);
+    if (!tradeSymbol) {
+      this.logger.warn(`TradeSymbol ${symbol} not found, using raw price`);
 
       return String(price);
     }
 
-    return priceToPrecision(market, price);
+    return priceToPrecision(tradeSymbol, price);
   }
 
   getMinOrderQty(symbol: string): number {
-    const market = this.markets.get(symbol);
+    const tradeSymbol = this.tradeSymbols.get(symbol);
 
-    if (!market) {
-      this.logger.warn(`Market ${symbol} not found, returning 0 for minOrderQty`);
+    if (!tradeSymbol) {
+      this.logger.warn(`TradeSymbol ${symbol} not found, returning 0 for minOrderQty`);
 
       return 0;
     }
 
-    return parseFloat(market.filter.minQty);
+    return parseFloat(tradeSymbol.filter.minQty);
   }
 
   getMinNotional(symbol: string): number {
-    const market = this.markets.get(symbol);
+    const tradeSymbol = this.tradeSymbols.get(symbol);
 
-    if (!market) {
-      this.logger.warn(`Market ${symbol} not found, returning 0 for minNotional`);
+    if (!tradeSymbol) {
+      this.logger.warn(`TradeSymbol ${symbol} not found, returning 0 for minNotional`);
 
       return 0;
     }
 
-    return parseFloat(market.filter.minNotional);
+    return parseFloat(tradeSymbol.filter.minNotional);
   }
 
   abstract createOrderWebSocket(...args: Parameters<ExchangeClient['createOrderWebSocket']>): ReturnType<ExchangeClient['createOrderWebSocket']>;
+  abstract fetchFundingRateHistory(...args: Parameters<ExchangeClient['fetchFundingRateHistory']>): ReturnType<ExchangeClient['fetchFundingRateHistory']>;
   abstract fetchPosition(...args: Parameters<ExchangeClient['fetchPosition']>): ReturnType<ExchangeClient['fetchPosition']>;
   abstract setLeverage(...args: Parameters<ExchangeClient['setLeverage']>): ReturnType<ExchangeClient['setLeverage']>;
   abstract setMarginMode(...args: Parameters<ExchangeClient['setMarginMode']>): ReturnType<ExchangeClient['setMarginMode']>;

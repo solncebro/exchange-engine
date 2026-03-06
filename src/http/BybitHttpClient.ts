@@ -1,5 +1,5 @@
 import type { ExchangeLogger } from '../types/common';
-import type { FetchKlinesArgs } from '../types/exchange';
+import type { FetchPageWithLimitArgs } from '../types/exchange';
 import type {
   BybitInstrumentInfoRaw,
   BybitTickerRaw,
@@ -42,7 +42,7 @@ interface FetchBybitKlineArgs {
   category: string;
   symbol: string;
   interval: string;
-  options?: FetchKlinesArgs;
+  options?: FetchPageWithLimitArgs;
 }
 
 interface SetBybitLeverageArgs {
@@ -175,7 +175,7 @@ export class BybitHttpClient extends BaseHttpClient {
   async fetchFundingHistory(
     category: string,
     symbol: string,
-    options?: FetchKlinesArgs,
+    options?: FetchPageWithLimitArgs,
   ): Promise<BybitListResponse<Record<string, unknown>>> {
     const params: Record<string, string | number | boolean> = { category, symbol };
     applyTimeRangeOptions(params, options);

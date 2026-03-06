@@ -26,6 +26,12 @@ function createClient() {
 }
 
 describe('BinanceSpot', () => {
+  it('throws "Not supported" for fetchFundingRateHistory', async () => {
+    const { client } = createClient();
+
+    await expect(client.fetchFundingRateHistory()).rejects.toThrow('Not supported for spot market');
+  });
+
   it('throws "Not supported" for fetchPosition', async () => {
     const { client } = createClient();
 

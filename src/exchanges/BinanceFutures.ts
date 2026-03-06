@@ -1,8 +1,8 @@
-import type { ExchangeArgs } from '../types/exchange';
-import type { Position } from '../types/common';
+import type { ExchangeArgs, FetchPageWithLimitArgs } from '../types/exchange';
+import type { Position, FundingRateHistory } from '../types/common';
 import { MarginMode } from '../types/common';
 import { BinanceFuturesHttpClient } from '../http/BinanceFuturesHttpClient';
-import { normalizeBinancePosition } from '../normalizers/binanceNormalizer';
+import { normalizeBinancePosition, normalizeBinanceFundingRateHistory } from '../normalizers/binanceNormalizer';
 import { BinanceFuturesPublicStream } from '../ws/BinanceFuturesPublicStream';
 import {
   BINANCE_KLINE_LIMIT_FUTURES,
@@ -36,6 +36,16 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
     const publicStream = new BinanceFuturesPublicStream(webSocketCombinedUrl, args.logger, args.onNotify);
 
     super(args, httpClient, publicStream);
+  }
+
+  async fetchFundingRateHistory(
+    symbol: string,
+    options?: FetchPageWithLimitArgs,
+  ): Promise<FundingRateHistory[]> {
+    this.logger.debug(`Fetching funding rate history for ${symbol}`);
+    const raw = await this.httpClient.fetchFundingRateHistory(symbol, options);
+
+    return normalizeBinanceFundingRateHistory(raw);
   }
 
   async fetchPosition(symbol: string): Promise<Position> {

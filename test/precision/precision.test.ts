@@ -1,5 +1,5 @@
 import { countDecimalPlaces, roundToStep, amountToPrecision, priceToPrecision } from '../../src/precision/precision';
-import { BTCUSDT_MARKET, ETHUSDT_MARKET } from '../fixtures/mockMarket';
+import { BTCUSDT_TRADE_SYMBOL, ETHUSDT_TRADE_SYMBOL } from '../fixtures/mockTradeSymbol';
 
 describe('countDecimalPlaces', () => {
   it('returns 0 for integer step "1"', () => {
@@ -55,13 +55,13 @@ describe('roundToStep', () => {
 
 describe('amountToPrecision', () => {
   it('rounds amount using market stepSize', () => {
-    const result = amountToPrecision(BTCUSDT_MARKET, 0.1234);
+    const result = amountToPrecision(BTCUSDT_TRADE_SYMBOL, 0.1234);
 
     expect(result).toBe('0.123');
   });
 
   it('uses ETHUSDT stepSize', () => {
-    const result = amountToPrecision(ETHUSDT_MARKET, 1.567);
+    const result = amountToPrecision(ETHUSDT_TRADE_SYMBOL, 1.567);
 
     expect(result).toBe('1.57');
   });
@@ -69,13 +69,13 @@ describe('amountToPrecision', () => {
 
 describe('priceToPrecision', () => {
   it('rounds price using market tickSize', () => {
-    const result = priceToPrecision(BTCUSDT_MARKET, 65432.15);
+    const result = priceToPrecision(BTCUSDT_TRADE_SYMBOL, 65432.15);
 
     expect(result).toBe('65432.2');
   });
 
   it('uses ETHUSDT tickSize', () => {
-    const result = priceToPrecision(ETHUSDT_MARKET, 3456.789);
+    const result = priceToPrecision(ETHUSDT_TRADE_SYMBOL, 3456.789);
 
     expect(result).toBe('3456.79');
   });

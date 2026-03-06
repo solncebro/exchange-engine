@@ -1,13 +1,14 @@
 import {
-  normalizeBinanceMarkets,
+  normalizeBinanceTradeSymbols,
   normalizeBinanceTickers,
   normalizeBinanceKlines,
   normalizeBinanceKlineWebSocketMessage,
   normalizeBinancePosition,
   normalizeBinanceOrder,
   normalizeBinanceBalance,
+  normalizeBinanceFundingRateHistory,
 } from '../../src/normalizers/binanceNormalizer';
-import { MarketType, PositionSide, MarginMode } from '../../src/types/common';
+import { TradeSymbolType, PositionSide, MarginMode } from '../../src/types/common';
 import {
   BINANCE_RAW_EXCHANGE_INFO,
   BINANCE_RAW_TICKER_LIST,
@@ -16,47 +17,48 @@ import {
   BINANCE_RAW_POSITION_RISK,
   BINANCE_RAW_ORDER_RESPONSE,
   BINANCE_RAW_ACCOUNT,
+  BINANCE_RAW_FUNDING_RATE_HISTORY,
 } from '../fixtures/binanceRaw';
 
-describe('normalizeBinanceMarkets', () => {
+describe('normalizeBinanceTradeSymbols', () => {
   it('returns a Map', () => {
-    const result = normalizeBinanceMarkets(BINANCE_RAW_EXCHANGE_INFO);
+    const result = normalizeBinanceTradeSymbols(BINANCE_RAW_EXCHANGE_INFO);
 
     expect(result).toBeInstanceOf(Map);
   });
 
   it('contains correct number of symbols', () => {
-    const result = normalizeBinanceMarkets(BINANCE_RAW_EXCHANGE_INFO);
+    const result = normalizeBinanceTradeSymbols(BINANCE_RAW_EXCHANGE_INFO);
 
     expect(result.size).toBe(2);
   });
 
   it('marks PERPETUAL contract as swap/linear', () => {
-    const result = normalizeBinanceMarkets(BINANCE_RAW_EXCHANGE_INFO);
+    const result = normalizeBinanceTradeSymbols(BINANCE_RAW_EXCHANGE_INFO);
     const btc = result.get('BTCUSDT')!;
 
-    expect(btc.type).toBe(MarketType.Swap);
+    expect(btc.type).toBe(TradeSymbolType.Swap);
     expect(btc.isLinear).toBe(true);
     expect(btc.settle).toBe('USDT');
   });
 
   it('marks spot symbol correctly', () => {
-    const result = normalizeBinanceMarkets(BINANCE_RAW_EXCHANGE_INFO);
+    const result = normalizeBinanceTradeSymbols(BINANCE_RAW_EXCHANGE_INFO);
     const eth = result.get('ETHBTC')!;
 
-    expect(eth.type).toBe(MarketType.Spot);
+    expect(eth.type).toBe(TradeSymbolType.Spot);
     expect(eth.isLinear).toBe(false);
     expect(eth.settle).toBe('');
   });
 
   it('extracts PRICE_FILTER tickSize', () => {
-    const result = normalizeBinanceMarkets(BINANCE_RAW_EXCHANGE_INFO);
+    const result = normalizeBinanceTradeSymbols(BINANCE_RAW_EXCHANGE_INFO);
 
     expect(result.get('BTCUSDT')!.filter.tickSize).toBe('0.10');
   });
 
   it('extracts LOT_SIZE filter fields', () => {
-    const result = normalizeBinanceMarkets(BINANCE_RAW_EXCHANGE_INFO);
+    const result = normalizeBinanceTradeSymbols(BINANCE_RAW_EXCHANGE_INFO);
     const filter = result.get('BTCUSDT')!.filter;
 
     expect(filter.stepSize).toBe('0.001');
@@ -65,26 +67,26 @@ describe('normalizeBinanceMarkets', () => {
   });
 
   it('extracts MIN_NOTIONAL from notional field', () => {
-    const result = normalizeBinanceMarkets(BINANCE_RAW_EXCHANGE_INFO);
+    const result = normalizeBinanceTradeSymbols(BINANCE_RAW_EXCHANGE_INFO);
 
     expect(result.get('BTCUSDT')!.filter.minNotional).toBe('5');
   });
 
   it('extracts NOTIONAL from minNotional field as fallback', () => {
-    const result = normalizeBinanceMarkets(BINANCE_RAW_EXCHANGE_INFO);
+    const result = normalizeBinanceTradeSymbols(BINANCE_RAW_EXCHANGE_INFO);
 
     expect(result.get('ETHBTC')!.filter.minNotional).toBe('0.0001');
   });
 
   it('sets isActive=true for TRADING status', () => {
-    const result = normalizeBinanceMarkets(BINANCE_RAW_EXCHANGE_INFO);
+    const result = normalizeBinanceTradeSymbols(BINANCE_RAW_EXCHANGE_INFO);
 
     expect(result.get('BTCUSDT')!.isActive).toBe(true);
   });
 
   it('sets isActive=false for non-TRADING status', () => {
     const info = { symbols: [{ ...BINANCE_RAW_EXCHANGE_INFO.symbols[0], status: 'BREAK' }] };
-    const result = normalizeBinanceMarkets(info);
+    const result = normalizeBinanceTradeSymbols(info);
 
     expect(result.get('BTCUSDT')!.isActive).toBe(false);
   });
@@ -134,14 +136,16 @@ describe('normalizeBinanceKlines', () => {
     const [kline] = normalizeBinanceKlines(BINANCE_RAW_KLINE_LIST);
 
     expect(kline.openTimestamp).toBe(1700000000000);
-    expect(kline.open).toBe(65000);
-    expect(kline.high).toBe(66000);
-    expect(kline.low).toBe(64000);
-    expect(kline.close).toBe(65500);
+    expect(kline.openPrice).toBe(65000);
+    expect(kline.highPrice).toBe(66000);
+    expect(kline.lowPrice).toBe(64000);
+    expect(kline.closePrice).toBe(65500);
     expect(kline.volume).toBe(1234.56);
     expect(kline.closeTimestamp).toBe(1700003600000);
-    expect(kline.quoteVolume).toBe(80500000);
-    expect(kline.trades).toBe(5000);
+    expect(kline.quoteAssetVolume).toBe(80500000);
+    expect(kline.numberOfTrades).toBe(5000);
+    expect(kline.takerBuyBaseAssetVolume).toBe(600);
+    expect(kline.takerBuyQuoteAssetVolume).toBe(39000000);
   });
 });
 
@@ -150,14 +154,16 @@ describe('normalizeBinanceKlineWebSocketMessage', () => {
     const result = normalizeBinanceKlineWebSocketMessage(BINANCE_RAW_WEBSOCKET_KLINE);
 
     expect(result.openTimestamp).toBe(1700000000000);
-    expect(result.open).toBe(65000);
-    expect(result.high).toBe(66000);
-    expect(result.low).toBe(64000);
-    expect(result.close).toBe(65500);
+    expect(result.openPrice).toBe(65000);
+    expect(result.highPrice).toBe(66000);
+    expect(result.lowPrice).toBe(64000);
+    expect(result.closePrice).toBe(65500);
     expect(result.volume).toBe(1234.56);
     expect(result.closeTimestamp).toBe(1700003600000);
-    expect(result.quoteVolume).toBe(80500000);
-    expect(result.trades).toBe(5000);
+    expect(result.quoteAssetVolume).toBe(80500000);
+    expect(result.numberOfTrades).toBe(5000);
+    expect(result.takerBuyBaseAssetVolume).toBe(600);
+    expect(result.takerBuyQuoteAssetVolume).toBe(39000000);
   });
 });
 
@@ -294,5 +300,49 @@ describe('normalizeBinanceBalance', () => {
     expect(usdt.free).toBe(1000.5);
     expect(usdt.locked).toBe(200);
     expect(usdt.total).toBe(1200.5);
+  });
+});
+
+describe('normalizeBinanceFundingRateHistory', () => {
+  it('returns array of FundingRateHistory objects', () => {
+    const result = normalizeBinanceFundingRateHistory(BINANCE_RAW_FUNDING_RATE_HISTORY);
+
+    expect(result).toHaveLength(2);
+  });
+
+  it('parses fundingRate as number', () => {
+    const [first] = normalizeBinanceFundingRateHistory(BINANCE_RAW_FUNDING_RATE_HISTORY);
+
+    expect(first.fundingRate).toBe(0.0001);
+  });
+
+  it('parses negative fundingRate', () => {
+    const [, second] = normalizeBinanceFundingRateHistory(BINANCE_RAW_FUNDING_RATE_HISTORY);
+
+    expect(second.fundingRate).toBe(-0.00005);
+  });
+
+  it('preserves fundingTime', () => {
+    const [first] = normalizeBinanceFundingRateHistory(BINANCE_RAW_FUNDING_RATE_HISTORY);
+
+    expect(first.fundingTime).toBe(1700006400000);
+  });
+
+  it('parses markPrice when present', () => {
+    const [first] = normalizeBinanceFundingRateHistory(BINANCE_RAW_FUNDING_RATE_HISTORY);
+
+    expect(first.markPrice).toBe(65500);
+  });
+
+  it('returns null markPrice for empty string', () => {
+    const [, second] = normalizeBinanceFundingRateHistory(BINANCE_RAW_FUNDING_RATE_HISTORY);
+
+    expect(second.markPrice).toBeNull();
+  });
+
+  it('preserves symbol', () => {
+    const [first] = normalizeBinanceFundingRateHistory(BINANCE_RAW_FUNDING_RATE_HISTORY);
+
+    expect(first.symbol).toBe('BTCUSDT');
   });
 });

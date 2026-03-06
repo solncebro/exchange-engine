@@ -1,4 +1,4 @@
-import type { Market } from '../types/common';
+import type { TradeSymbol } from '../types/common';
 
 export function countDecimalPlaces(step: string): number {
   const parts = step.split('.');
@@ -23,10 +23,10 @@ export function roundToStep(value: number, step: string): string {
   return rounded.toFixed(decimals);
 }
 
-export function amountToPrecision(market: Market, amount: number): string {
-  return roundToStep(amount, market.filter.stepSize);
+export function amountToPrecision(tradeSymbol: TradeSymbol, amount: number): string {
+  return roundToStep(amount, tradeSymbol.filter.stepSize);
 }
 
-export function priceToPrecision(market: Market, price: number): string {
-  return roundToStep(price, market.filter.tickSize);
+export function priceToPrecision(tradeSymbol: TradeSymbol, price: number): string {
+  return roundToStep(price, tradeSymbol.filter.tickSize);
 }

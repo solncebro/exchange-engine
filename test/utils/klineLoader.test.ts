@@ -2,17 +2,19 @@ import type { Kline } from '../../src/types/common';
 import { loadKlinesInChunks } from '../../src/utils/klineLoader';
 import { createMockLogger } from '../fixtures/mockLogger';
 
-function createMockKline(symbol: string): Kline {
+function createMockKline(_symbol: string): Kline {
   return {
     openTimestamp: 1700000000000,
-    open: 100,
-    high: 110,
-    low: 90,
-    close: 105,
+    openPrice: 100,
+    highPrice: 110,
+    lowPrice: 90,
+    closePrice: 105,
     volume: 1000,
     closeTimestamp: 1700003600000,
-    quoteVolume: 105000,
-    trades: 500,
+    quoteAssetVolume: 105000,
+    numberOfTrades: 500,
+    takerBuyBaseAssetVolume: 400,
+    takerBuyQuoteAssetVolume: 42000,
   };
 }
 

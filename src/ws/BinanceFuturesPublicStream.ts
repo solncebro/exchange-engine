@@ -1,7 +1,7 @@
 import type { RawData } from 'ws';
 import { ReliableWebSocket } from '@solncebro/websocket-engine';
 
-import type { ExchangeLogger, Kline, KlineInterval, TickerBySymbol } from '../types/common';
+import type { ExchangeLogger, KlineInterval, TickerBySymbol } from '../types/common';
 import type { KlineHandler } from '../types/exchange';
 import { normalizeBinanceKlineWebSocketMessage, normalizeBinanceTickers } from '../normalizers/binanceNormalizer';
 import type { BinanceTicker24hrRaw, BinanceWebSocketKlineRaw } from '../normalizers/binanceNormalizer';
@@ -66,11 +66,9 @@ class BinanceFuturesPublicStream {
   subscribeKlines(symbol: string, interval: KlineInterval, handler: KlineHandler): void {
     const key = `${symbol}_${interval}`;
 
-    if (!this.klineHandlerByKey.has(key)) {
-      this.klineHandlerByKey.set(key, new Set());
-    }
-
-    this.klineHandlerByKey.get(key)!.add(handler);
+    const handlerSet = this.klineHandlerByKey.get(key) ?? new Set<KlineHandler>();
+    handlerSet.add(handler);
+    this.klineHandlerByKey.set(key, handlerSet);
 
     if (this.connectionList.length > 0) {
       const binanceInterval = interval;
@@ -143,9 +141,7 @@ class BinanceFuturesPublicStream {
   private createConnection(streamList: string[], index: number): void {
     const label = `BinanceFuturesPublicStream-${index}`;
     const url = `${this.webSocketCombinedUrl}?streams=${streamList.join('/')}`;
-    const connection: FuturesConnection = { webSocket: null!, label, streamList };
-
-    connection.webSocket = new ReliableWebSocket<BinanceCombinedMessage>({
+    const webSocket = new ReliableWebSocket<BinanceCombinedMessage>({
       label,
       url,
       logger: this.logger,
@@ -157,7 +153,7 @@ class BinanceFuturesPublicStream {
       },
     });
 
-    this.connectionList.push(connection);
+    this.connectionList.push({ webSocket, label, streamList });
   }
 
   private addStreamToConnection(stream: string): void {

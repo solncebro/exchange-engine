@@ -1,12 +1,12 @@
 import type { RawData } from 'ws';
 import { ReliableWebSocket } from '@solncebro/websocket-engine';
 
-import type { ExchangeLogger, Kline, KlineInterval, TickerBySymbol } from '../types/common';
+import type { ExchangeLogger, KlineInterval, TickerBySymbol } from '../types/common';
 import type { KlineHandler } from '../types/exchange';
 import { normalizeBybitKlineWebSocketMessage, normalizeBybitTickers } from '../normalizers/bybitNormalizer';
 import type { BybitTickerRaw, BybitWebSocketKlineRaw } from '../normalizers/bybitNormalizer';
 import { BYBIT_KLINE_INTERVAL } from '../constants/bybit';
-import { isBybitPongResponse, BYBIT_HEARTBEAT_CONFIG, BYBIT_PING_INTERVAL } from './bybitWebSocketUtils';
+import { BYBIT_HEARTBEAT_CONFIG, BYBIT_PING_INTERVAL } from './bybitWebSocketUtils';
 import type { BybitBaseWebSocketMessage } from './bybitWebSocketUtils';
 
 interface BybitWebSocketMessage extends BybitBaseWebSocketMessage {
@@ -62,11 +62,9 @@ class BybitPublicStream {
   subscribeKlines(symbol: string, interval: KlineInterval, handler: KlineHandler): void {
     const key = `${symbol}_${interval}`;
 
-    if (!this.klineHandlerByKey.has(key)) {
-      this.klineHandlerByKey.set(key, new Set());
-    }
-
-    this.klineHandlerByKey.get(key)!.add(handler);
+    const handlerSet = this.klineHandlerByKey.get(key) ?? new Set<KlineHandler>();
+    handlerSet.add(handler);
+    this.klineHandlerByKey.set(key, handlerSet);
 
     const bybitInterval = BYBIT_KLINE_INTERVAL[interval];
     const topic = `kline.${bybitInterval}.${symbol}`;
@@ -198,7 +196,7 @@ class BybitPublicStream {
 
   private sendSubscribe(topicList: string[]): void {
     try {
-      this.webSocket!.sendToConnectedSocket({ op: 'subscribe', args: topicList });
+      this.webSocket?.sendToConnectedSocket({ op: 'subscribe', args: topicList });
     } catch {
       this.logger.warn('BybitPublicStream: failed to subscribe, socket not connected');
     }
@@ -206,7 +204,7 @@ class BybitPublicStream {
 
   private sendUnsubscribe(topicList: string[]): void {
     try {
-      this.webSocket!.sendToConnectedSocket({ op: 'unsubscribe', args: topicList });
+      this.webSocket?.sendToConnectedSocket({ op: 'unsubscribe', args: topicList });
     } catch {
       this.logger.warn('BybitPublicStream: failed to unsubscribe, socket not connected');
     }

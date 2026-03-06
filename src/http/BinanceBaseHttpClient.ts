@@ -5,7 +5,7 @@ import type {
   BinanceOrderResponseRaw,
   BinanceAccountRaw,
 } from '../normalizers/binanceNormalizer';
-import type { FetchKlinesArgs } from '../types/exchange';
+import type { FetchPageWithLimitArgs } from '../types/exchange';
 import { buildBinanceSignedParams, buildBinanceAuthHeaders } from '../auth/binanceAuth';
 import { applyTimeRangeOptions } from '../utils/httpParams';
 import { BaseHttpClient } from './BaseHttpClient';
@@ -97,7 +97,7 @@ abstract class BinanceBaseHttpClient extends BaseHttpClient {
   async fetchKlines(
     symbol: string,
     interval: string,
-    options?: FetchKlinesArgs,
+    options?: FetchPageWithLimitArgs,
   ): Promise<unknown[][]> {
     const params: Record<string, string | number | boolean> = { symbol, interval };
     applyTimeRangeOptions(params, options);

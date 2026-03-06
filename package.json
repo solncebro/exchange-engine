@@ -1,6 +1,6 @@
 {
   "name": "@solncebro/exchange-engine",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "Universal TypeScript client library for Binance and Bybit with unified API, type safety, and WebSocket support",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -24,8 +24,9 @@
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "test:smoke": "ts-node --project test/tsconfig.json test/smoke.test.ts",
+    "lint": "eslint src/ test/",
     "type-check": "tsc -p tsconfig.json --noEmit",
-    "prepublishOnly": "npm run test && npm run build && npm run type-check"
+    "prepublishOnly": "yarn lint && yarn test && yarn build && yarn type-check"
   },
   "keywords": [
     "exchange",
@@ -64,6 +65,9 @@
     "@types/jest": "^30.0.0",
     "@types/node": "^22.0.0",
     "@types/ws": "^8.18.1",
+    "@typescript-eslint/eslint-plugin": "^8.56.1",
+    "@typescript-eslint/parser": "^8.56.1",
+    "eslint": "^10.0.2",
     "jest": "^30.2.0",
     "ts-jest": "^29.4.6",
     "ts-node": "^10.9.2",

@@ -3,11 +3,12 @@ import type {
   ExchangeLogger,
   KlineInterval,
   Kline,
-  MarketBySymbol,
+  TradeSymbolBySymbol,
   Order,
   TickerBySymbol,
   BalanceByAsset,
   Position,
+  FundingRateHistory,
 } from './common';
 import { MarginMode, OrderSide, OrderType } from './common';
 
@@ -26,7 +27,7 @@ export interface CreateOrderWebSocketArgs {
   params?: Record<string, unknown>;
 }
 
-export interface FetchKlinesArgs {
+export interface FetchPageWithLimitArgs {
   startTime?: number;
   endTime?: number;
   limit?: number;
@@ -42,13 +43,14 @@ export interface SubscribeKlinesArgs {
 
 export interface ExchangeClient {
   readonly apiKey: string;
-  readonly markets: MarketBySymbol;
+  readonly tradeSymbols: TradeSymbolBySymbol;
 
-  loadMarkets(shouldReload?: boolean): Promise<MarketBySymbol>;
+  loadTradeSymbols(shouldReload?: boolean): Promise<TradeSymbolBySymbol>;
   fetchTickers(): Promise<TickerBySymbol>;
-  fetchKlines(symbol: string, interval: KlineInterval, options?: FetchKlinesArgs): Promise<Kline[]>;
+  fetchKlines(symbol: string, interval: KlineInterval, options?: FetchPageWithLimitArgs): Promise<Kline[]>;
   fetchAllKlines(symbolList: string[], interval: KlineInterval): Promise<Map<string, Kline[]>>;
   fetchBalance(): Promise<BalanceByAsset>;
+  fetchFundingRateHistory(symbol: string, options?: FetchPageWithLimitArgs): Promise<FundingRateHistory[]>;
   fetchPosition(symbol: string): Promise<Position>;
   setLeverage(leverage: number, symbol: string): Promise<void>;
   setMarginMode(marginMode: MarginMode, symbol: string): Promise<void>;
