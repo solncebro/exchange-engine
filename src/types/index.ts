@@ -4,6 +4,7 @@ export type {
   OrderType,
   MarginMode,
   PositionSide,
+  PositionMode,
   TradeSymbolType,
   TimeInForce,
   KlineInterval,
@@ -20,6 +21,7 @@ export type {
   Balance,
   BalanceByAsset,
   FundingRateHistory,
+  FundingInfo,
 } from './common';
 
 export type {

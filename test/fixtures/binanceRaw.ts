@@ -6,6 +6,7 @@ import type {
   BinanceOrderResponseRaw,
   BinanceAccountRaw,
   BinanceFundingRateHistoryRaw,
+  BinanceFundingInfoRaw,
 } from '../../src/normalizers/binanceNormalizer';
 
 export const BINANCE_RAW_EXCHANGE_INFO: BinanceExchangeInfoRaw = {
@@ -98,3 +99,12 @@ export const BINANCE_RAW_FUNDING_RATE_HISTORY: BinanceFundingRateHistoryRaw[] = 
   { symbol: 'BTCUSDT', fundingRate: '0.00010000', fundingTime: 1700006400000, markPrice: '65500.00' },
   { symbol: 'BTCUSDT', fundingRate: '-0.00005000', fundingTime: 1700035200000, markPrice: '' },
 ];
+
+export const BINANCE_RAW_FUNDING_INFO: BinanceFundingInfoRaw[] = [
+  { symbol: 'BTCUSDT', adjustedFundingRateCap: '0.02000000', adjustedFundingRateFloor: '-0.02000000', fundingIntervalHours: 8 },
+  { symbol: 'ETHUSDT', adjustedFundingRateCap: '0.01500000', adjustedFundingRateFloor: '-0.01500000', fundingIntervalHours: 4 },
+];
+
+export const BINANCE_RAW_POSITION_MODE_HEDGE = { dualSidePosition: true };
+
+export const BINANCE_RAW_POSITION_MODE_ONE_WAY = { dualSidePosition: false };

@@ -1,8 +1,8 @@
 import type { ExchangeArgs, FetchPageWithLimitArgs } from '../types/exchange';
-import type { Position, FundingRateHistory } from '../types/common';
-import { MarginMode } from '../types/common';
+import type { Position, FundingRateHistory, FundingInfo } from '../types/common';
+import { MarginMode, PositionMode } from '../types/common';
 import { BinanceFuturesHttpClient } from '../http/BinanceFuturesHttpClient';
-import { normalizeBinancePosition, normalizeBinanceFundingRateHistory } from '../normalizers/binanceNormalizer';
+import { normalizeBinancePosition, normalizeBinanceFundingRateHistory, normalizeBinanceFundingInfo } from '../normalizers/binanceNormalizer';
 import { BinanceFuturesPublicStream } from '../ws/BinanceFuturesPublicStream';
 import {
   BINANCE_KLINE_LIMIT_FUTURES,
@@ -46,6 +46,20 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
     const raw = await this.httpClient.fetchFundingRateHistory(symbol, options);
 
     return normalizeBinanceFundingRateHistory(raw);
+  }
+
+  async fetchFundingInfo(symbol?: string): Promise<FundingInfo[]> {
+    this.logger.debug('Fetching funding info');
+    const raw = await this.httpClient.fetchFundingInfo(symbol);
+
+    return normalizeBinanceFundingInfo(raw);
+  }
+
+  async fetchPositionMode(): Promise<PositionMode> {
+    this.logger.debug('Fetching position mode');
+    const raw = await this.httpClient.fetchPositionMode();
+
+    return raw.dualSidePosition === true ? PositionMode.Hedge : PositionMode.OneWay;
   }
 
   async fetchPosition(symbol: string): Promise<Position> {

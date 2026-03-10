@@ -1,4 +1,4 @@
-import type { BinancePositionRiskRaw, BinanceFundingRateHistoryRaw } from '../normalizers/binanceNormalizer';
+import type { BinancePositionRiskRaw, BinanceFundingRateHistoryRaw, BinanceFundingInfoRaw } from '../normalizers/binanceNormalizer';
 import type { FetchPageWithLimitArgs } from '../types/exchange';
 import { buildBinanceSignedParams } from '../auth/binanceAuth';
 import { applyTimeRangeOptions } from '../utils/httpParams';
@@ -21,6 +21,20 @@ export class BinanceFuturesHttpClient extends BinanceBaseHttpClient {
 
   constructor(args: BinanceHttpClientArgs) {
     super(args, BINANCE_REQUEST_TIMEOUT);
+  }
+
+  async fetchFundingInfo(symbol?: string): Promise<BinanceFundingInfoRaw[]> {
+    const params: Record<string, string | number | boolean> = {};
+
+    if (symbol !== undefined) {
+      params.symbol = symbol;
+    }
+
+    return this.get<BinanceFundingInfoRaw[]>('/fapi/v1/fundingInfo', params);
+  }
+
+  async fetchPositionMode(): Promise<Record<string, unknown>> {
+    return this.signedGet<Record<string, unknown>>('/fapi/v1/positionSide/dual', {});
   }
 
   async fetchMarkPrice(

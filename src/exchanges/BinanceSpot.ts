@@ -1,6 +1,6 @@
 import type { ExchangeArgs } from '../types/exchange';
-import type { Position, FundingRateHistory } from '../types/common';
-import { MarginMode } from '../types/common';
+import type { Position, FundingRateHistory, FundingInfo } from '../types/common';
+import { MarginMode, PositionMode } from '../types/common';
 import { BinanceSpotHttpClient } from '../http/BinanceSpotHttpClient';
 import { BinanceSpotPublicStream } from '../ws/BinanceSpotPublicStream';
 import {
@@ -33,6 +33,14 @@ class BinanceSpot extends BinanceBaseClient<BinanceSpotHttpClient> {
   }
 
   async fetchFundingRateHistory(): Promise<FundingRateHistory[]> {
+    throw new Error('Not supported for spot market');
+  }
+
+  async fetchFundingInfo(): Promise<FundingInfo[]> {
+    throw new Error('Not supported for spot market');
+  }
+
+  async fetchPositionMode(): Promise<PositionMode> {
     throw new Error('Not supported for spot market');
   }
 

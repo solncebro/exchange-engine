@@ -7,6 +7,7 @@ import {
   normalizeBinanceOrder,
   normalizeBinanceBalance,
   normalizeBinanceFundingRateHistory,
+  normalizeBinanceFundingInfo,
 } from '../../src/normalizers/binanceNormalizer';
 import { TradeSymbolType, PositionSide, MarginMode } from '../../src/types/common';
 import {
@@ -18,6 +19,7 @@ import {
   BINANCE_RAW_ORDER_RESPONSE,
   BINANCE_RAW_ACCOUNT,
   BINANCE_RAW_FUNDING_RATE_HISTORY,
+  BINANCE_RAW_FUNDING_INFO,
 } from '../fixtures/binanceRaw';
 
 describe('normalizeBinanceTradeSymbols', () => {
@@ -344,5 +346,46 @@ describe('normalizeBinanceFundingRateHistory', () => {
     const [first] = normalizeBinanceFundingRateHistory(BINANCE_RAW_FUNDING_RATE_HISTORY);
 
     expect(first.symbol).toBe('BTCUSDT');
+  });
+});
+
+describe('normalizeBinanceFundingInfo', () => {
+  it('returns array of FundingInfo objects', () => {
+    const result = normalizeBinanceFundingInfo(BINANCE_RAW_FUNDING_INFO);
+
+    expect(result).toHaveLength(2);
+  });
+
+  it('preserves symbol', () => {
+    const [first] = normalizeBinanceFundingInfo(BINANCE_RAW_FUNDING_INFO);
+
+    expect(first.symbol).toBe('BTCUSDT');
+  });
+
+  it('preserves fundingIntervalHours as number', () => {
+    const [first] = normalizeBinanceFundingInfo(BINANCE_RAW_FUNDING_INFO);
+
+    expect(first.fundingIntervalHours).toBe(8);
+  });
+
+  it('parses adjustedFundingRateCap as number', () => {
+    const [first] = normalizeBinanceFundingInfo(BINANCE_RAW_FUNDING_INFO);
+
+    expect(first.adjustedFundingRateCap).toBe(0.02);
+  });
+
+  it('parses adjustedFundingRateFloor as number', () => {
+    const [first] = normalizeBinanceFundingInfo(BINANCE_RAW_FUNDING_INFO);
+
+    expect(first.adjustedFundingRateFloor).toBe(-0.02);
+  });
+
+  it('parses second entry correctly', () => {
+    const [, second] = normalizeBinanceFundingInfo(BINANCE_RAW_FUNDING_INFO);
+
+    expect(second.symbol).toBe('ETHUSDT');
+    expect(second.fundingIntervalHours).toBe(4);
+    expect(second.adjustedFundingRateCap).toBe(0.015);
+    expect(second.adjustedFundingRateFloor).toBe(-0.015);
   });
 });

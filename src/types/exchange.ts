@@ -9,8 +9,9 @@ import type {
   BalanceByAsset,
   Position,
   FundingRateHistory,
+  FundingInfo,
 } from './common';
-import { MarginMode, OrderSide, OrderType } from './common';
+import { MarginMode, OrderSide, OrderType, PositionMode } from './common';
 
 export interface ExchangeArgs {
   config: ExchangeConfig;
@@ -58,6 +59,8 @@ export interface ExchangeClient {
   priceToPrecision(symbol: string, price: number): string;
   getMinOrderQty(symbol: string): number;
   getMinNotional(symbol: string): number;
+  fetchFundingInfo(symbol?: string): Promise<FundingInfo[]>;
+  fetchPositionMode(): Promise<PositionMode>;
   createOrderWebSocket(args: CreateOrderWebSocketArgs): Promise<Order>;
   close(): Promise<void>;
 

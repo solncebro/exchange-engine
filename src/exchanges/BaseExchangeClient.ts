@@ -157,6 +157,8 @@ abstract class BaseExchangeClient implements ExchangeClient {
 
   abstract createOrderWebSocket(...args: Parameters<ExchangeClient['createOrderWebSocket']>): ReturnType<ExchangeClient['createOrderWebSocket']>;
   abstract fetchFundingRateHistory(...args: Parameters<ExchangeClient['fetchFundingRateHistory']>): ReturnType<ExchangeClient['fetchFundingRateHistory']>;
+  abstract fetchFundingInfo(...args: Parameters<ExchangeClient['fetchFundingInfo']>): ReturnType<ExchangeClient['fetchFundingInfo']>;
+  abstract fetchPositionMode(): ReturnType<ExchangeClient['fetchPositionMode']>;
   abstract fetchPosition(...args: Parameters<ExchangeClient['fetchPosition']>): ReturnType<ExchangeClient['fetchPosition']>;
   abstract setLeverage(...args: Parameters<ExchangeClient['setLeverage']>): ReturnType<ExchangeClient['setLeverage']>;
   abstract setMarginMode(...args: Parameters<ExchangeClient['setMarginMode']>): ReturnType<ExchangeClient['setMarginMode']>;

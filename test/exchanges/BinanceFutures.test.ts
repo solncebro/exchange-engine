@@ -9,8 +9,11 @@ import {
   BINANCE_RAW_KLINE_LIST,
   BINANCE_RAW_ACCOUNT,
   BINANCE_RAW_ORDER_RESPONSE,
+  BINANCE_RAW_FUNDING_INFO,
+  BINANCE_RAW_POSITION_MODE_HEDGE,
+  BINANCE_RAW_POSITION_MODE_ONE_WAY,
 } from '../fixtures/binanceRaw';
-import { MarginMode, OrderSide, OrderType, PositionSide, TradeSymbolType } from '../../src/types/common';
+import { MarginMode, OrderSide, OrderType, PositionMode, PositionSide, TradeSymbolType } from '../../src/types/common';
 import { BinanceFuturesPublicStream } from '../../src/ws/BinanceFuturesPublicStream';
 
 jest.mock('axios');
@@ -431,6 +434,55 @@ describe('BinanceFutures', () => {
       const publicStreamInstance = MockedPublicStream.mock.instances[0];
 
       expect(publicStreamInstance.subscribeAllTickers).toHaveBeenCalled();
+    });
+  });
+
+  describe('fetchFundingInfo', () => {
+    it('returns normalized funding info', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: BINANCE_RAW_FUNDING_INFO });
+
+      const result = await client.fetchFundingInfo();
+
+      expect(result).toHaveLength(2);
+      expect(result[0].symbol).toBe('BTCUSDT');
+      expect(result[0].fundingIntervalHours).toBe(8);
+      expect(result[0].adjustedFundingRateCap).toBe(0.02);
+      expect(result[0].adjustedFundingRateFloor).toBe(-0.02);
+    });
+
+    it('passes symbol to httpClient when provided', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: [BINANCE_RAW_FUNDING_INFO[0]] });
+
+      const result = await client.fetchFundingInfo('BTCUSDT');
+
+      expect(result).toHaveLength(1);
+
+      const [url, options] = mockInstance.get.mock.calls[0];
+
+      expect(url).toBe('/fapi/v1/fundingInfo');
+      expect(options.params.symbol).toBe('BTCUSDT');
+    });
+  });
+
+  describe('fetchPositionMode', () => {
+    it('returns Hedge when dualSidePosition is true', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: BINANCE_RAW_POSITION_MODE_HEDGE });
+
+      const result = await client.fetchPositionMode();
+
+      expect(result).toBe(PositionMode.Hedge);
+    });
+
+    it('returns OneWay when dualSidePosition is false', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: BINANCE_RAW_POSITION_MODE_ONE_WAY });
+
+      const result = await client.fetchPositionMode();
+
+      expect(result).toBe(PositionMode.OneWay);
     });
   });
 

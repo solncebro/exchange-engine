@@ -152,3 +152,15 @@ export interface FundingRateHistory {
   fundingTime: number;
   markPrice: number | null;
 }
+
+export interface FundingInfo {
+  symbol: string;
+  fundingIntervalHours: number;
+  adjustedFundingRateCap: number;
+  adjustedFundingRateFloor: number;
+}
+
+export enum PositionMode {
+  Hedge = 'hedge',
+  OneWay = 'oneWay',
+}

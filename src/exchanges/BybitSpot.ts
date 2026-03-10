@@ -8,8 +8,9 @@ import type {
   Position,
   Order,
   FundingRateHistory,
+  FundingInfo,
 } from '../types/common';
-import { OrderType, OrderSide, MarginMode } from '../types/common';
+import { OrderType, OrderSide, MarginMode, PositionMode } from '../types/common';
 import type { PublicStreamLike } from '../types/stream';
 import { BybitHttpClient } from '../http/BybitHttpClient';
 import {
@@ -123,6 +124,14 @@ class BybitSpot extends BaseExchangeClient {
   }
 
   async fetchFundingRateHistory(): Promise<FundingRateHistory[]> {
+    throw new Error('Not supported for spot market');
+  }
+
+  async fetchFundingInfo(): Promise<FundingInfo[]> {
+    throw new Error('Not supported for spot market');
+  }
+
+  async fetchPositionMode(): Promise<PositionMode> {
     throw new Error('Not supported for spot market');
   }
 

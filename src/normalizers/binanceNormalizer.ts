@@ -9,6 +9,7 @@ import type {
   Balance,
   BalanceByAsset,
   FundingRateHistory,
+  FundingInfo,
 } from '../types/common';
 import { TradeSymbolType, PositionSide, MarginMode } from '../types/common';
 import { BINANCE_POSITION_SIDE, BINANCE_ORDER_SIDE, BINANCE_ORDER_TYPE } from '../constants/mappings';
@@ -265,5 +266,21 @@ export function normalizeBinanceFundingRateHistory(
     fundingRate: parseFloat(raw.fundingRate),
     fundingTime: raw.fundingTime,
     markPrice: raw.markPrice !== '' ? parseFloat(raw.markPrice) : null,
+  }));
+}
+
+export interface BinanceFundingInfoRaw {
+  symbol: string;
+  adjustedFundingRateCap: string;
+  adjustedFundingRateFloor: string;
+  fundingIntervalHours: number;
+}
+
+export function normalizeBinanceFundingInfo(rawList: BinanceFundingInfoRaw[]): FundingInfo[] {
+  return rawList.map((raw) => ({
+    symbol: raw.symbol,
+    fundingIntervalHours: raw.fundingIntervalHours,
+    adjustedFundingRateCap: parseFloat(raw.adjustedFundingRateCap),
+    adjustedFundingRateFloor: parseFloat(raw.adjustedFundingRateFloor),
   }));
 }

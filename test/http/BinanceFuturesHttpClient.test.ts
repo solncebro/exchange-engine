@@ -218,4 +218,34 @@ describe('BinanceFuturesHttpClient', () => {
       expect(options.params.signature).toBeDefined();
     });
   });
+
+  describe('fetchFundingInfo', () => {
+    it('calls GET /fapi/v1/fundingInfo without symbol', async () => {
+      await client.fetchFundingInfo();
+
+      const [url, options] = mockInstance.get.mock.calls[0];
+
+      expect(url).toBe('/fapi/v1/fundingInfo');
+      expect(options.params.symbol).toBeUndefined();
+    });
+
+    it('includes symbol when provided', async () => {
+      await client.fetchFundingInfo('BTCUSDT');
+
+      const [, options] = mockInstance.get.mock.calls[0];
+
+      expect(options.params.symbol).toBe('BTCUSDT');
+    });
+  });
+
+  describe('fetchPositionMode', () => {
+    it('calls signedGet /fapi/v1/positionSide/dual', async () => {
+      await client.fetchPositionMode();
+
+      const [url, options] = mockInstance.get.mock.calls[0];
+
+      expect(url).toBe('/fapi/v1/positionSide/dual');
+      expect(options.params.signature).toBeDefined();
+    });
+  });
 });

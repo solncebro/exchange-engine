@@ -8,8 +8,9 @@ import type {
   Position,
   Order,
   FundingRateHistory,
+  FundingInfo,
 } from '../types/common';
-import { MarginMode, OrderType, OrderSide } from '../types/common';
+import { MarginMode, OrderType, OrderSide, PositionMode } from '../types/common';
 import type { PublicStreamLike } from '../types/stream';
 import { BybitHttpClient } from '../http/BybitHttpClient';
 import {
@@ -140,6 +141,14 @@ class BybitLinear extends BaseExchangeClient {
   }
 
   async fetchFundingRateHistory(): Promise<FundingRateHistory[]> {
+    throw new Error('Not implemented for Bybit');
+  }
+
+  async fetchFundingInfo(): Promise<FundingInfo[]> {
+    throw new Error('Not implemented for Bybit');
+  }
+
+  async fetchPositionMode(): Promise<PositionMode> {
     throw new Error('Not implemented for Bybit');
   }
 
