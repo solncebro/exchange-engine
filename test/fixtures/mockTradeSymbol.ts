@@ -1,5 +1,5 @@
 import type { TradeSymbol, TradeSymbolBySymbol } from '../../src/types/common';
-import { TradeSymbolType } from '../../src/types/common';
+import { TradeSymbolTypeEnum } from '../../src/types/common';
 
 export const BTCUSDT_TRADE_SYMBOL: TradeSymbol = {
   symbol: 'BTCUSDT',
@@ -7,7 +7,7 @@ export const BTCUSDT_TRADE_SYMBOL: TradeSymbol = {
   quoteAsset: 'USDT',
   settle: 'USDT',
   isActive: true,
-  type: TradeSymbolType.Swap,
+  type: TradeSymbolTypeEnum.Swap,
   isLinear: true,
   contractSize: 1,
   filter: {
@@ -25,7 +25,7 @@ export const ETHUSDT_TRADE_SYMBOL: TradeSymbol = {
   quoteAsset: 'USDT',
   settle: 'USDT',
   isActive: true,
-  type: TradeSymbolType.Swap,
+  type: TradeSymbolTypeEnum.Swap,
   isLinear: true,
   contractSize: 1,
   filter: {

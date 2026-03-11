@@ -1,8 +1,8 @@
 import type { ExchangeArgs, FetchPageWithLimitArgs } from '../types/exchange';
-import type { Position, FundingRateHistory, FundingInfo } from '../types/common';
-import { MarginMode, PositionMode } from '../types/common';
+import type { Position, Order, FundingRateHistory, FundingInfo } from '../types/common';
+import { MarginModeEnum, PositionModeEnum } from '../types/common';
 import { BinanceFuturesHttpClient } from '../http/BinanceFuturesHttpClient';
-import { normalizeBinancePosition, normalizeBinanceFundingRateHistory, normalizeBinanceFundingInfo } from '../normalizers/binanceNormalizer';
+import { normalizeBinancePosition, normalizeBinanceOrder, normalizeBinanceFundingRateHistory, normalizeBinanceFundingInfo } from '../normalizers/binanceNormalizer';
 import { BinanceFuturesPublicStream } from '../ws/BinanceFuturesPublicStream';
 import {
   BINANCE_KLINE_LIMIT_FUTURES,
@@ -55,11 +55,11 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
     return normalizeBinanceFundingInfo(raw);
   }
 
-  async fetchPositionMode(): Promise<PositionMode> {
+  async fetchPositionMode(): Promise<PositionModeEnum> {
     this.logger.debug('Fetching position mode');
     const raw = await this.httpClient.fetchPositionMode();
 
-    return raw.dualSidePosition === true ? PositionMode.Hedge : PositionMode.OneWay;
+    return raw.dualSidePosition === true ? PositionModeEnum.Hedge : PositionModeEnum.OneWay;
   }
 
   async fetchPosition(symbol: string): Promise<Position> {
@@ -79,10 +79,17 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
     await this.httpClient.setLeverage(symbol, leverage);
   }
 
-  async setMarginMode(marginMode: MarginMode, symbol: string): Promise<void> {
+  async setMarginMode(marginMode: MarginModeEnum, symbol: string): Promise<void> {
     this.logger.info(`Setting margin mode to ${marginMode} for ${symbol}`);
-    const marginType = marginMode === MarginMode.Isolated ? 'ISOLATED' : 'CROSSED';
+    const marginType = marginMode === MarginModeEnum.Isolated ? 'ISOLATED' : 'CROSSED';
     await this.httpClient.setMarginType(symbol, marginType);
+  }
+
+  async fetchOrderHistory(symbol: string, options?: FetchPageWithLimitArgs): Promise<Order[]> {
+    this.logger.debug(`Fetching order history for ${symbol}`);
+    const rawList = await this.httpClient.getAllOrders(symbol, options);
+
+    return rawList.map(normalizeBinanceOrder);
   }
 }
 

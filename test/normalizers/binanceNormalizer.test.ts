@@ -9,7 +9,7 @@ import {
   normalizeBinanceFundingRateHistory,
   normalizeBinanceFundingInfo,
 } from '../../src/normalizers/binanceNormalizer';
-import { TradeSymbolType, PositionSide, MarginMode } from '../../src/types/common';
+import { TradeSymbolTypeEnum, PositionSideEnum, MarginModeEnum } from '../../src/types/common';
 import {
   BINANCE_RAW_EXCHANGE_INFO,
   BINANCE_RAW_TICKER_LIST,
@@ -39,7 +39,7 @@ describe('normalizeBinanceTradeSymbols', () => {
     const result = normalizeBinanceTradeSymbols(BINANCE_RAW_EXCHANGE_INFO);
     const btc = result.get('BTCUSDT')!;
 
-    expect(btc.type).toBe(TradeSymbolType.Swap);
+    expect(btc.type).toBe(TradeSymbolTypeEnum.Swap);
     expect(btc.isLinear).toBe(true);
     expect(btc.settle).toBe('USDT');
   });
@@ -48,7 +48,7 @@ describe('normalizeBinanceTradeSymbols', () => {
     const result = normalizeBinanceTradeSymbols(BINANCE_RAW_EXCHANGE_INFO);
     const eth = result.get('ETHBTC')!;
 
-    expect(eth.type).toBe(TradeSymbolType.Spot);
+    expect(eth.type).toBe(TradeSymbolTypeEnum.Spot);
     expect(eth.isLinear).toBe(false);
     expect(eth.settle).toBe('');
   });
@@ -110,14 +110,34 @@ describe('normalizeBinanceTickers', () => {
   it('parses lastPrice as number', () => {
     const result = normalizeBinanceTickers(BINANCE_RAW_TICKER_LIST);
 
-    expect(result.get('BTCUSDT')!.close).toBe(65432.1);
+    expect(result.get('BTCUSDT')!.lastPrice).toBe(65432.1);
+  });
+
+  it('parses openPrice as number', () => {
+    const result = normalizeBinanceTickers(BINANCE_RAW_TICKER_LIST);
+
+    expect(result.get('BTCUSDT')!.openPrice).toBe(63900);
+  });
+
+  it('parses highPrice and lowPrice', () => {
+    const result = normalizeBinanceTickers(BINANCE_RAW_TICKER_LIST);
+
+    expect(result.get('BTCUSDT')!.highPrice).toBe(66000);
+    expect(result.get('BTCUSDT')!.lowPrice).toBe(63500);
   });
 
   it('parses priceChangePercent as number', () => {
     const result = normalizeBinanceTickers(BINANCE_RAW_TICKER_LIST);
 
-    expect(result.get('BTCUSDT')!.percentage).toBe(2.35);
-    expect(result.get('ETHUSDT')!.percentage).toBe(-1.2);
+    expect(result.get('BTCUSDT')!.priceChangePercent).toBe(2.35);
+    expect(result.get('ETHUSDT')!.priceChangePercent).toBe(-1.2);
+  });
+
+  it('parses volume and quoteVolume', () => {
+    const result = normalizeBinanceTickers(BINANCE_RAW_TICKER_LIST);
+
+    expect(result.get('BTCUSDT')!.volume).toBe(12345.67);
+    expect(result.get('BTCUSDT')!.quoteVolume).toBe(805000000);
   });
 
   it('preserves timestamp', () => {
@@ -173,41 +193,41 @@ describe('normalizeBinancePosition', () => {
   it('maps LONG to long', () => {
     const result = normalizeBinancePosition(BINANCE_RAW_POSITION_RISK);
 
-    expect(result.side).toBe(PositionSide.Long);
+    expect(result.side).toBe(PositionSideEnum.Long);
   });
 
   it('maps SHORT to short', () => {
     const raw = { ...BINANCE_RAW_POSITION_RISK, positionSide: 'SHORT' };
     const result = normalizeBinancePosition(raw);
 
-    expect(result.side).toBe(PositionSide.Short);
+    expect(result.side).toBe(PositionSideEnum.Short);
   });
 
   it('maps BOTH to both', () => {
     const raw = { ...BINANCE_RAW_POSITION_RISK, positionSide: 'BOTH' };
     const result = normalizeBinancePosition(raw);
 
-    expect(result.side).toBe(PositionSide.Both);
+    expect(result.side).toBe(PositionSideEnum.Both);
   });
 
   it('falls back to both for unknown side', () => {
     const raw = { ...BINANCE_RAW_POSITION_RISK, positionSide: 'UNKNOWN' };
     const result = normalizeBinancePosition(raw);
 
-    expect(result.side).toBe(PositionSide.Both);
+    expect(result.side).toBe(PositionSideEnum.Both);
   });
 
   it('maps ISOLATED marginType', () => {
     const result = normalizeBinancePosition(BINANCE_RAW_POSITION_RISK);
 
-    expect(result.marginMode).toBe(MarginMode.Isolated);
+    expect(result.marginMode).toBe(MarginModeEnum.Isolated);
   });
 
   it('maps CROSSED marginType to cross', () => {
     const raw = { ...BINANCE_RAW_POSITION_RISK, marginType: 'CROSSED' };
     const result = normalizeBinancePosition(raw);
 
-    expect(result.marginMode).toBe(MarginMode.Cross);
+    expect(result.marginMode).toBe(MarginModeEnum.Cross);
   });
 
   it('parses numeric fields', () => {
@@ -242,6 +262,12 @@ describe('normalizeBinanceOrder', () => {
     expect(result.id).toBe('123456789');
   });
 
+  it('preserves clientOrderId', () => {
+    const result = normalizeBinanceOrder(BINANCE_RAW_ORDER_RESPONSE);
+
+    expect(result.clientOrderId).toBe('myOrder123');
+  });
+
   it('lowercases side', () => {
     const result = normalizeBinanceOrder(BINANCE_RAW_ORDER_RESPONSE);
 
@@ -254,11 +280,30 @@ describe('normalizeBinanceOrder', () => {
     expect(result.type).toBe('limit');
   });
 
+  it('parses timeInForce', () => {
+    const result = normalizeBinanceOrder(BINANCE_RAW_ORDER_RESPONSE);
+
+    expect(result.timeInForce).toBe('GTC');
+  });
+
   it('parses origQty and price', () => {
     const result = normalizeBinanceOrder(BINANCE_RAW_ORDER_RESPONSE);
 
     expect(result.amount).toBe(0.1);
     expect(result.price).toBe(65000);
+  });
+
+  it('parses avgPrice', () => {
+    const result = normalizeBinanceOrder(BINANCE_RAW_ORDER_RESPONSE);
+
+    expect(result.avgPrice).toBe(64950);
+  });
+
+  it('parses filledAmount and filledQuoteAmount', () => {
+    const result = normalizeBinanceOrder(BINANCE_RAW_ORDER_RESPONSE);
+
+    expect(result.filledAmount).toBe(0.1);
+    expect(result.filledQuoteAmount).toBe(6495);
   });
 
   it('lowercases status', () => {
@@ -267,10 +312,22 @@ describe('normalizeBinanceOrder', () => {
     expect(result.status).toBe('filled');
   });
 
-  it('preserves updateTime as timestamp', () => {
+  it('preserves reduceOnly', () => {
     const result = normalizeBinanceOrder(BINANCE_RAW_ORDER_RESPONSE);
 
-    expect(result.timestamp).toBe(1700000000000);
+    expect(result.reduceOnly).toBe(false);
+  });
+
+  it('uses time as timestamp', () => {
+    const result = normalizeBinanceOrder(BINANCE_RAW_ORDER_RESPONSE);
+
+    expect(result.timestamp).toBe(1699999990000);
+  });
+
+  it('preserves updateTime as updatedTimestamp', () => {
+    const result = normalizeBinanceOrder(BINANCE_RAW_ORDER_RESPONSE);
+
+    expect(result.updatedTimestamp).toBe(1700000000000);
   });
 });
 

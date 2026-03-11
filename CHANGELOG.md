@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-03-11
+
+### Breaking Changes
+- All enums renamed with `Enum` suffix: `ExchangeName` → `ExchangeNameEnum`, `OrderSide` → `OrderSideEnum`, `OrderType` → `OrderTypeEnum`, `MarginMode` → `MarginModeEnum`, `PositionSide` → `PositionSideEnum`, `TradeSymbolType` → `TradeSymbolTypeEnum`, `TimeInForce` → `TimeInForceEnum`, `PositionMode` → `PositionModeEnum`
+- Expanded `Ticker` interface: added `lastPrice`, `openPrice`, `highPrice`, `lowPrice`, `priceChangePercent`, `volume`, `quoteVolume`; removed `close`, `percentage`
+- Expanded `Order` interface: added `clientOrderId`, `timeInForce`, `avgPrice`, `stopPrice`, `filledAmount`, `filledQuoteAmount`, `reduceOnly`, `updatedTimestamp`
+- Expanded `CreateOrderWebSocketArgs`: added `stopPrice`, `closePosition`, `workingType`, `positionSide`, `reduceOnly`, `timeInForce`, `clientOrderId`
+
+### Added
+- `WorkingTypeEnum` — `MarkPrice`, `ContractPrice`
+- `OrderTypeEnum` expanded: `StopMarket`, `TakeProfitMarket`, `Stop`, `TakeProfit`, `TrailingStop`
+- `fetchOrderHistory(symbol, options?)` method on `ExchangeClient` (Binance Futures implementation, stubs for others)
+- Reverse mapping constants: `BINANCE_ORDER_TYPE_REVERSE`, `BINANCE_TIME_IN_FORCE`, `BINANCE_WORKING_TYPE`, `BYBIT_TIME_IN_FORCE`
+
 ## [0.2.0] - 2026-03-06
 
 ### Breaking Changes
@@ -91,6 +105,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Private endpoints (balance, position, orders) require valid credentials
 - WebSocket subscriptions are stateless and can be re-established on reconnect
 
+[0.3.0]: https://github.com/solncebro/exchange-engine/releases/tag/v0.3.0
 [0.2.0]: https://github.com/solncebro/exchange-engine/releases/tag/v0.2.0
 [0.1.2]: https://github.com/solncebro/exchange-engine/releases/tag/v0.1.2
 [0.1.0]: https://github.com/solncebro/exchange-engine/releases/tag/v0.1.0

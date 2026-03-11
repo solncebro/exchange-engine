@@ -13,7 +13,7 @@ import {
   BINANCE_RAW_POSITION_MODE_HEDGE,
   BINANCE_RAW_POSITION_MODE_ONE_WAY,
 } from '../fixtures/binanceRaw';
-import { MarginMode, OrderSide, OrderType, PositionMode, PositionSide, TradeSymbolType } from '../../src/types/common';
+import { MarginModeEnum, OrderSideEnum, OrderTypeEnum, PositionModeEnum, PositionSideEnum, TimeInForceEnum, TradeSymbolTypeEnum, WorkingTypeEnum } from '../../src/types/common';
 import { BinanceFuturesPublicStream } from '../../src/ws/BinanceFuturesPublicStream';
 
 jest.mock('axios');
@@ -67,7 +67,7 @@ describe('BinanceFutures', () => {
       const position = await client.fetchPosition('BTCUSDT');
 
       expect(position.symbol).toBe('BTCUSDT');
-      expect(position.side).toBe(PositionSide.Long);
+      expect(position.side).toBe(PositionSideEnum.Long);
       expect(position.contracts).toBe(0.1);
     });
 
@@ -121,7 +121,7 @@ describe('BinanceFutures', () => {
     it('maps isolated to ISOLATED', async () => {
       const { client, mockInstance } = createClient();
 
-      await client.setMarginMode(MarginMode.Isolated, 'BTCUSDT');
+      await client.setMarginMode(MarginModeEnum.Isolated, 'BTCUSDT');
 
       const [, , options] = mockInstance.post.mock.calls[0];
 
@@ -131,7 +131,7 @@ describe('BinanceFutures', () => {
     it('maps cross to CROSSED', async () => {
       const { client, mockInstance } = createClient();
 
-      await client.setMarginMode(MarginMode.Cross, 'BTCUSDT');
+      await client.setMarginMode(MarginModeEnum.Cross, 'BTCUSDT');
 
       const [, , options] = mockInstance.post.mock.calls[0];
 
@@ -155,7 +155,7 @@ describe('BinanceFutures', () => {
       expect(btc!.symbol).toBe('BTCUSDT');
       expect(btc!.baseAsset).toBe('BTC');
       expect(btc!.quoteAsset).toBe('USDT');
-      expect(btc!.type).toBe(TradeSymbolType.Swap);
+      expect(btc!.type).toBe(TradeSymbolTypeEnum.Swap);
     });
 
     it('returns cached symbols on second call', async () => {
@@ -194,8 +194,8 @@ describe('BinanceFutures', () => {
 
       expect(btc).toBeDefined();
       expect(btc!.symbol).toBe('BTCUSDT');
-      expect(btc!.close).toBe(65432.1);
-      expect(btc!.percentage).toBe(2.35);
+      expect(btc!.lastPrice).toBe(65432.1);
+      expect(btc!.priceChangePercent).toBe(2.35);
     });
   });
 
@@ -245,15 +245,15 @@ describe('BinanceFutures', () => {
 
       const result = await client.createOrderWebSocket({
         symbol: 'BTCUSDT',
-        type: OrderType.Market,
-        side: OrderSide.Buy,
+        type: OrderTypeEnum.Market,
+        side: OrderSideEnum.Buy,
         amount: 0.1,
         price: 0,
       });
 
       expect(result.id).toBe('123456789');
       expect(result.symbol).toBe('BTCUSDT');
-      expect(result.side).toBe(OrderSide.Buy);
+      expect(result.side).toBe(OrderSideEnum.Buy);
 
       const [, , options] = mockInstance.post.mock.calls[0];
 
@@ -271,8 +271,8 @@ describe('BinanceFutures', () => {
 
       await client.createOrderWebSocket({
         symbol: 'BTCUSDT',
-        type: OrderType.Limit,
-        side: OrderSide.Sell,
+        type: OrderTypeEnum.Limit,
+        side: OrderSideEnum.Sell,
         amount: 0.5,
         price: 65000,
       });
@@ -281,6 +281,128 @@ describe('BinanceFutures', () => {
 
       expect(options.params.price).toBe('65000.0');
       expect(options.params.timeInForce).toBe('GTC');
+    });
+
+    it('sends stopPrice when provided', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: BINANCE_RAW_EXCHANGE_INFO });
+      await client.loadTradeSymbols();
+
+      mockInstance.post.mockResolvedValue({ data: BINANCE_RAW_ORDER_RESPONSE });
+
+      await client.createOrderWebSocket({
+        symbol: 'BTCUSDT',
+        type: OrderTypeEnum.StopMarket,
+        side: OrderSideEnum.Sell,
+        amount: 0.1,
+        stopPrice: 60000,
+      });
+
+      const [, , options] = mockInstance.post.mock.calls[0];
+
+      expect(options.params.stopPrice).toBe('60000.0');
+    });
+
+    it('sends closePosition when provided', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: BINANCE_RAW_EXCHANGE_INFO });
+      await client.loadTradeSymbols();
+
+      mockInstance.post.mockResolvedValue({ data: BINANCE_RAW_ORDER_RESPONSE });
+
+      await client.createOrderWebSocket({
+        symbol: 'BTCUSDT',
+        type: OrderTypeEnum.StopMarket,
+        side: OrderSideEnum.Sell,
+        amount: 0.1,
+        stopPrice: 60000,
+        closePosition: true,
+      });
+
+      const [, , options] = mockInstance.post.mock.calls[0];
+
+      expect(options.params.closePosition).toBe(true);
+    });
+
+    it('sends workingType when provided', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: BINANCE_RAW_EXCHANGE_INFO });
+      await client.loadTradeSymbols();
+
+      mockInstance.post.mockResolvedValue({ data: BINANCE_RAW_ORDER_RESPONSE });
+
+      await client.createOrderWebSocket({
+        symbol: 'BTCUSDT',
+        type: OrderTypeEnum.StopMarket,
+        side: OrderSideEnum.Sell,
+        amount: 0.1,
+        stopPrice: 60000,
+        workingType: WorkingTypeEnum.MarkPrice,
+      });
+
+      const [, , options] = mockInstance.post.mock.calls[0];
+
+      expect(options.params.workingType).toBe('MARK_PRICE');
+    });
+
+    it('sends positionSide when provided', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: BINANCE_RAW_EXCHANGE_INFO });
+      await client.loadTradeSymbols();
+
+      mockInstance.post.mockResolvedValue({ data: BINANCE_RAW_ORDER_RESPONSE });
+
+      await client.createOrderWebSocket({
+        symbol: 'BTCUSDT',
+        type: OrderTypeEnum.Market,
+        side: OrderSideEnum.Buy,
+        amount: 0.1,
+        positionSide: PositionSideEnum.Long,
+      });
+
+      const [, , options] = mockInstance.post.mock.calls[0];
+
+      expect(options.params.positionSide).toBe('LONG');
+    });
+
+    it('sends reduceOnly when provided', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: BINANCE_RAW_EXCHANGE_INFO });
+      await client.loadTradeSymbols();
+
+      mockInstance.post.mockResolvedValue({ data: BINANCE_RAW_ORDER_RESPONSE });
+
+      await client.createOrderWebSocket({
+        symbol: 'BTCUSDT',
+        type: OrderTypeEnum.Market,
+        side: OrderSideEnum.Sell,
+        amount: 0.1,
+        reduceOnly: true,
+      });
+
+      const [, , options] = mockInstance.post.mock.calls[0];
+
+      expect(options.params.reduceOnly).toBe(true);
+    });
+
+    it('sends clientOrderId as newClientOrderId when provided', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: BINANCE_RAW_EXCHANGE_INFO });
+      await client.loadTradeSymbols();
+
+      mockInstance.post.mockResolvedValue({ data: BINANCE_RAW_ORDER_RESPONSE });
+
+      await client.createOrderWebSocket({
+        symbol: 'BTCUSDT',
+        type: OrderTypeEnum.Market,
+        side: OrderSideEnum.Buy,
+        amount: 0.1,
+        clientOrderId: 'my-custom-id',
+      });
+
+      const [, , options] = mockInstance.post.mock.calls[0];
+
+      expect(options.params.newClientOrderId).toBe('my-custom-id');
     });
 
     it('does not override existing timeInForce for limit orders', async () => {
@@ -292,11 +414,11 @@ describe('BinanceFutures', () => {
 
       await client.createOrderWebSocket({
         symbol: 'BTCUSDT',
-        type: OrderType.Limit,
-        side: OrderSide.Buy,
+        type: OrderTypeEnum.Limit,
+        side: OrderSideEnum.Buy,
         amount: 0.1,
         price: 65000,
-        params: { timeInForce: 'IOC' },
+        timeInForce: TimeInForceEnum.Ioc,
       });
 
       const [, , options] = mockInstance.post.mock.calls[0];
@@ -473,7 +595,7 @@ describe('BinanceFutures', () => {
 
       const result = await client.fetchPositionMode();
 
-      expect(result).toBe(PositionMode.Hedge);
+      expect(result).toBe(PositionModeEnum.Hedge);
     });
 
     it('returns OneWay when dualSidePosition is false', async () => {
@@ -482,7 +604,21 @@ describe('BinanceFutures', () => {
 
       const result = await client.fetchPositionMode();
 
-      expect(result).toBe(PositionMode.OneWay);
+      expect(result).toBe(PositionModeEnum.OneWay);
+    });
+  });
+
+  describe('fetchOrderHistory', () => {
+    it('returns normalized order list', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: [BINANCE_RAW_ORDER_RESPONSE] });
+
+      const result = await client.fetchOrderHistory('BTCUSDT');
+
+      expect(result).toHaveLength(1);
+      expect(result[0].id).toBe('123456789');
+      expect(result[0].symbol).toBe('BTCUSDT');
+      expect(result[0].side).toBe(OrderSideEnum.Buy);
     });
   });
 

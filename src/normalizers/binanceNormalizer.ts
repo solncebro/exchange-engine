@@ -11,8 +11,8 @@ import type {
   FundingRateHistory,
   FundingInfo,
 } from '../types/common';
-import { TradeSymbolType, PositionSide, MarginMode } from '../types/common';
-import { BINANCE_POSITION_SIDE, BINANCE_ORDER_SIDE, BINANCE_ORDER_TYPE } from '../constants/mappings';
+import { TradeSymbolTypeEnum, PositionSideEnum, MarginModeEnum, TimeInForceEnum } from '../types/common';
+import { BINANCE_POSITION_SIDE, BINANCE_ORDER_SIDE, BINANCE_ORDER_TYPE, BINANCE_TIME_IN_FORCE } from '../constants/mappings';
 
 interface BinanceFilterRaw {
   filterType: string;
@@ -41,7 +41,12 @@ export interface BinanceExchangeInfoRaw {
 export interface BinanceTicker24hrRaw {
   symbol: string;
   lastPrice: string;
+  openPrice: string;
+  highPrice: string;
+  lowPrice: string;
   priceChangePercent: string;
+  volume: string;
+  quoteVolume: string;
   time: number;
 }
 
@@ -76,12 +81,20 @@ export interface BinancePositionRiskRaw {
 
 export interface BinanceOrderResponseRaw {
   orderId: number;
+  clientOrderId: string;
   symbol: string;
   side: string;
   type: string;
+  timeInForce: string;
   origQty: string;
+  executedQty: string;
   price: string;
+  avgPrice: string;
+  stopPrice: string;
+  cumQuote: string;
   status: string;
+  reduceOnly: boolean;
+  time: number;
   updateTime: number;
 }
 
@@ -112,12 +125,12 @@ export function normalizeBinanceTradeSymbols(raw: BinanceExchangeInfoRaw): Trade
     const isPerp = symbol.contractType === 'PERPETUAL';
     const isSpot = symbol.contractType === undefined || symbol.contractType === '';
 
-    let tradeSymbolType: TradeSymbolType = TradeSymbolType.Future;
+    let tradeSymbolType: TradeSymbolTypeEnum = TradeSymbolTypeEnum.Future;
 
     if (isPerp) {
-      tradeSymbolType = TradeSymbolType.Swap;
+      tradeSymbolType = TradeSymbolTypeEnum.Swap;
     } else if (isSpot) {
-      tradeSymbolType = TradeSymbolType.Spot;
+      tradeSymbolType = TradeSymbolTypeEnum.Spot;
     }
 
     const tradeSymbol: TradeSymbol = {
@@ -152,8 +165,13 @@ export function normalizeBinanceTickers(rawList: BinanceTicker24hrRaw[]): Ticker
   for (const raw of rawList) {
     const ticker: Ticker = {
       symbol: raw.symbol,
-      close: parseFloat(raw.lastPrice),
-      percentage: parseFloat(raw.priceChangePercent),
+      lastPrice: parseFloat(raw.lastPrice),
+      openPrice: parseFloat(raw.openPrice),
+      highPrice: parseFloat(raw.highPrice),
+      lowPrice: parseFloat(raw.lowPrice),
+      priceChangePercent: parseFloat(raw.priceChangePercent),
+      volume: parseFloat(raw.volume),
+      quoteVolume: parseFloat(raw.quoteVolume),
       timestamp: raw.time,
     };
 
@@ -196,8 +214,8 @@ export function normalizeBinanceKlineWebSocketMessage(raw: BinanceWebSocketKline
 }
 
 export function normalizeBinancePosition(raw: BinancePositionRiskRaw): Position {
-  const side = BINANCE_POSITION_SIDE[raw.positionSide] ?? PositionSide.Both;
-  const marginMode: MarginMode = raw.marginType === 'ISOLATED' ? MarginMode.Isolated : MarginMode.Cross;
+  const side = BINANCE_POSITION_SIDE[raw.positionSide] ?? PositionSideEnum.Both;
+  const marginMode: MarginModeEnum = raw.marginType === 'ISOLATED' ? MarginModeEnum.Isolated : MarginModeEnum.Cross;
   const liquidationPriceRaw = parseFloat(raw.liquidationPrice);
 
   return {
@@ -217,13 +235,21 @@ export function normalizeBinancePosition(raw: BinancePositionRiskRaw): Position 
 export function normalizeBinanceOrder(raw: BinanceOrderResponseRaw): Order {
   return {
     id: String(raw.orderId),
+    clientOrderId: raw.clientOrderId ?? '',
     symbol: raw.symbol,
     side: BINANCE_ORDER_SIDE[raw.side],
-    type: BINANCE_ORDER_TYPE[raw.type],
-    amount: parseFloat(raw.origQty),
+    type: BINANCE_ORDER_TYPE[raw.type] ?? raw.type.toLowerCase() as never,
+    timeInForce: BINANCE_TIME_IN_FORCE[raw.timeInForce] ?? TimeInForceEnum.Gtc,
     price: parseFloat(raw.price),
+    avgPrice: parseFloat(raw.avgPrice ?? '0'),
+    stopPrice: parseFloat(raw.stopPrice ?? '0'),
+    amount: parseFloat(raw.origQty),
+    filledAmount: parseFloat(raw.executedQty ?? '0'),
+    filledQuoteAmount: parseFloat(raw.cumQuote ?? '0'),
     status: raw.status.toLowerCase(),
-    timestamp: raw.updateTime,
+    reduceOnly: raw.reduceOnly ?? false,
+    timestamp: raw.time ?? raw.updateTime,
+    updatedTimestamp: raw.updateTime,
   };
 }
 

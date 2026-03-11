@@ -269,7 +269,7 @@ export class BybitHttpClient extends BaseHttpClient {
   async getOrderHistory(
     category: string,
     options?: SymbolLimitFilterArgs,
-  ): Promise<BybitListResponse<Record<string, unknown>>> {
+  ): Promise<BybitListResponse<BybitOrderResponseRaw>> {
     const params: Record<string, string | number | boolean> = { category };
 
     if (options?.symbol !== undefined) {

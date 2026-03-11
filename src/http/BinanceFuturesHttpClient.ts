@@ -1,4 +1,4 @@
-import type { BinancePositionRiskRaw, BinanceFundingRateHistoryRaw, BinanceFundingInfoRaw } from '../normalizers/binanceNormalizer';
+import type { BinancePositionRiskRaw, BinanceFundingRateHistoryRaw, BinanceFundingInfoRaw, BinanceOrderResponseRaw } from '../normalizers/binanceNormalizer';
 import type { FetchPageWithLimitArgs } from '../types/exchange';
 import { buildBinanceSignedParams } from '../auth/binanceAuth';
 import { applyTimeRangeOptions } from '../utils/httpParams';
@@ -89,11 +89,11 @@ export class BinanceFuturesHttpClient extends BinanceBaseHttpClient {
   async getAllOrders(
     symbol: string,
     options?: FetchPageWithLimitArgs,
-  ): Promise<Array<Record<string, unknown>>> {
+  ): Promise<BinanceOrderResponseRaw[]> {
     const params: Record<string, string | number | boolean> = { symbol };
     applyTimeRangeOptions(params, options);
 
-    return this.signedGet<Array<Record<string, unknown>>>('/fapi/v1/allOrders', params);
+    return this.signedGet<BinanceOrderResponseRaw[]>('/fapi/v1/allOrders', params);
   }
 
   async createBatchOrders(

@@ -1,36 +1,41 @@
-export enum ExchangeName {
+export enum ExchangeNameEnum {
   Binance = 'binance',
   Bybit = 'bybit',
 }
 
-export enum OrderSide {
+export enum OrderSideEnum {
   Buy = 'buy',
   Sell = 'sell',
 }
 
-export enum OrderType {
+export enum OrderTypeEnum {
   Market = 'market',
   Limit = 'limit',
+  StopMarket = 'stopMarket',
+  TakeProfitMarket = 'takeProfitMarket',
+  Stop = 'stop',
+  TakeProfit = 'takeProfit',
+  TrailingStop = 'trailingStop',
 }
 
-export enum MarginMode {
+export enum MarginModeEnum {
   Isolated = 'isolated',
   Cross = 'cross',
 }
 
-export enum PositionSide {
+export enum PositionSideEnum {
   Long = 'long',
   Short = 'short',
   Both = 'both',
 }
 
-export enum TradeSymbolType {
+export enum TradeSymbolTypeEnum {
   Spot = 'spot',
   Swap = 'swap',
   Future = 'future',
 }
 
-export enum TimeInForce {
+export enum TimeInForceEnum {
   Gtc = 'GTC',
   Ioc = 'IOC',
   Fok = 'FOK',
@@ -70,8 +75,13 @@ export interface ExchangeLogger {
 
 export interface Ticker {
   symbol: string;
-  close: number;
-  percentage: number;
+  lastPrice: number;
+  openPrice: number;
+  highPrice: number;
+  lowPrice: number;
+  priceChangePercent: number;
+  volume: number;
+  quoteVolume: number;
   timestamp: number;
 }
 
@@ -105,7 +115,7 @@ export interface TradeSymbol {
   quoteAsset: string;
   settle: string;
   isActive: boolean;
-  type: TradeSymbolType;
+  type: TradeSymbolTypeEnum;
   isLinear: boolean;
   contractSize: number;
   filter: TradeSymbolFilter;
@@ -115,26 +125,34 @@ export type TradeSymbolBySymbol = Map<string, TradeSymbol>;
 
 export interface Position {
   symbol: string;
-  side: PositionSide;
+  side: PositionSideEnum;
   contracts: number;
   entryPrice: number;
   markPrice: number;
   unrealizedPnl: number;
   leverage: number;
-  marginMode: MarginMode;
+  marginMode: MarginModeEnum;
   liquidationPrice: number;
   info: Record<string, unknown>;
 }
 
 export interface Order {
   id: string;
+  clientOrderId: string;
   symbol: string;
-  side: OrderSide;
-  type: OrderType;
-  amount: number;
+  side: OrderSideEnum;
+  type: OrderTypeEnum;
+  timeInForce: TimeInForceEnum;
   price: number;
+  avgPrice: number;
+  stopPrice: number;
+  amount: number;
+  filledAmount: number;
+  filledQuoteAmount: number;
   status: string;
+  reduceOnly: boolean;
   timestamp: number;
+  updatedTimestamp: number;
 }
 
 export interface Balance {
@@ -160,7 +178,12 @@ export interface FundingInfo {
   adjustedFundingRateFloor: number;
 }
 
-export enum PositionMode {
+export enum PositionModeEnum {
   Hedge = 'hedge',
   OneWay = 'oneWay',
+}
+
+export enum WorkingTypeEnum {
+  MarkPrice = 'markPrice',
+  ContractPrice = 'contractPrice',
 }

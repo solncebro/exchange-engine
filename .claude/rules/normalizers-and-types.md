@@ -37,7 +37,7 @@ BinanceTicker24hrRaw { symbol, lastPrice: string, priceChangePercent: string, ti
 - `normalizeBinanceKlineWebSocketMessage(raw)` → `Kline` — маппинг коротких ключей
 - `normalizeBinancePosition(raw)` → `Position`
   - Маппинг через `BINANCE_POSITION_SIDE` (LONG→long, SHORT→short, BOTH→both)
-  - `marginType === 'ISOLATED' ? MarginMode.Isolated : MarginMode.Cross`
+  - `marginType === 'ISOLATED' ? MarginModeEnum.Isolated : MarginModeEnum.Cross`
   - NaN liquidationPrice → 0
   - Сохраняет raw в `info`
 - `normalizeBinanceOrder(raw)` → `Order`
@@ -60,14 +60,14 @@ BinanceTicker24hrRaw { symbol, lastPrice: string, priceChangePercent: string, ti
 ## Унифицированные типы (src/types/common.ts)
 
 ### Enums:
-- `ExchangeName` — Binance, Bybit
-- `OrderSide` — Buy, Sell
-- `OrderType` — Market, Limit
-- `MarginMode` — Isolated, Cross
-- `PositionSide` — Long, Short, Both
-- `PositionMode` — Hedge, OneWay
-- `TradeSymbolType` — Spot, Swap, Future
-- `TimeInForce` — Gtc, Ioc, Fok, PostOnly
+- `ExchangeNameEnum` — Binance, Bybit
+- `OrderSideEnum` — Buy, Sell
+- `OrderTypeEnum` — Market, Limit
+- `MarginModeEnum` — Isolated, Cross
+- `PositionSideEnum` — Long, Short, Both
+- `PositionModeEnum` — Hedge, OneWay
+- `TradeSymbolTypeEnum` — Spot, Swap, Future
+- `TimeInForceEnum` — Gtc, Ioc, Fok, PostOnly
 
 ### Интерфейсы:
 - `Ticker` — `{ symbol, close, percentage, timestamp }`

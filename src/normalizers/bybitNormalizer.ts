@@ -9,8 +9,8 @@ import type {
   Balance,
   BalanceByAsset,
 } from '../types/common';
-import { TradeSymbolType, PositionSide, MarginMode } from '../types/common';
-import { BYBIT_POSITION_SIDE, BYBIT_ORDER_STATUS, BYBIT_ORDER_SIDE, BYBIT_ORDER_TYPE } from '../constants/mappings';
+import { TradeSymbolTypeEnum, PositionSideEnum, MarginModeEnum, TimeInForceEnum } from '../types/common';
+import { BYBIT_POSITION_SIDE, BYBIT_ORDER_STATUS, BYBIT_ORDER_SIDE, BYBIT_ORDER_TYPE, BYBIT_TIME_IN_FORCE } from '../constants/mappings';
 import type { CreateOrderWebSocketArgs } from '../types/exchange';
 
 interface BybitLotSizeFilterRaw {
@@ -41,7 +41,12 @@ export interface BybitInstrumentInfoRaw {
 export interface BybitTickerRaw {
   symbol: string;
   lastPrice: string;
+  prevPrice24h: string;
+  highPrice24h: string;
+  lowPrice24h: string;
   price24hPcnt: string;
+  volume24h: string;
+  turnover24h: string;
   time?: number;
 }
 
@@ -73,13 +78,21 @@ export interface BybitPositionRaw {
 
 export interface BybitOrderResponseRaw {
   orderId: string;
+  orderLinkId: string;
   symbol: string;
   side: string;
   orderType: string;
+  timeInForce: string;
   qty: string;
   price: string;
+  avgPrice: string;
+  triggerPrice: string;
+  cumExecQty: string;
+  cumExecValue: string;
   orderStatus: string;
+  reduceOnly: boolean;
   createdTime: string;
+  updatedTime: string;
 }
 
 interface BybitCoinRaw {
@@ -104,12 +117,12 @@ export function normalizeBybitTradeSymbols(rawList: BybitInstrumentInfoRaw[]): T
     const isLinear = LINEAR_CONTRACT_TYPES.has(raw.contractType ?? '');
     const isSpot = raw.contractType === undefined || raw.contractType === '';
 
-    let tradeSymbolType: TradeSymbolType = TradeSymbolType.Future;
+    let tradeSymbolType: TradeSymbolTypeEnum = TradeSymbolTypeEnum.Future;
 
     if (isLinear) {
-      tradeSymbolType = TradeSymbolType.Swap;
+      tradeSymbolType = TradeSymbolTypeEnum.Swap;
     } else if (isSpot) {
-      tradeSymbolType = TradeSymbolType.Spot;
+      tradeSymbolType = TradeSymbolTypeEnum.Spot;
     }
 
     const tradeSymbol: TradeSymbol = {
@@ -144,8 +157,13 @@ export function normalizeBybitTickers(rawList: BybitTickerRaw[]): TickerBySymbol
   for (const raw of rawList) {
     const ticker: Ticker = {
       symbol: raw.symbol,
-      close: parseFloat(raw.lastPrice),
-      percentage: parseFloat(raw.price24hPcnt) * 100,
+      lastPrice: parseFloat(raw.lastPrice),
+      openPrice: parseFloat(raw.prevPrice24h ?? '0'),
+      highPrice: parseFloat(raw.highPrice24h ?? '0'),
+      lowPrice: parseFloat(raw.lowPrice24h ?? '0'),
+      priceChangePercent: parseFloat(raw.price24hPcnt) * 100,
+      volume: parseFloat(raw.volume24h ?? '0'),
+      quoteVolume: parseFloat(raw.turnover24h ?? '0'),
       timestamp: raw.time ?? Date.now(),
     };
 
@@ -188,8 +206,8 @@ export function normalizeBybitKlineWebSocketMessage(raw: BybitWebSocketKlineRaw)
 }
 
 export function normalizeBybitPosition(raw: BybitPositionRaw): Position {
-  const side = BYBIT_POSITION_SIDE[raw.side] ?? PositionSide.Both;
-  const marginMode: MarginMode = raw.tradeMode === 0 ? MarginMode.Cross : MarginMode.Isolated;
+  const side = BYBIT_POSITION_SIDE[raw.side] ?? PositionSideEnum.Both;
+  const marginMode: MarginModeEnum = raw.tradeMode === 0 ? MarginModeEnum.Cross : MarginModeEnum.Isolated;
   const liquidationPriceRaw = parseFloat(raw.liqPrice);
 
   return {
@@ -211,26 +229,42 @@ export function normalizeBybitOrder(raw: BybitOrderResponseRaw): Order {
 
   return {
     id: raw.orderId,
+    clientOrderId: raw.orderLinkId ?? '',
     symbol: raw.symbol,
     side: BYBIT_ORDER_SIDE[raw.side],
-    type: BYBIT_ORDER_TYPE[raw.orderType],
-    amount: parseFloat(raw.qty),
+    type: BYBIT_ORDER_TYPE[raw.orderType] ?? raw.orderType.toLowerCase() as never,
+    timeInForce: BYBIT_TIME_IN_FORCE[raw.timeInForce] ?? TimeInForceEnum.Gtc,
     price: parseFloat(raw.price),
+    avgPrice: parseFloat(raw.avgPrice ?? '0'),
+    stopPrice: parseFloat(raw.triggerPrice ?? '0'),
+    amount: parseFloat(raw.qty),
+    filledAmount: parseFloat(raw.cumExecQty ?? '0'),
+    filledQuoteAmount: parseFloat(raw.cumExecValue ?? '0'),
     status,
+    reduceOnly: raw.reduceOnly ?? false,
     timestamp: parseFloat(raw.createdTime),
+    updatedTimestamp: parseFloat(raw.updatedTime ?? raw.createdTime),
   };
 }
 
 export function buildBybitOrderFromCreateResponse(args: CreateOrderWebSocketArgs, orderId: string): Order {
   return {
     id: orderId,
+    clientOrderId: args.clientOrderId ?? '',
     symbol: args.symbol,
     side: args.side,
     type: args.type,
+    timeInForce: args.timeInForce ?? TimeInForceEnum.Gtc,
+    price: args.price ?? 0,
+    avgPrice: 0,
+    stopPrice: args.stopPrice ?? 0,
     amount: args.amount,
-    price: args.price,
+    filledAmount: 0,
+    filledQuoteAmount: 0,
     status: 'open',
+    reduceOnly: args.reduceOnly ?? false,
     timestamp: Date.now(),
+    updatedTimestamp: Date.now(),
   };
 }
 

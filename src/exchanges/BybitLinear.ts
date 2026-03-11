@@ -10,7 +10,7 @@ import type {
   FundingRateHistory,
   FundingInfo,
 } from '../types/common';
-import { MarginMode, OrderType, OrderSide, PositionMode } from '../types/common';
+import { MarginModeEnum, OrderTypeEnum, OrderSideEnum, PositionModeEnum } from '../types/common';
 import type { PublicStreamLike } from '../types/stream';
 import { BybitHttpClient } from '../http/BybitHttpClient';
 import {
@@ -18,6 +18,7 @@ import {
   normalizeBybitTickers,
   normalizeBybitKlines,
   normalizeBybitPosition,
+  normalizeBybitOrder,
   normalizeBybitBalance,
   buildBybitOrderFromCreateResponse,
 } from '../normalizers/bybitNormalizer';
@@ -115,17 +116,35 @@ class BybitLinear extends BaseExchangeClient {
   }
 
   async createOrderWebSocket(args: CreateOrderWebSocketArgs): Promise<Order> {
+    const isMarket = args.type === OrderTypeEnum.Market;
+    const bybitOrderType = isMarket ? 'Market' : 'Limit';
+
     const orderParams: Record<string, unknown> = {
       category: 'linear',
       symbol: args.symbol,
-      orderType: args.type === OrderType.Market ? 'Market' : 'Limit',
-      side: args.side === OrderSide.Buy ? 'Buy' : 'Sell',
+      orderType: bybitOrderType,
+      side: args.side === OrderSideEnum.Buy ? 'Buy' : 'Sell',
       qty: this.amountToPrecision(args.symbol, args.amount),
-      ...args.params,
     };
 
-    if (args.price > 0) {
+    if (args.price !== undefined && args.price > 0) {
       orderParams.price = this.priceToPrecision(args.symbol, args.price);
+    }
+
+    if (args.stopPrice !== undefined && args.stopPrice > 0) {
+      orderParams.triggerPrice = this.priceToPrecision(args.symbol, args.stopPrice);
+    }
+
+    if (args.reduceOnly !== undefined) {
+      orderParams.reduceOnly = args.reduceOnly;
+    }
+
+    if (args.timeInForce !== undefined) {
+      orderParams.timeInForce = args.timeInForce;
+    }
+
+    if (args.clientOrderId !== undefined) {
+      orderParams.orderLinkId = args.clientOrderId;
     }
 
     if (this.tradeStream !== null) {
@@ -140,6 +159,14 @@ class BybitLinear extends BaseExchangeClient {
     return buildBybitOrderFromCreateResponse(args, raw.result.orderId);
   }
 
+  async fetchOrderHistory(symbol: string, options?: FetchPageWithLimitArgs): Promise<Order[]> {
+    this.logger.debug(`Fetching order history for ${symbol}`);
+    const raw = await this.httpClient.getOrderHistory('linear', { symbol, limit: options?.limit });
+    const rawList = raw.result.list;
+
+    return rawList.map(normalizeBybitOrder);
+  }
+
   async fetchFundingRateHistory(): Promise<FundingRateHistory[]> {
     throw new Error('Not implemented for Bybit');
   }
@@ -148,7 +175,7 @@ class BybitLinear extends BaseExchangeClient {
     throw new Error('Not implemented for Bybit');
   }
 
-  async fetchPositionMode(): Promise<PositionMode> {
+  async fetchPositionMode(): Promise<PositionModeEnum> {
     throw new Error('Not implemented for Bybit');
   }
 
@@ -169,9 +196,9 @@ class BybitLinear extends BaseExchangeClient {
     await this.httpClient.setLeverage({ category: 'linear', symbol, buyLeverage: leverage, sellLeverage: leverage });
   }
 
-  async setMarginMode(marginMode: MarginMode, symbol: string): Promise<void> {
+  async setMarginMode(marginMode: MarginModeEnum, symbol: string): Promise<void> {
     this.logger.info(`Setting margin mode to ${marginMode} for ${symbol}`);
-    const tradeMode = marginMode === MarginMode.Isolated ? 1 : 0;
+    const tradeMode = marginMode === MarginModeEnum.Isolated ? 1 : 0;
     const defaultLeverage = 10;
 
     await this.httpClient.switchIsolated({

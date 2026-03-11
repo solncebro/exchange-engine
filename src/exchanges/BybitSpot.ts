@@ -10,7 +10,7 @@ import type {
   FundingRateHistory,
   FundingInfo,
 } from '../types/common';
-import { OrderType, OrderSide, MarginMode, PositionMode } from '../types/common';
+import { OrderTypeEnum, OrderSideEnum, MarginModeEnum, PositionModeEnum } from '../types/common';
 import type { PublicStreamLike } from '../types/stream';
 import { BybitHttpClient } from '../http/BybitHttpClient';
 import {
@@ -99,28 +99,35 @@ class BybitSpot extends BaseExchangeClient {
   async createOrderWebSocket(args: CreateOrderWebSocketArgs): Promise<Order> {
     this.logger.debug(`Creating order via REST: ${args.symbol}`);
 
-    const isMarket = args.type === OrderType.Market;
+    const isMarket = args.type === OrderTypeEnum.Market;
 
     const orderParams: Record<string, unknown> = {
       category: 'spot',
       symbol: args.symbol,
       orderType: isMarket ? 'Market' : 'Limit',
-      side: args.side === OrderSide.Buy ? 'Buy' : 'Sell',
+      side: args.side === OrderSideEnum.Buy ? 'Buy' : 'Sell',
       qty: this.amountToPrecision(args.symbol, args.amount),
-      ...args.params,
     };
 
     if (isMarket) {
       orderParams.marketUnit = 'baseCoin';
     }
 
-    if (args.price > 0) {
+    if (args.price !== undefined && args.price > 0) {
       orderParams.price = this.priceToPrecision(args.symbol, args.price);
+    }
+
+    if (args.clientOrderId !== undefined) {
+      orderParams.orderLinkId = args.clientOrderId;
     }
 
     const raw = await this.httpClient.createOrder(orderParams);
 
     return buildBybitOrderFromCreateResponse(args, raw.result.orderId);
+  }
+
+  async fetchOrderHistory(_symbol: string): Promise<Order[]> {
+    throw new Error('Not supported for spot market');
   }
 
   async fetchFundingRateHistory(): Promise<FundingRateHistory[]> {
@@ -131,7 +138,7 @@ class BybitSpot extends BaseExchangeClient {
     throw new Error('Not supported for spot market');
   }
 
-  async fetchPositionMode(): Promise<PositionMode> {
+  async fetchPositionMode(): Promise<PositionModeEnum> {
     throw new Error('Not supported for spot market');
   }
 
@@ -143,7 +150,7 @@ class BybitSpot extends BaseExchangeClient {
     throw new Error('Not supported for spot market');
   }
 
-  async setMarginMode(_marginMode: MarginMode, _symbol: string): Promise<void> {
+  async setMarginMode(_marginMode: MarginModeEnum, _symbol: string): Promise<void> {
     throw new Error('Not supported for spot market');
   }
 

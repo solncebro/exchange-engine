@@ -8,7 +8,7 @@ import {
   buildBybitOrderFromCreateResponse,
   normalizeBybitBalance,
 } from '../../src/normalizers/bybitNormalizer';
-import { TradeSymbolType, PositionSide, MarginMode, OrderSide, OrderType } from '../../src/types/common';
+import { TradeSymbolTypeEnum, PositionSideEnum, MarginModeEnum, OrderSideEnum, OrderTypeEnum } from '../../src/types/common';
 import {
   BYBIT_RAW_INSTRUMENT_LIST,
   BYBIT_RAW_TICKER_LIST,
@@ -36,7 +36,7 @@ describe('normalizeBybitTradeSymbols', () => {
     const result = normalizeBybitTradeSymbols(BYBIT_RAW_INSTRUMENT_LIST);
     const btc = result.get('BTCUSDT')!;
 
-    expect(btc.type).toBe(TradeSymbolType.Swap);
+    expect(btc.type).toBe(TradeSymbolTypeEnum.Swap);
     expect(btc.isLinear).toBe(true);
   });
 
@@ -57,7 +57,7 @@ describe('normalizeBybitTradeSymbols', () => {
     const result = normalizeBybitTradeSymbols(BYBIT_RAW_INSTRUMENT_LIST);
     const eth = result.get('ETHBTC')!;
 
-    expect(eth.type).toBe(TradeSymbolType.Spot);
+    expect(eth.type).toBe(TradeSymbolTypeEnum.Spot);
     expect(eth.isLinear).toBe(false);
     expect(eth.settle).toBe('');
   });
@@ -122,14 +122,34 @@ describe('normalizeBybitTickers', () => {
   it('multiplies price24hPcnt by 100', () => {
     const result = normalizeBybitTickers(BYBIT_RAW_TICKER_LIST);
 
-    expect(result.get('BTCUSDT')!.percentage).toBeCloseTo(2.35);
-    expect(result.get('ETHUSDT')!.percentage).toBeCloseTo(-1.2);
+    expect(result.get('BTCUSDT')!.priceChangePercent).toBeCloseTo(2.35);
+    expect(result.get('ETHUSDT')!.priceChangePercent).toBeCloseTo(-1.2);
   });
 
   it('parses lastPrice', () => {
     const result = normalizeBybitTickers(BYBIT_RAW_TICKER_LIST);
 
-    expect(result.get('BTCUSDT')!.close).toBe(65432.1);
+    expect(result.get('BTCUSDT')!.lastPrice).toBe(65432.1);
+  });
+
+  it('parses openPrice from prevPrice24h', () => {
+    const result = normalizeBybitTickers(BYBIT_RAW_TICKER_LIST);
+
+    expect(result.get('BTCUSDT')!.openPrice).toBe(63900);
+  });
+
+  it('parses highPrice and lowPrice', () => {
+    const result = normalizeBybitTickers(BYBIT_RAW_TICKER_LIST);
+
+    expect(result.get('BTCUSDT')!.highPrice).toBe(66000);
+    expect(result.get('BTCUSDT')!.lowPrice).toBe(63500);
+  });
+
+  it('parses volume and quoteVolume', () => {
+    const result = normalizeBybitTickers(BYBIT_RAW_TICKER_LIST);
+
+    expect(result.get('BTCUSDT')!.volume).toBe(12345.67);
+    expect(result.get('BTCUSDT')!.quoteVolume).toBe(805000000);
   });
 
   it('preserves timestamp when present', () => {
@@ -202,34 +222,34 @@ describe('normalizeBybitPosition', () => {
   it('maps Buy to long', () => {
     const result = normalizeBybitPosition(BYBIT_RAW_POSITION);
 
-    expect(result.side).toBe(PositionSide.Long);
+    expect(result.side).toBe(PositionSideEnum.Long);
   });
 
   it('maps Sell to short', () => {
     const raw = { ...BYBIT_RAW_POSITION, side: 'Sell' };
     const result = normalizeBybitPosition(raw);
 
-    expect(result.side).toBe(PositionSide.Short);
+    expect(result.side).toBe(PositionSideEnum.Short);
   });
 
   it('falls back to both for unknown side', () => {
     const raw = { ...BYBIT_RAW_POSITION, side: 'None' };
     const result = normalizeBybitPosition(raw);
 
-    expect(result.side).toBe(PositionSide.Both);
+    expect(result.side).toBe(PositionSideEnum.Both);
   });
 
   it('maps tradeMode 0 to cross', () => {
     const raw = { ...BYBIT_RAW_POSITION, tradeMode: 0 };
     const result = normalizeBybitPosition(raw);
 
-    expect(result.marginMode).toBe(MarginMode.Cross);
+    expect(result.marginMode).toBe(MarginModeEnum.Cross);
   });
 
   it('maps tradeMode 1 to isolated', () => {
     const result = normalizeBybitPosition(BYBIT_RAW_POSITION);
 
-    expect(result.marginMode).toBe(MarginMode.Isolated);
+    expect(result.marginMode).toBe(MarginModeEnum.Isolated);
   });
 
   it('parses numeric fields', () => {
@@ -264,6 +284,12 @@ describe('normalizeBybitOrder', () => {
     expect(result.id).toBe('abc-123-def');
   });
 
+  it('preserves orderLinkId as clientOrderId', () => {
+    const result = normalizeBybitOrder(BYBIT_RAW_ORDER_RESPONSE);
+
+    expect(result.clientOrderId).toBe('myBybitOrder123');
+  });
+
   it('lowercases side', () => {
     const result = normalizeBybitOrder(BYBIT_RAW_ORDER_RESPONSE);
 
@@ -274,6 +300,25 @@ describe('normalizeBybitOrder', () => {
     const result = normalizeBybitOrder(BYBIT_RAW_ORDER_RESPONSE);
 
     expect(result.type).toBe('limit');
+  });
+
+  it('parses timeInForce', () => {
+    const result = normalizeBybitOrder(BYBIT_RAW_ORDER_RESPONSE);
+
+    expect(result.timeInForce).toBe('GTC');
+  });
+
+  it('parses avgPrice', () => {
+    const result = normalizeBybitOrder(BYBIT_RAW_ORDER_RESPONSE);
+
+    expect(result.avgPrice).toBe(64950);
+  });
+
+  it('parses filledAmount and filledQuoteAmount', () => {
+    const result = normalizeBybitOrder(BYBIT_RAW_ORDER_RESPONSE);
+
+    expect(result.filledAmount).toBe(0.1);
+    expect(result.filledQuoteAmount).toBe(6495);
   });
 
   it('maps Filled status to closed', () => {
@@ -310,6 +355,12 @@ describe('normalizeBybitOrder', () => {
     expect(result.status).toBe('customstatus');
   });
 
+  it('preserves reduceOnly', () => {
+    const result = normalizeBybitOrder(BYBIT_RAW_ORDER_RESPONSE);
+
+    expect(result.reduceOnly).toBe(false);
+  });
+
   it('parses qty and price', () => {
     const result = normalizeBybitOrder(BYBIT_RAW_ORDER_RESPONSE);
 
@@ -322,6 +373,12 @@ describe('normalizeBybitOrder', () => {
 
     expect(result.timestamp).toBe(1700000000000);
   });
+
+  it('parses updatedTime as updatedTimestamp', () => {
+    const result = normalizeBybitOrder(BYBIT_RAW_ORDER_RESPONSE);
+
+    expect(result.updatedTimestamp).toBe(1700000010000);
+  });
 });
 
 describe('buildBybitOrderFromCreateResponse', () => {
@@ -329,18 +386,25 @@ describe('buildBybitOrderFromCreateResponse', () => {
     jest.spyOn(Date, 'now').mockReturnValue(1700000000000);
 
     const result = buildBybitOrderFromCreateResponse(
-      { symbol: 'BTCUSDT', type: OrderType.Limit, side: OrderSide.Buy, amount: 0.1, price: 65000 },
+      { symbol: 'BTCUSDT', type: OrderTypeEnum.Limit, side: OrderSideEnum.Buy, amount: 0.1, price: 65000 },
       'order-123',
     );
 
     expect(result.id).toBe('order-123');
+    expect(result.clientOrderId).toBe('');
     expect(result.symbol).toBe('BTCUSDT');
-    expect(result.side).toBe(OrderSide.Buy);
-    expect(result.type).toBe(OrderType.Limit);
+    expect(result.side).toBe(OrderSideEnum.Buy);
+    expect(result.type).toBe(OrderTypeEnum.Limit);
+    expect(result.timeInForce).toBe('GTC');
     expect(result.amount).toBe(0.1);
     expect(result.price).toBe(65000);
+    expect(result.avgPrice).toBe(0);
+    expect(result.filledAmount).toBe(0);
+    expect(result.filledQuoteAmount).toBe(0);
     expect(result.status).toBe('open');
+    expect(result.reduceOnly).toBe(false);
     expect(result.timestamp).toBe(1700000000000);
+    expect(result.updatedTimestamp).toBe(1700000000000);
   });
 });
 

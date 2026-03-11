@@ -7,7 +7,7 @@ import {
   BYBIT_RAW_KLINE_LIST,
   BYBIT_RAW_WALLET_BALANCE,
 } from '../fixtures/bybitRaw';
-import { TradeSymbolType, OrderType, OrderSide, MarginMode } from '../../src/types/common';
+import { TradeSymbolTypeEnum, OrderTypeEnum, OrderSideEnum, MarginModeEnum } from '../../src/types/common';
 
 jest.mock('axios');
 jest.mock('../../src/ws/BybitPublicStream');
@@ -41,7 +41,7 @@ describe('BybitSpot', () => {
       const { client, mockInstance } = createClient();
       client.tradeSymbols.set('BTCUSDT', {
         symbol: 'BTCUSDT', baseAsset: 'BTC', quoteAsset: 'USDT', settle: '',
-        isActive: true, type: TradeSymbolType.Spot, isLinear: false, contractSize: 1,
+        isActive: true, type: TradeSymbolTypeEnum.Spot, isLinear: false, contractSize: 1,
         filter: { tickSize: '0.01', stepSize: '0.001', minQty: '0.001', maxQty: '1000', minNotional: '5' },
       });
 
@@ -52,7 +52,7 @@ describe('BybitSpot', () => {
         },
       });
 
-      await client.createOrderWebSocket({ symbol: 'BTCUSDT', type: OrderType.Market, side: OrderSide.Buy, amount: 0.001, price: 0 });
+      await client.createOrderWebSocket({ symbol: 'BTCUSDT', type: OrderTypeEnum.Market, side: OrderSideEnum.Buy, amount: 0.001, price: 0 });
 
       const [, body] = mockInstance.post.mock.calls[0];
 
@@ -63,7 +63,7 @@ describe('BybitSpot', () => {
       const { client, mockInstance } = createClient();
       client.tradeSymbols.set('BTCUSDT', {
         symbol: 'BTCUSDT', baseAsset: 'BTC', quoteAsset: 'USDT', settle: '',
-        isActive: true, type: TradeSymbolType.Spot, isLinear: false, contractSize: 1,
+        isActive: true, type: TradeSymbolTypeEnum.Spot, isLinear: false, contractSize: 1,
         filter: { tickSize: '0.01', stepSize: '0.001', minQty: '0.001', maxQty: '1000', minNotional: '5' },
       });
 
@@ -74,12 +74,51 @@ describe('BybitSpot', () => {
         },
       });
 
-      await client.createOrderWebSocket({ symbol: 'BTCUSDT', type: OrderType.Limit, side: OrderSide.Buy, amount: 0.001, price: 65000 });
+      await client.createOrderWebSocket({ symbol: 'BTCUSDT', type: OrderTypeEnum.Limit, side: OrderSideEnum.Buy, amount: 0.001, price: 65000 });
 
       const [, body] = mockInstance.post.mock.calls[0];
 
       expect(body.marketUnit).toBeUndefined();
     });
+  });
+
+  describe('createOrderWebSocket optional params', () => {
+    it('sends clientOrderId as orderLinkId', async () => {
+      const { client, mockInstance } = createClient();
+      client.tradeSymbols.set('BTCUSDT', {
+        symbol: 'BTCUSDT', baseAsset: 'BTC', quoteAsset: 'USDT', settle: '',
+        isActive: true, type: TradeSymbolTypeEnum.Spot, isLinear: false, contractSize: 1,
+        filter: { tickSize: '0.01', stepSize: '0.001', minQty: '0.001', maxQty: '1000', minNotional: '5' },
+      });
+
+      mockInstance.post.mockResolvedValue({
+        data: { retCode: 0, result: { orderId: '123', symbol: 'BTCUSDT', side: 'Buy', orderType: 'Market', qty: '0.001', price: '0', orderStatus: 'New', createdTime: '1700000000000' } },
+      });
+
+      await client.createOrderWebSocket({ symbol: 'BTCUSDT', type: OrderTypeEnum.Market, side: OrderSideEnum.Buy, amount: 0.001, clientOrderId: 'custom-id' });
+
+      const [, body] = mockInstance.post.mock.calls[0];
+
+      expect(body.orderLinkId).toBe('custom-id');
+    });
+  });
+
+  it('throws "Not supported" for fetchOrderHistory', async () => {
+    const { client } = createClient();
+
+    await expect(client.fetchOrderHistory('BTCUSDT')).rejects.toThrow('Not supported for spot market');
+  });
+
+  it('throws "Not supported" for fetchFundingInfo', async () => {
+    const { client } = createClient();
+
+    await expect(client.fetchFundingInfo()).rejects.toThrow('Not supported for spot market');
+  });
+
+  it('throws "Not supported" for fetchPositionMode', async () => {
+    const { client } = createClient();
+
+    await expect(client.fetchPositionMode()).rejects.toThrow('Not supported for spot market');
   });
 
   it('throws "Not supported" for fetchFundingRateHistory', async () => {
@@ -103,7 +142,7 @@ describe('BybitSpot', () => {
   it('throws "Not supported" for setMarginMode', async () => {
     const { client } = createClient();
 
-    await expect(client.setMarginMode(MarginMode.Isolated, 'BTCUSDT')).rejects.toThrow('Not supported for spot market');
+    await expect(client.setMarginMode(MarginModeEnum.Isolated, 'BTCUSDT')).rejects.toThrow('Not supported for spot market');
   });
 
   describe('loadTradeSymbols', () => {
@@ -132,7 +171,7 @@ describe('BybitSpot', () => {
 
       expect(tickers.size).toBeGreaterThan(0);
       expect(tickers.get('BTCUSDT')).toBeDefined();
-      expect(tickers.get('BTCUSDT')!.close).toBe(65432.1);
+      expect(tickers.get('BTCUSDT')!.lastPrice).toBe(65432.1);
     });
   });
 

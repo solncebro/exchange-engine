@@ -1,22 +1,22 @@
 import type { ExchangeClient, ExchangeArgs } from '../types/exchange';
-import { ExchangeName } from '../types/common';
+import { ExchangeNameEnum } from '../types/common';
 import { BinanceFutures } from './BinanceFutures';
 import { BinanceSpot } from './BinanceSpot';
 import { BybitLinear } from './BybitLinear';
 import { BybitSpot } from './BybitSpot';
 
 class Exchange {
-  readonly name: ExchangeName;
+  readonly name: ExchangeNameEnum;
   readonly futures: ExchangeClient;
   readonly spot: ExchangeClient;
 
-  constructor(name: ExchangeName, args: ExchangeArgs) {
+  constructor(name: ExchangeNameEnum, args: ExchangeArgs) {
     this.name = name;
 
-    if (name === ExchangeName.Binance) {
+    if (name === ExchangeNameEnum.Binance) {
       this.futures = new BinanceFutures(args);
       this.spot = new BinanceSpot(args);
-    } else if (name === ExchangeName.Bybit) {
+    } else if (name === ExchangeNameEnum.Bybit) {
       this.futures = new BybitLinear(args);
       this.spot = new BybitSpot(args);
     } else {

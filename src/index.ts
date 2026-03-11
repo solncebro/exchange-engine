@@ -10,14 +10,15 @@ export type {
 } from './types/exchange';
 
 export {
-  ExchangeName,
-  OrderSide,
-  OrderType,
-  MarginMode,
-  PositionSide,
-  PositionMode,
-  TradeSymbolType,
-  TimeInForce,
+  ExchangeNameEnum,
+  OrderSideEnum,
+  OrderTypeEnum,
+  MarginModeEnum,
+  PositionSideEnum,
+  PositionModeEnum,
+  TradeSymbolTypeEnum,
+  TimeInForceEnum,
+  WorkingTypeEnum,
 } from './types/common';
 
 export type {

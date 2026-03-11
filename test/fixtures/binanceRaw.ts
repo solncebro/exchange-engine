@@ -39,8 +39,8 @@ export const BINANCE_RAW_EXCHANGE_INFO: BinanceExchangeInfoRaw = {
 };
 
 export const BINANCE_RAW_TICKER_LIST: BinanceTicker24hrRaw[] = [
-  { symbol: 'BTCUSDT', lastPrice: '65432.10', priceChangePercent: '2.35', time: 1700000000000 },
-  { symbol: 'ETHUSDT', lastPrice: '3456.78', priceChangePercent: '-1.20', time: 1700000000000 },
+  { symbol: 'BTCUSDT', lastPrice: '65432.10', openPrice: '63900.00', highPrice: '66000.00', lowPrice: '63500.00', priceChangePercent: '2.35', volume: '12345.67', quoteVolume: '805000000.00', time: 1700000000000 },
+  { symbol: 'ETHUSDT', lastPrice: '3456.78', openPrice: '3498.78', highPrice: '3550.00', lowPrice: '3400.00', priceChangePercent: '-1.20', volume: '98765.43', quoteVolume: '340000000.00', time: 1700000000000 },
 ];
 
 export const BINANCE_RAW_KLINE_LIST: unknown[][] = [
@@ -78,12 +78,20 @@ export const BINANCE_RAW_POSITION_RISK: BinancePositionRiskRaw = {
 
 export const BINANCE_RAW_ORDER_RESPONSE: BinanceOrderResponseRaw = {
   orderId: 123456789,
+  clientOrderId: 'myOrder123',
   symbol: 'BTCUSDT',
   side: 'BUY',
   type: 'LIMIT',
+  timeInForce: 'GTC',
   origQty: '0.100',
+  executedQty: '0.100',
   price: '65000.00',
+  avgPrice: '64950.00',
+  stopPrice: '0',
+  cumQuote: '6495.00',
   status: 'FILLED',
+  reduceOnly: false,
+  time: 1699999990000,
   updateTime: 1700000000000,
 };
 

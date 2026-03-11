@@ -3,12 +3,14 @@ describe('export contract', () => {
     const api = require('../src/index');
 
     expect(api.Exchange).toBeDefined();
-    expect(api.ExchangeName).toBeDefined();
-    expect(api.OrderSide).toBeDefined();
-    expect(api.OrderType).toBeDefined();
-    expect(api.MarginMode).toBeDefined();
-    expect(api.PositionSide).toBeDefined();
-    expect(api.TradeSymbolType).toBeDefined();
-    expect(api.TimeInForce).toBeDefined();
+    expect(api.ExchangeNameEnum).toBeDefined();
+    expect(api.OrderSideEnum).toBeDefined();
+    expect(api.OrderTypeEnum).toBeDefined();
+    expect(api.MarginModeEnum).toBeDefined();
+    expect(api.PositionSideEnum).toBeDefined();
+    expect(api.TradeSymbolTypeEnum).toBeDefined();
+    expect(api.TimeInForceEnum).toBeDefined();
+    expect(api.PositionModeEnum).toBeDefined();
+    expect(api.WorkingTypeEnum).toBeDefined();
   });
 });

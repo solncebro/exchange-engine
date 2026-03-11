@@ -29,7 +29,7 @@ BaseExchangeClient (abstract, implements ExchangeClient)
 Аккаунт:
   fetchBalance(): Promise<BalanceByAsset>
   fetchPosition(symbol): Promise<Position>
-  fetchPositionMode(): Promise<PositionMode>
+  fetchPositionMode(): Promise<PositionModeEnum>
   fetchFundingRateHistory(symbol, options?): Promise<FundingRateHistory[]>
   fetchFundingInfo(symbol?): Promise<FundingInfo[]>
 

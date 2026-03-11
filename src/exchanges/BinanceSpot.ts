@@ -1,6 +1,6 @@
 import type { ExchangeArgs } from '../types/exchange';
-import type { Position, FundingRateHistory, FundingInfo } from '../types/common';
-import { MarginMode, PositionMode } from '../types/common';
+import type { Position, Order, FundingRateHistory, FundingInfo } from '../types/common';
+import { MarginModeEnum, PositionModeEnum } from '../types/common';
 import { BinanceSpotHttpClient } from '../http/BinanceSpotHttpClient';
 import { BinanceSpotPublicStream } from '../ws/BinanceSpotPublicStream';
 import {
@@ -40,7 +40,7 @@ class BinanceSpot extends BinanceBaseClient<BinanceSpotHttpClient> {
     throw new Error('Not supported for spot market');
   }
 
-  async fetchPositionMode(): Promise<PositionMode> {
+  async fetchPositionMode(): Promise<PositionModeEnum> {
     throw new Error('Not supported for spot market');
   }
 
@@ -52,7 +52,11 @@ class BinanceSpot extends BinanceBaseClient<BinanceSpotHttpClient> {
     throw new Error('Not supported for spot market');
   }
 
-  async setMarginMode(_marginMode: MarginMode, _symbol: string): Promise<void> {
+  async setMarginMode(_marginMode: MarginModeEnum, _symbol: string): Promise<void> {
+    throw new Error('Not supported for spot market');
+  }
+
+  async fetchOrderHistory(_symbol: string): Promise<Order[]> {
     throw new Error('Not supported for spot market');
   }
 }

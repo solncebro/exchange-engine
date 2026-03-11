@@ -30,8 +30,8 @@ export const BYBIT_RAW_INSTRUMENT_LIST: BybitInstrumentInfoRaw[] = [
 ];
 
 export const BYBIT_RAW_TICKER_LIST: BybitTickerRaw[] = [
-  { symbol: 'BTCUSDT', lastPrice: '65432.10', price24hPcnt: '0.0235', time: 1700000000000 },
-  { symbol: 'ETHUSDT', lastPrice: '3456.78', price24hPcnt: '-0.0120' },
+  { symbol: 'BTCUSDT', lastPrice: '65432.10', prevPrice24h: '63900.00', highPrice24h: '66000.00', lowPrice24h: '63500.00', price24hPcnt: '0.0235', volume24h: '12345.67', turnover24h: '805000000.00', time: 1700000000000 },
+  { symbol: 'ETHUSDT', lastPrice: '3456.78', prevPrice24h: '3498.78', highPrice24h: '3550.00', lowPrice24h: '3400.00', price24hPcnt: '-0.0120', volume24h: '98765.43', turnover24h: '340000000.00' },
 ];
 
 export const BYBIT_RAW_KLINE_LIST: string[][] = [
@@ -66,13 +66,21 @@ export const BYBIT_RAW_POSITION: BybitPositionRaw = {
 
 export const BYBIT_RAW_ORDER_RESPONSE: BybitOrderResponseRaw = {
   orderId: 'abc-123-def',
+  orderLinkId: 'myBybitOrder123',
   symbol: 'BTCUSDT',
   side: 'Buy',
   orderType: 'Limit',
+  timeInForce: 'GTC',
   qty: '0.100',
   price: '65000.00',
+  avgPrice: '64950.00',
+  triggerPrice: '0',
+  cumExecQty: '0.100',
+  cumExecValue: '6495.00',
   orderStatus: 'Filled',
+  reduceOnly: false,
   createdTime: '1700000000000',
+  updatedTime: '1700000010000',
 };
 
 export const BYBIT_RAW_WALLET_BALANCE: BybitWalletBalanceRaw = {

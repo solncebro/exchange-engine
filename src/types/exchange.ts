@@ -11,7 +11,15 @@ import type {
   FundingRateHistory,
   FundingInfo,
 } from './common';
-import { MarginMode, OrderSide, OrderType, PositionMode } from './common';
+import {
+  MarginModeEnum,
+  OrderSideEnum,
+  OrderTypeEnum,
+  PositionModeEnum,
+  PositionSideEnum,
+  TimeInForceEnum,
+  WorkingTypeEnum,
+} from './common';
 
 export interface ExchangeArgs {
   config: ExchangeConfig;
@@ -21,11 +29,17 @@ export interface ExchangeArgs {
 
 export interface CreateOrderWebSocketArgs {
   symbol: string;
-  type: OrderType;
-  side: OrderSide;
+  type: OrderTypeEnum;
+  side: OrderSideEnum;
   amount: number;
-  price: number;
-  params?: Record<string, unknown>;
+  price?: number;
+  stopPrice?: number;
+  closePosition?: boolean;
+  workingType?: WorkingTypeEnum;
+  positionSide?: PositionSideEnum;
+  reduceOnly?: boolean;
+  timeInForce?: TimeInForceEnum;
+  clientOrderId?: string;
 }
 
 export interface FetchPageWithLimitArgs {
@@ -54,14 +68,15 @@ export interface ExchangeClient {
   fetchFundingRateHistory(symbol: string, options?: FetchPageWithLimitArgs): Promise<FundingRateHistory[]>;
   fetchPosition(symbol: string): Promise<Position>;
   setLeverage(leverage: number, symbol: string): Promise<void>;
-  setMarginMode(marginMode: MarginMode, symbol: string): Promise<void>;
+  setMarginMode(marginMode: MarginModeEnum, symbol: string): Promise<void>;
   amountToPrecision(symbol: string, amount: number): string;
   priceToPrecision(symbol: string, price: number): string;
   getMinOrderQty(symbol: string): number;
   getMinNotional(symbol: string): number;
   fetchFundingInfo(symbol?: string): Promise<FundingInfo[]>;
-  fetchPositionMode(): Promise<PositionMode>;
+  fetchPositionMode(): Promise<PositionModeEnum>;
   createOrderWebSocket(args: CreateOrderWebSocketArgs): Promise<Order>;
+  fetchOrderHistory(symbol: string, options?: FetchPageWithLimitArgs): Promise<Order[]>;
   close(): Promise<void>;
 
   watchTickers(): AsyncGenerator<TickerBySymbol>;

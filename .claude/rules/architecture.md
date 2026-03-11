@@ -74,13 +74,13 @@ Exchange (фабрика)
 `Exchange` — точка входа. Создаёт пару futures + spot:
 
 ```typescript
-const exchange = new Exchange(ExchangeName.Binance, { config, logger });
+const exchange = new Exchange(ExchangeNameEnum.Binance, { config, logger });
 exchange.futures  // → BinanceFutures (ExchangeClient)
 exchange.spot     // → BinanceSpot (ExchangeClient)
 exchange.close()  // → закрывает оба
 ```
 
-При `ExchangeName.Bybit` создаёт `BybitLinear` + `BybitSpot`.
+При `ExchangeNameEnum.Bybit` создаёт `BybitLinear` + `BybitSpot`.
 
 ## Ключевые принципы
 
