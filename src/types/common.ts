@@ -63,6 +63,7 @@ export interface ExchangeConfig {
   secret: string;
   recvWindow?: number;
   isDemoMode?: boolean;
+  httpsAgent?: unknown;
 }
 
 export interface ExchangeLogger {

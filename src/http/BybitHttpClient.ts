@@ -17,6 +17,7 @@ interface BybitHttpClientArgs {
   apiKey: string;
   secret: string;
   logger: ExchangeLogger;
+  httpsAgent?: unknown;
 }
 
 interface SymbolFilterArgs {
@@ -83,7 +84,7 @@ export class BybitHttpClient extends BaseHttpClient {
   private readonly secret: string;
 
   constructor(args: BybitHttpClientArgs) {
-    super({ baseUrl: args.baseUrl, apiKey: args.apiKey, logger: args.logger, timeout: BYBIT_REQUEST_TIMEOUT });
+    super({ baseUrl: args.baseUrl, apiKey: args.apiKey, logger: args.logger, timeout: BYBIT_REQUEST_TIMEOUT, httpsAgent: args.httpsAgent });
     this.secret = args.secret;
   }
 

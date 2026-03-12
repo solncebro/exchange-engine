@@ -56,6 +56,7 @@ class BybitLinear extends BaseExchangeClient {
       apiKey: args.config.apiKey,
       secret: args.config.secret,
       logger: args.logger,
+      httpsAgent: args.config.httpsAgent,
     });
 
     this.publicStream = new BybitPublicStream(

@@ -25,6 +25,7 @@ class BinanceSpot extends BinanceBaseClient<BinanceSpotHttpClient> {
       apiKey: args.config.apiKey,
       secret: args.config.secret,
       logger: args.logger,
+      httpsAgent: args.config.httpsAgent,
     });
 
     const publicStream = new BinanceSpotPublicStream(BINANCE_SPOT_WEBSOCKET_STREAM_URL, args.logger, args.onNotify);

@@ -1,5 +1,14 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
+import { HttpsAgent as KeepAliveHttpsAgent } from 'agentkeepalive';
 import { ExchangeLogger } from '../types/common';
+
+const DEFAULT_HTTPS_AGENT = new KeepAliveHttpsAgent({
+  maxSockets: 100,
+  maxFreeSockets: 10,
+  timeout: 60000,
+  freeSocketTimeout: 30000,
+  keepAlive: true,
+});
 
 const MAX_RETRIES = 3;
 const RETRY_BASE_DELAY_MS = 1000;
@@ -35,6 +44,7 @@ interface BaseHttpClientArgs {
   apiKey: string;
   logger: ExchangeLogger;
   timeout?: number;
+  httpsAgent?: unknown;
 }
 
 export abstract class BaseHttpClient {
@@ -48,6 +58,7 @@ export abstract class BaseHttpClient {
     this.axiosInstance = axios.create({
       baseURL: args.baseUrl,
       timeout: args.timeout ?? 30000,
+      httpsAgent: args.httpsAgent ?? DEFAULT_HTTPS_AGENT,
     });
   }
 

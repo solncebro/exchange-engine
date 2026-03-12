@@ -97,4 +97,75 @@ describe('loadKlinesInChunks', () => {
     expect(logger.info).toHaveBeenCalledWith('Loaded klines for 200/201 symbols');
     expect(logger.info).toHaveBeenCalledWith('Loaded klines for 201/201 symbols');
   });
+
+  it('warns and skips symbols with empty klines', async () => {
+    const fetchKlines = jest.fn().mockResolvedValue([]);
+    const logger = createMockLogger();
+
+    const result = await loadKlinesInChunks({ fetchKlines, symbolList: ['BTCUSDT'], logger });
+
+    expect(result.size).toBe(0);
+    expect(logger.warn).toHaveBeenCalledWith('BTCUSDT has no klines');
+  });
+
+  it('trims last kline when trimLastKline is true', async () => {
+    const kline1 = createMockKline('A');
+    const kline2 = { ...createMockKline('A'), openTimestamp: 1700003600000 };
+    const fetchKlines = jest.fn().mockResolvedValue([kline1, kline2]);
+    const logger = createMockLogger();
+
+    const result = await loadKlinesInChunks({ fetchKlines, symbolList: ['BTCUSDT'], logger, trimLastKline: true });
+
+    expect(result.get('BTCUSDT')).toEqual([kline1]);
+  });
+
+  it('warns and skips when trimLastKline leaves empty list', async () => {
+    const fetchKlines = jest.fn().mockResolvedValue([createMockKline('A')]);
+    const logger = createMockLogger();
+
+    const result = await loadKlinesInChunks({ fetchKlines, symbolList: ['BTCUSDT'], logger, trimLastKline: true });
+
+    expect(result.size).toBe(0);
+    expect(logger.warn).toHaveBeenCalledWith('BTCUSDT has no klines after trim');
+  });
+
+  it('calls onChunkLoaded callback for each chunk', async () => {
+    const fetchKlines = jest.fn().mockResolvedValue([createMockKline('X')]);
+    const logger = createMockLogger();
+    const onChunkLoaded = jest.fn();
+
+    await loadKlinesInChunks({ fetchKlines, symbolList: ['A', 'B', 'C'], logger, chunkSize: 2, onChunkLoaded });
+
+    expect(onChunkLoaded).toHaveBeenCalledTimes(2);
+    expect(onChunkLoaded.mock.calls[0][0]).toBeInstanceOf(Map);
+    expect(onChunkLoaded.mock.calls[0][0].size).toBe(2);
+    expect(onChunkLoaded.mock.calls[1][0].size).toBe(1);
+  });
+
+  it('pauses between chunks when pauseBetweenChunksMs is set', async () => {
+    jest.useFakeTimers();
+    const fetchKlines = jest.fn().mockResolvedValue([createMockKline('X')]);
+    const logger = createMockLogger();
+
+    const promise = loadKlinesInChunks({ fetchKlines, symbolList: ['A', 'B', 'C'], logger, chunkSize: 2, pauseBetweenChunksMs: 500 });
+
+    await jest.advanceTimersByTimeAsync(500);
+    await promise;
+
+    expect(logger.info).toHaveBeenCalledWith('Pause for 500ms');
+    jest.useRealTimers();
+  });
+
+  it('does not pause after last chunk', async () => {
+    jest.useFakeTimers();
+    const fetchKlines = jest.fn().mockResolvedValue([createMockKline('X')]);
+    const logger = createMockLogger();
+
+    const promise = loadKlinesInChunks({ fetchKlines, symbolList: ['A', 'B'], logger, chunkSize: 2, pauseBetweenChunksMs: 500 });
+
+    await promise;
+
+    expect(logger.info).not.toHaveBeenCalledWith(expect.stringContaining('Pause'));
+    jest.useRealTimers();
+  });
 });

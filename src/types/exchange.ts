@@ -56,6 +56,13 @@ export interface SubscribeKlinesArgs {
   handler: KlineHandler;
 }
 
+export interface FetchAllKlinesOptions {
+  chunkSize?: number;
+  pauseBetweenChunksMs?: number;
+  trimLastKline?: boolean;
+  onChunkLoaded?: (chunkResult: Map<string, Kline[]>) => void;
+}
+
 export interface ExchangeClient {
   readonly apiKey: string;
   readonly tradeSymbols: TradeSymbolBySymbol;
@@ -63,7 +70,7 @@ export interface ExchangeClient {
   loadTradeSymbols(shouldReload?: boolean): Promise<TradeSymbolBySymbol>;
   fetchTickers(): Promise<TickerBySymbol>;
   fetchKlines(symbol: string, interval: KlineInterval, options?: FetchPageWithLimitArgs): Promise<Kline[]>;
-  fetchAllKlines(symbolList: string[], interval: KlineInterval): Promise<Map<string, Kline[]>>;
+  fetchAllKlines(symbolList: string[], interval: KlineInterval, options?: FetchAllKlinesOptions): Promise<Map<string, Kline[]>>;
   fetchBalance(): Promise<BalanceByAsset>;
   fetchFundingRateHistory(symbol: string, options?: FetchPageWithLimitArgs): Promise<FundingRateHistory[]>;
   fetchPosition(symbol: string): Promise<Position>;

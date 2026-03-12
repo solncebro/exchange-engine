@@ -15,6 +15,7 @@ export interface BinanceHttpClientArgs {
   apiKey: string;
   secret: string;
   logger: ExchangeLogger;
+  httpsAgent?: unknown;
 }
 
 interface BinanceListenKeyResponse {
@@ -38,7 +39,7 @@ abstract class BinanceBaseHttpClient extends BaseHttpClient {
   protected abstract readonly endpoints: BinanceEndpoints;
 
   constructor(args: BinanceHttpClientArgs, timeout: number) {
-    super({ baseUrl: args.baseUrl, apiKey: args.apiKey, logger: args.logger, timeout });
+    super({ baseUrl: args.baseUrl, apiKey: args.apiKey, logger: args.logger, timeout, httpsAgent: args.httpsAgent });
     this.secret = args.secret;
   }
 

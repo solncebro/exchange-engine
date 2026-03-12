@@ -4,6 +4,7 @@ export type {
   ExchangeClient,
   ExchangeArgs,
   CreateOrderWebSocketArgs,
+  FetchAllKlinesOptions,
   FetchPageWithLimitArgs,
   SubscribeKlinesArgs,
   KlineHandler,

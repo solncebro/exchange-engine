@@ -31,6 +31,7 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
       apiKey: args.config.apiKey,
       secret: args.config.secret,
       logger: args.logger,
+      httpsAgent: args.config.httpsAgent,
     });
 
     const publicStream = new BinanceFuturesPublicStream(webSocketCombinedUrl, args.logger, args.onNotify);

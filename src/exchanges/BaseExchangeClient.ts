@@ -1,6 +1,7 @@
 import type {
   ExchangeClient,
   ExchangeArgs,
+  FetchAllKlinesOptions,
   FetchPageWithLimitArgs,
   SubscribeKlinesArgs,
 } from '../types/exchange';
@@ -72,18 +73,27 @@ abstract class BaseExchangeClient implements ExchangeClient {
     options?: FetchPageWithLimitArgs,
   ): Promise<Kline[]> {
     this.logger.debug(`Fetching klines for ${symbol} ${interval}`);
+    const resolvedOptions: FetchPageWithLimitArgs = {
+      ...options,
+      limit: options?.limit ?? this.klineLimit,
+    };
 
-    return this.fetchAndNormalizeKlines(symbol, interval, options);
+    return this.fetchAndNormalizeKlines(symbol, interval, resolvedOptions);
   }
 
   async fetchAllKlines(
     symbolList: string[],
     interval: KlineInterval,
+    options?: FetchAllKlinesOptions,
   ): Promise<Map<string, Kline[]>> {
     return loadKlinesInChunks({
-      fetchKlines: (symbol) => this.fetchKlines(symbol, interval, { limit: this.klineLimit }),
+      fetchKlines: (symbol) => this.fetchKlines(symbol, interval),
       symbolList,
       logger: this.logger,
+      chunkSize: options?.chunkSize,
+      pauseBetweenChunksMs: options?.pauseBetweenChunksMs,
+      trimLastKline: options?.trimLastKline,
+      onChunkLoaded: options?.onChunkLoaded,
     });
   }
 

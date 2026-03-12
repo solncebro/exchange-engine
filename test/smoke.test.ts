@@ -15,6 +15,7 @@ import {
   ExchangeConfig,
   ExchangeLogger,
   CreateOrderWebSocketArgs,
+  FetchAllKlinesOptions,
   FetchPageWithLimitArgs,
   SubscribeKlinesArgs,
   PositionSideEnum,
@@ -175,6 +176,7 @@ type _CheckOrder             = AssertAssignable<Order>;
 type _CheckBalance           = AssertAssignable<Balance>;
 type _CheckBalanceByAsset    = AssertAssignable<BalanceByAsset>;
 type _CheckCreateOrderArgs   = AssertAssignable<CreateOrderWebSocketArgs>;
+type _CheckFetchAllKlinesOptions = AssertAssignable<FetchAllKlinesOptions>;
 type _CheckFetchPageArgs     = AssertAssignable<FetchPageWithLimitArgs>;
 type _CheckSubscribeKlines   = AssertAssignable<SubscribeKlinesArgs>;
 type _CheckFundingHistory    = AssertAssignable<FundingRateHistory>;
