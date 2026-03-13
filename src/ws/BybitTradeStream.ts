@@ -1,135 +1,46 @@
 import type { WebSocketOpenContext } from '@solncebro/websocket-engine';
 import { ReliableWebSocket } from '@solncebro/websocket-engine';
-import type { RawData } from 'ws';
 
 import type { BybitOrderResponseRaw } from '../normalizers/bybitNormalizer';
 import { normalizeBybitOrder } from '../normalizers/bybitNormalizer';
-import type { ExchangeLogger, Order } from '../types/common';
 import type { BybitBaseWebSocketMessage } from './bybitWebSocketUtils';
 import {
   BYBIT_HEARTBEAT_CONFIG,
   BYBIT_PING_INTERVAL,
-  authenticateBybitWebSocket
+  authenticateBybitWebSocket,
 } from './bybitWebSocketUtils';
+import { BaseTradeStream } from './BaseTradeStream';
+import { parseWebSocketMessage } from './parseWebSocketMessage';
 
 interface BybitTradeMessage extends BybitBaseWebSocketMessage {
   reason?: string;
   reqId?: string;
 }
 
-interface BybitTradeStreamArgs {
-  url: string;
-  apiKey: string;
-  secret: string;
-  logger: ExchangeLogger;
-  onNotify?: (message: string) => void | Promise<void>;
-}
+class BybitTradeStream extends BaseTradeStream<BybitTradeMessage> {
+  protected readonly label = 'BybitTradeStream';
 
-interface PendingRequest {
-  resolve: (order: Order) => void;
-  reject: (error: Error) => void;
-  timeout: NodeJS.Timeout;
-}
-
-function parseBybitTradeMessage(rawData: RawData): BybitTradeMessage {
-  return JSON.parse(rawData.toString()) as BybitTradeMessage;
-}
-
-const ORDER_TIMEOUT_MS = 30000;
-
-class BybitTradeStream {
-  private webSocket: ReliableWebSocket<BybitTradeMessage> | null = null;
-  private readonly url: string;
-  private readonly logger: ExchangeLogger;
-  private readonly apiKey: string;
-  private readonly secret: string;
-  private readonly onNotify?: (message: string) => void | Promise<void>;
-  private readonly pendingRequestByRequestId: Map<string, PendingRequest> = new Map();
-  private connectPromise: Promise<void> | null = null;
-
-  constructor(args: BybitTradeStreamArgs) {
-    this.url = args.url;
-    this.logger = args.logger;
-    this.apiKey = args.apiKey;
-    this.secret = args.secret;
-    this.onNotify = args.onNotify;
-  }
-
-  async createOrder(orderParams: Record<string, unknown>): Promise<Order> {
-    await this.ensureConnected();
-
-    const requestId = `order_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-    const request = {
+  protected buildOrderRequest(
+    orderParams: Record<string, unknown>,
+    requestId: string,
+  ): unknown {
+    return {
       op: 'order.create',
       args: [{ ...orderParams }],
       header: { 'X-BAPI-TIMESTAMP': String(Date.now()), 'X-BAPI-RECV-WINDOW': '7000' },
       reqId: requestId,
     };
-
-    return new Promise<Order>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        this.pendingRequestByRequestId.delete(requestId);
-        reject(new Error(`Order creation timeout after ${ORDER_TIMEOUT_MS}ms`));
-      }, ORDER_TIMEOUT_MS);
-
-      this.pendingRequestByRequestId.set(requestId, { resolve, reject, timeout });
-
-      if (this.webSocket === null) {
-        reject(new Error('WebSocket is not connected'));
-
-        return;
-      }
-
-      this.webSocket.sendToConnectedSocket(request);
-    });
   }
 
-  disconnect(): void {
-    for (const [requestId, pending] of this.pendingRequestByRequestId) {
-      clearTimeout(pending.timeout);
-      pending.reject(new Error('BybitTradeStream disconnected'));
-      this.pendingRequestByRequestId.delete(requestId);
-    }
-
-    if (this.webSocket !== null) {
-      this.webSocket.close();
-      this.webSocket = null;
-    }
-
-    this.connectPromise = null;
-  }
-
-  isConnected(): boolean {
-    return this.webSocket !== null;
-  }
-
-  private async ensureConnected(): Promise<void> {
-    if (this.webSocket !== null) {
-      return;
-    }
-
-    if (this.connectPromise !== null) {
-      return this.connectPromise;
-    }
-
-    this.connectPromise = this.initConnection();
-
-    try {
-      await this.connectPromise;
-    } finally {
-      this.connectPromise = null;
-    }
-  }
-
-  private initConnection(): Promise<void> {
+  protected initConnection(): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       let isResolved = false;
 
       this.webSocket = new ReliableWebSocket<BybitTradeMessage>({
-        label: 'BybitTradeStream',
+        label: this.label,
         url: this.url,
         logger: this.logger,
-        parseMessage: parseBybitTradeMessage,
+        parseMessage: (rawData) => parseWebSocketMessage<BybitTradeMessage>(rawData),
         onMessage: (message) => this.handleMessage(message),
         onOpen: async (context) => {
           try {
@@ -153,7 +64,13 @@ class BybitTradeStream {
   }
 
   private async authenticate(context: WebSocketOpenContext<BybitTradeMessage>): Promise<void> {
-    await authenticateBybitWebSocket({ context, apiKey: this.apiKey, secret: this.secret, label: 'BybitTradeStream', logger: this.logger });
+    await authenticateBybitWebSocket({
+      context,
+      apiKey: this.apiKey,
+      secret: this.secret,
+      label: this.label,
+      logger: this.logger,
+    });
   }
 
   private handleMessage(message: BybitTradeMessage): void {
@@ -182,4 +99,3 @@ class BybitTradeStream {
 }
 
 export { BybitTradeStream };
-export type { BybitTradeStreamArgs };

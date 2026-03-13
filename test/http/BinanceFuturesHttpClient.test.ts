@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { BinanceFuturesHttpClient } from '../../src/http/BinanceFuturesHttpClient';
 import { createMockLogger } from '../fixtures/mockLogger';
+import { createMockAxiosInstance } from '../fixtures/mockAxios';
 
 jest.mock('axios');
 const mockedAxios = axios as jest.Mocked<typeof axios>;
@@ -12,12 +13,7 @@ describe('BinanceFuturesHttpClient', () => {
   beforeEach(() => {
     jest.spyOn(Date, 'now').mockReturnValue(1700000000000);
 
-    mockInstance = {
-      get: jest.fn().mockResolvedValue({ data: {} }),
-      post: jest.fn().mockResolvedValue({ data: {} }),
-      put: jest.fn().mockResolvedValue({ data: {} }),
-      delete: jest.fn().mockResolvedValue({ data: {} }),
-    };
+    mockInstance = createMockAxiosInstance();
     mockedAxios.create.mockReturnValue(mockInstance as any);
 
     client = new BinanceFuturesHttpClient({
@@ -147,27 +143,27 @@ describe('BinanceFuturesHttpClient', () => {
 
   describe('createBatchOrders', () => {
     it('calls signedPost /fapi/v1/batchOrders with stringified order list', async () => {
-      const orders = [{ symbol: 'BTCUSDT', side: 'BUY' }];
-      await client.createBatchOrders(orders);
+      const orderList = [{ symbol: 'BTCUSDT', side: 'BUY' }];
+      await client.createBatchOrders(orderList);
 
       const [url, , options] = mockInstance.post.mock.calls[0];
 
       expect(url).toBe('/fapi/v1/batchOrders');
-      expect(options.params.batchOrders).toBe(JSON.stringify(orders));
+      expect(options.params.batchOrders).toBe(JSON.stringify(orderList));
       expect(options.params.signature).toBeDefined();
     });
   });
 
   describe('cancelBatchOrders', () => {
     it('calls signedDelete /fapi/v1/batchOrders with stringified order ids', async () => {
-      const orderIds = ['111', '222'];
-      await client.cancelBatchOrders('BTCUSDT', orderIds);
+      const orderIdList = ['111', '222'];
+      await client.cancelBatchOrders('BTCUSDT', orderIdList);
 
       const [url, options] = mockInstance.delete.mock.calls[0];
 
       expect(url).toBe('/fapi/v1/batchOrders');
       expect(options.params.symbol).toBe('BTCUSDT');
-      expect(options.params.orderIdList).toBe(JSON.stringify(orderIds));
+      expect(options.params.orderIdList).toBe(JSON.stringify(orderIdList));
       expect(options.params.signature).toBeDefined();
     });
   });

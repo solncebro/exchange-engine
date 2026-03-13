@@ -84,6 +84,8 @@ export interface ExchangeClient {
   fetchPositionMode(): Promise<PositionModeEnum>;
   createOrderWebSocket(args: CreateOrderWebSocketArgs): Promise<Order>;
   fetchOrderHistory(symbol: string, options?: FetchPageWithLimitArgs): Promise<Order[]>;
+  isTradeWebSocketConnected(): boolean;
+  connectTradeWebSocket(): Promise<void>;
   close(): Promise<void>;
 
   watchTickers(): AsyncGenerator<TickerBySymbol>;

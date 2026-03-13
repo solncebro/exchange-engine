@@ -1,4 +1,3 @@
-import type { RawData } from 'ws';
 import { ReliableWebSocket } from '@solncebro/websocket-engine';
 
 import type { ExchangeLogger, KlineInterval, TickerBySymbol } from '../types/common';
@@ -8,14 +7,11 @@ import type { BybitTickerRaw, BybitWebSocketKlineRaw } from '../normalizers/bybi
 import { BYBIT_KLINE_INTERVAL } from '../constants/bybit';
 import { BYBIT_HEARTBEAT_CONFIG, BYBIT_PING_INTERVAL } from './bybitWebSocketUtils';
 import type { BybitBaseWebSocketMessage } from './bybitWebSocketUtils';
+import { parseWebSocketMessage } from './parseWebSocketMessage';
 
 interface BybitWebSocketMessage extends BybitBaseWebSocketMessage {
   topic?: string;
   ret_code?: number;
-}
-
-function parseBybitMessage(rawData: RawData): BybitWebSocketMessage {
-  return JSON.parse(rawData.toString()) as BybitWebSocketMessage;
 }
 
 function resolveUnifiedInterval(bybitInterval: string): KlineInterval {
@@ -117,7 +113,7 @@ class BybitPublicStream {
       label: 'BybitPublicStream',
       url: this.url,
       logger: this.logger,
-      parseMessage: parseBybitMessage,
+      parseMessage: (rawData) => parseWebSocketMessage<BybitWebSocketMessage>(rawData),
       onMessage: (message) => this.handleMessage(message),
       onReconnectSuccess: () => this.resubscribeAll(),
       onNotify: this.onNotify,
@@ -148,10 +144,10 @@ class BybitPublicStream {
     const topic = message.topic;
 
     if (topic.startsWith('tickers.')) {
-      const tickers = normalizeBybitTickers(message.data as BybitTickerRaw[]);
+      const tickerBySymbol = normalizeBybitTickers(message.data as BybitTickerRaw[]);
 
       for (const handler of this.tickerHandlerSet) {
-        handler(tickers);
+        handler(tickerBySymbol);
       }
 
       return;

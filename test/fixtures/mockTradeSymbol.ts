@@ -1,4 +1,4 @@
-import type { TradeSymbol, TradeSymbolBySymbol } from '../../src/types/common';
+import type { TradeSymbol } from '../../src/types/common';
 import { TradeSymbolTypeEnum } from '../../src/types/common';
 
 export const BTCUSDT_TRADE_SYMBOL: TradeSymbol = {
@@ -37,10 +37,21 @@ export const ETHUSDT_TRADE_SYMBOL: TradeSymbol = {
   },
 };
 
-export function createMockTradeSymbols(): TradeSymbolBySymbol {
-  const tradeSymbols = new Map<string, TradeSymbol>();
-  tradeSymbols.set('BTCUSDT', BTCUSDT_TRADE_SYMBOL);
-  tradeSymbols.set('ETHUSDT', ETHUSDT_TRADE_SYMBOL);
+export const BTCUSDT_SPOT_TRADE_SYMBOL: TradeSymbol = {
+  symbol: 'BTCUSDT',
+  baseAsset: 'BTC',
+  quoteAsset: 'USDT',
+  settle: '',
+  isActive: true,
+  type: TradeSymbolTypeEnum.Spot,
+  isLinear: false,
+  contractSize: 1,
+  filter: {
+    tickSize: '0.01',
+    stepSize: '0.001',
+    minQty: '0.001',
+    maxQty: '1000',
+    minNotional: '5',
+  },
+};
 
-  return tradeSymbols;
-}

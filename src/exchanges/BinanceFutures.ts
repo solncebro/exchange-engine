@@ -2,7 +2,12 @@ import type { ExchangeArgs, FetchPageWithLimitArgs } from '../types/exchange';
 import type { Position, Order, FundingRateHistory, FundingInfo } from '../types/common';
 import { MarginModeEnum, PositionModeEnum } from '../types/common';
 import { BinanceFuturesHttpClient } from '../http/BinanceFuturesHttpClient';
-import { normalizeBinancePosition, normalizeBinanceOrder, normalizeBinanceFundingRateHistory, normalizeBinanceFundingInfo } from '../normalizers/binanceNormalizer';
+import {
+  normalizeBinancePosition,
+  normalizeBinanceOrder,
+  normalizeBinanceFundingRateHistory,
+  normalizeBinanceFundingInfo,
+} from '../normalizers/binanceNormalizer';
 import { BinanceFuturesPublicStream } from '../ws/BinanceFuturesPublicStream';
 import {
   BINANCE_KLINE_LIMIT_FUTURES,
@@ -10,6 +15,8 @@ import {
   BINANCE_DEMO_FUTURES_BASE_URL,
   BINANCE_FUTURES_WEBSOCKET_COMBINED_URL,
   BINANCE_DEMO_FUTURES_WEBSOCKET_COMBINED_URL,
+  BINANCE_FUTURES_TRADE_WEBSOCKET_URL,
+  BINANCE_DEMO_FUTURES_TRADE_WEBSOCKET_URL,
 } from '../constants/binance';
 import { BinanceBaseClient } from './BinanceBaseClient';
 
@@ -18,13 +25,19 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
   protected readonly klineLimit = BINANCE_KLINE_LIMIT_FUTURES;
 
   constructor(args: ExchangeArgs) {
-    const baseUrl = args.config.isDemoMode === true
+    const isDemoMode = args.config.isDemoMode === true;
+
+    const baseUrl = isDemoMode
       ? BINANCE_DEMO_FUTURES_BASE_URL
       : BINANCE_FUTURES_BASE_URL;
 
-    const webSocketCombinedUrl = args.config.isDemoMode === true
+    const webSocketCombinedUrl = isDemoMode
       ? BINANCE_DEMO_FUTURES_WEBSOCKET_COMBINED_URL
       : BINANCE_FUTURES_WEBSOCKET_COMBINED_URL;
+
+    const tradeWebSocketUrl = isDemoMode
+      ? BINANCE_DEMO_FUTURES_TRADE_WEBSOCKET_URL
+      : BINANCE_FUTURES_TRADE_WEBSOCKET_URL;
 
     const httpClient = new BinanceFuturesHttpClient({
       baseUrl,
@@ -36,7 +49,12 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
 
     const publicStream = new BinanceFuturesPublicStream(webSocketCombinedUrl, args.logger, args.onNotify);
 
-    super(args, httpClient, publicStream);
+    super({
+      exchangeArgs: args,
+      httpClient,
+      publicStream,
+      tradeWebSocketUrl,
+    });
   }
 
   async fetchFundingRateHistory(

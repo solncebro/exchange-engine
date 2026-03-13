@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { BinanceFutures } from '../../src/exchanges/BinanceFutures';
 import { createMockLogger } from '../fixtures/mockLogger';
+import { createMockAxiosInstance } from '../fixtures/mockAxios';
 import {
   BINANCE_RAW_POSITION_RISK,
   BINANCE_RAW_FUNDING_RATE_HISTORY,
@@ -18,16 +19,12 @@ import { BinanceFuturesPublicStream } from '../../src/ws/BinanceFuturesPublicStr
 
 jest.mock('axios');
 jest.mock('../../src/ws/BinanceFuturesPublicStream');
+jest.mock('../../src/ws/BinanceTradeStream');
 
 const mockedAxios = axios as jest.Mocked<typeof axios>;
 
 function createClient(isDemoMode = false) {
-  const mockInstance: Record<string, jest.Mock> = {
-    get: jest.fn().mockResolvedValue({ data: {} }),
-    post: jest.fn().mockResolvedValue({ data: {} }),
-    put: jest.fn().mockResolvedValue({ data: {} }),
-    delete: jest.fn().mockResolvedValue({ data: {} }),
-  };
+  const mockInstance = createMockAxiosInstance();
   mockedAxios.create.mockReturnValue(mockInstance as any);
 
   const client = new BinanceFutures({

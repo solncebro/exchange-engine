@@ -1,15 +1,17 @@
 import axios from 'axios';
 import { BybitLinear } from '../../src/exchanges/BybitLinear';
 import { createMockLogger } from '../fixtures/mockLogger';
+import { createMockAxiosInstance } from '../fixtures/mockAxios';
 import {
   BYBIT_RAW_INSTRUMENT_LIST,
   BYBIT_RAW_TICKER_LIST,
   BYBIT_RAW_KLINE_LIST,
   BYBIT_RAW_WALLET_BALANCE,
   BYBIT_RAW_POSITION,
+  BYBIT_RAW_ORDER_RESPONSE,
 } from '../fixtures/bybitRaw';
-import { TradeSymbolTypeEnum, OrderTypeEnum, OrderSideEnum, PositionSideEnum, MarginModeEnum, TimeInForceEnum } from '../../src/types/common';
-import { BYBIT_RAW_ORDER_RESPONSE } from '../fixtures/bybitRaw';
+import { BTCUSDT_TRADE_SYMBOL } from '../fixtures/mockTradeSymbol';
+import { OrderTypeEnum, OrderSideEnum, PositionSideEnum, MarginModeEnum, TimeInForceEnum } from '../../src/types/common';
 
 jest.mock('axios');
 jest.mock('../../src/ws/BybitPublicStream');
@@ -18,12 +20,7 @@ jest.mock('../../src/ws/BybitTradeStream');
 const mockedAxios = axios as jest.Mocked<typeof axios>;
 
 function createClient(isDemoMode = false) {
-  const mockInstance: Record<string, jest.Mock> = {
-    get: jest.fn().mockResolvedValue({ data: {} }),
-    post: jest.fn().mockResolvedValue({ data: {} }),
-    put: jest.fn().mockResolvedValue({ data: {} }),
-    delete: jest.fn().mockResolvedValue({ data: {} }),
-  };
+  const mockInstance = createMockAxiosInstance();
   mockedAxios.create.mockReturnValue(mockInstance as any);
 
   const client = new BybitLinear({
@@ -58,12 +55,7 @@ describe('BybitLinear', () => {
   describe('createOrderWebSocket (demo mode — REST fallback)', () => {
     it('falls back to REST in demo mode and returns order', async () => {
       const { client, mockInstance } = createClient(true);
-      const mockMarket = {
-        symbol: 'BTCUSDT', baseAsset: 'BTC', quoteAsset: 'USDT', settle: 'USDT',
-        isActive: true, type: TradeSymbolTypeEnum.Swap, isLinear: true, contractSize: 1,
-        filter: { tickSize: '0.10', stepSize: '0.001', minQty: '0.001', maxQty: '1000', minNotional: '5' },
-      };
-      client.tradeSymbols.set('BTCUSDT', mockMarket);
+      client.tradeSymbols.set('BTCUSDT', BTCUSDT_TRADE_SYMBOL);
 
       mockInstance.post.mockResolvedValue({
         data: {
@@ -97,11 +89,7 @@ describe('BybitLinear', () => {
   describe('order params construction', () => {
     it('maps market type to Market', async () => {
       const { client, mockInstance } = createClient(true);
-      client.tradeSymbols.set('BTCUSDT', {
-        symbol: 'BTCUSDT', baseAsset: 'BTC', quoteAsset: 'USDT', settle: 'USDT',
-        isActive: true, type: TradeSymbolTypeEnum.Swap, isLinear: true, contractSize: 1,
-        filter: { tickSize: '0.10', stepSize: '0.001', minQty: '0.001', maxQty: '1000', minNotional: '5' },
-      });
+      client.tradeSymbols.set('BTCUSDT', BTCUSDT_TRADE_SYMBOL);
 
       mockInstance.post.mockResolvedValue({
         data: { retCode: 0, result: { orderId: '1', symbol: 'BTCUSDT', side: 'Buy', orderType: 'Market', qty: '0.001', price: '0', orderStatus: 'New', createdTime: '1700000000000' } },
@@ -117,11 +105,7 @@ describe('BybitLinear', () => {
 
     it('maps limit type to Limit', async () => {
       const { client, mockInstance } = createClient(true);
-      client.tradeSymbols.set('BTCUSDT', {
-        symbol: 'BTCUSDT', baseAsset: 'BTC', quoteAsset: 'USDT', settle: 'USDT',
-        isActive: true, type: TradeSymbolTypeEnum.Swap, isLinear: true, contractSize: 1,
-        filter: { tickSize: '0.10', stepSize: '0.001', minQty: '0.001', maxQty: '1000', minNotional: '5' },
-      });
+      client.tradeSymbols.set('BTCUSDT', BTCUSDT_TRADE_SYMBOL);
 
       mockInstance.post.mockResolvedValue({
         data: { retCode: 0, result: { orderId: '1', symbol: 'BTCUSDT', side: 'Sell', orderType: 'Limit', qty: '0.001', price: '65000', orderStatus: 'New', createdTime: '1700000000000' } },
@@ -162,11 +146,7 @@ describe('BybitLinear', () => {
   describe('createOrderWebSocket optional params', () => {
     it('sends stopPrice as triggerPrice', async () => {
       const { client, mockInstance } = createClient(true);
-      client.tradeSymbols.set('BTCUSDT', {
-        symbol: 'BTCUSDT', baseAsset: 'BTC', quoteAsset: 'USDT', settle: 'USDT',
-        isActive: true, type: TradeSymbolTypeEnum.Swap, isLinear: true, contractSize: 1,
-        filter: { tickSize: '0.10', stepSize: '0.001', minQty: '0.001', maxQty: '1000', minNotional: '5' },
-      });
+      client.tradeSymbols.set('BTCUSDT', BTCUSDT_TRADE_SYMBOL);
 
       mockInstance.post.mockResolvedValue({
         data: { retCode: 0, result: { orderId: '1', symbol: 'BTCUSDT', side: 'Sell', orderType: 'Market', qty: '0.001', price: '0', orderStatus: 'New', createdTime: '1700000000000' } },
@@ -181,11 +161,7 @@ describe('BybitLinear', () => {
 
     it('sends reduceOnly when provided', async () => {
       const { client, mockInstance } = createClient(true);
-      client.tradeSymbols.set('BTCUSDT', {
-        symbol: 'BTCUSDT', baseAsset: 'BTC', quoteAsset: 'USDT', settle: 'USDT',
-        isActive: true, type: TradeSymbolTypeEnum.Swap, isLinear: true, contractSize: 1,
-        filter: { tickSize: '0.10', stepSize: '0.001', minQty: '0.001', maxQty: '1000', minNotional: '5' },
-      });
+      client.tradeSymbols.set('BTCUSDT', BTCUSDT_TRADE_SYMBOL);
 
       mockInstance.post.mockResolvedValue({
         data: { retCode: 0, result: { orderId: '1', symbol: 'BTCUSDT', side: 'Sell', orderType: 'Market', qty: '0.001', price: '0', orderStatus: 'New', createdTime: '1700000000000' } },
@@ -200,11 +176,7 @@ describe('BybitLinear', () => {
 
     it('sends timeInForce when provided', async () => {
       const { client, mockInstance } = createClient(true);
-      client.tradeSymbols.set('BTCUSDT', {
-        symbol: 'BTCUSDT', baseAsset: 'BTC', quoteAsset: 'USDT', settle: 'USDT',
-        isActive: true, type: TradeSymbolTypeEnum.Swap, isLinear: true, contractSize: 1,
-        filter: { tickSize: '0.10', stepSize: '0.001', minQty: '0.001', maxQty: '1000', minNotional: '5' },
-      });
+      client.tradeSymbols.set('BTCUSDT', BTCUSDT_TRADE_SYMBOL);
 
       mockInstance.post.mockResolvedValue({
         data: { retCode: 0, result: { orderId: '1', symbol: 'BTCUSDT', side: 'Buy', orderType: 'Limit', qty: '0.001', price: '65000', orderStatus: 'New', createdTime: '1700000000000' } },
@@ -219,11 +191,7 @@ describe('BybitLinear', () => {
 
     it('sends clientOrderId as orderLinkId', async () => {
       const { client, mockInstance } = createClient(true);
-      client.tradeSymbols.set('BTCUSDT', {
-        symbol: 'BTCUSDT', baseAsset: 'BTC', quoteAsset: 'USDT', settle: 'USDT',
-        isActive: true, type: TradeSymbolTypeEnum.Swap, isLinear: true, contractSize: 1,
-        filter: { tickSize: '0.10', stepSize: '0.001', minQty: '0.001', maxQty: '1000', minNotional: '5' },
-      });
+      client.tradeSymbols.set('BTCUSDT', BTCUSDT_TRADE_SYMBOL);
 
       mockInstance.post.mockResolvedValue({
         data: { retCode: 0, result: { orderId: '1', symbol: 'BTCUSDT', side: 'Buy', orderType: 'Market', qty: '0.001', price: '0', orderStatus: 'New', createdTime: '1700000000000' } },
@@ -292,11 +260,11 @@ describe('BybitLinear', () => {
         data: { result: { list: BYBIT_RAW_INSTRUMENT_LIST } },
       });
 
-      const tradeSymbols = await client.loadTradeSymbols();
+      const tradeSymbolBySymbol = await client.loadTradeSymbols();
 
-      expect(tradeSymbols.size).toBeGreaterThan(0);
-      expect(tradeSymbols.get('BTCUSDT')).toBeDefined();
-      expect(tradeSymbols.get('BTCUSDT')!.baseAsset).toBe('BTC');
+      expect(tradeSymbolBySymbol.size).toBeGreaterThan(0);
+      expect(tradeSymbolBySymbol.get('BTCUSDT')).toBeDefined();
+      expect(tradeSymbolBySymbol.get('BTCUSDT')!.baseAsset).toBe('BTC');
     });
   });
 
@@ -307,11 +275,11 @@ describe('BybitLinear', () => {
         data: { result: { list: BYBIT_RAW_TICKER_LIST } },
       });
 
-      const tickers = await client.fetchTickers();
+      const tickerBySymbol = await client.fetchTickers();
 
-      expect(tickers.size).toBeGreaterThan(0);
-      expect(tickers.get('BTCUSDT')).toBeDefined();
-      expect(tickers.get('BTCUSDT')!.lastPrice).toBe(65432.1);
+      expect(tickerBySymbol.size).toBeGreaterThan(0);
+      expect(tickerBySymbol.get('BTCUSDT')).toBeDefined();
+      expect(tickerBySymbol.get('BTCUSDT')!.lastPrice).toBe(65432.1);
     });
   });
 
@@ -322,11 +290,11 @@ describe('BybitLinear', () => {
         data: { result: { list: BYBIT_RAW_KLINE_LIST } },
       });
 
-      const klines = await client.fetchKlines('BTCUSDT', '1h');
+      const klineList = await client.fetchKlines('BTCUSDT', '1h');
 
-      expect(klines).toHaveLength(2);
-      expect(klines[0].openTimestamp).toBe(1700000000000);
-      expect(klines[0].openPrice).toBe(65000);
+      expect(klineList).toHaveLength(2);
+      expect(klineList[0].openTimestamp).toBe(1700000000000);
+      expect(klineList[0].openPrice).toBe(65000);
     });
   });
 
@@ -337,11 +305,11 @@ describe('BybitLinear', () => {
         data: { result: BYBIT_RAW_WALLET_BALANCE },
       });
 
-      const balance = await client.fetchBalance();
+      const balanceByAsset = await client.fetchBalance();
 
-      expect(balance.size).toBeGreaterThan(0);
-      expect(balance.get('USDT')).toBeDefined();
-      expect(balance.get('BTC')).toBeDefined();
+      expect(balanceByAsset.size).toBeGreaterThan(0);
+      expect(balanceByAsset.get('USDT')).toBeDefined();
+      expect(balanceByAsset.get('BTC')).toBeDefined();
     });
   });
 
@@ -373,11 +341,7 @@ describe('BybitLinear', () => {
   describe('createOrderWebSocket (non-demo — WebSocket path)', () => {
     it('delegates to tradeStream.createOrder', async () => {
       const { client } = createClient(false);
-      client.tradeSymbols.set('BTCUSDT', {
-        symbol: 'BTCUSDT', baseAsset: 'BTC', quoteAsset: 'USDT', settle: 'USDT',
-        isActive: true, type: TradeSymbolTypeEnum.Swap, isLinear: true, contractSize: 1,
-        filter: { tickSize: '0.10', stepSize: '0.001', minQty: '0.001', maxQty: '1000', minNotional: '5' },
-      });
+      client.tradeSymbols.set('BTCUSDT', BTCUSDT_TRADE_SYMBOL);
 
       const mockOrder = {
         id: 'ws-order-456',

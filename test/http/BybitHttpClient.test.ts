@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { BybitHttpClient } from '../../src/http/BybitHttpClient';
 import { createMockLogger } from '../fixtures/mockLogger';
+import { createMockAxiosInstance } from '../fixtures/mockAxios';
 
 jest.mock('axios');
 const mockedAxios = axios as jest.Mocked<typeof axios>;
@@ -12,12 +13,7 @@ describe('BybitHttpClient', () => {
   beforeEach(() => {
     jest.spyOn(Date, 'now').mockReturnValue(1700000000000);
 
-    mockInstance = {
-      get: jest.fn().mockResolvedValue({ data: {} }),
-      post: jest.fn().mockResolvedValue({ data: {} }),
-      put: jest.fn().mockResolvedValue({ data: {} }),
-      delete: jest.fn().mockResolvedValue({ data: {} }),
-    };
+    mockInstance = createMockAxiosInstance();
     mockedAxios.create.mockReturnValue(mockInstance as any);
 
     client = new BybitHttpClient({

@@ -10,7 +10,7 @@ import { buildBinanceSignedParams, buildBinanceAuthHeaders } from '../auth/binan
 import { applyTimeRangeOptions } from '../utils/httpParams';
 import { BaseHttpClient } from './BaseHttpClient';
 
-export interface BinanceHttpClientArgs {
+interface BinanceHttpClientArgs {
   baseUrl: string;
   apiKey: string;
   secret: string;
@@ -47,34 +47,53 @@ abstract class BinanceBaseHttpClient extends BaseHttpClient {
     path: string,
     params: Record<string, string | number | boolean> = {},
   ): Promise<T> {
-    const signedParams = buildBinanceSignedParams({ params, secret: this.secret });
-    const headers = buildBinanceAuthHeaders(this.apiKey);
+    const { signedParams, headers } = this.signRequest(params);
 
-    return this.get<T>(path, signedParams as Record<string, string | number | boolean>, headers);
+    return this.get<T>(path, signedParams, headers);
   }
 
   protected signedPost<T>(
     path: string,
     params: Record<string, string | number | boolean> = {},
   ): Promise<T> {
-    const signedParams = buildBinanceSignedParams({ params, secret: this.secret });
-    const headers = buildBinanceAuthHeaders(this.apiKey);
+    const { signedParams, headers } = this.signRequest(params);
 
-    return this.postWithParams<T>(path, signedParams as Record<string, string | number | boolean>, headers);
+    return this.postWithParams<T>(path, signedParams, headers);
   }
 
   protected signedDelete<T>(
     path: string,
     params: Record<string, string | number | boolean> = {},
   ): Promise<T> {
-    const signedParams = buildBinanceSignedParams({ params, secret: this.secret });
-    const headers = buildBinanceAuthHeaders(this.apiKey);
+    const { signedParams, headers } = this.signRequest(params);
 
-    return this.delete<T>(path, signedParams as Record<string, string | number | boolean>, headers);
+    return this.delete<T>(path, signedParams, headers);
+  }
+
+  private signRequest(params: Record<string, string | number | boolean>): {
+    signedParams: Record<string, string | number | boolean>;
+    headers: Record<string, string>;
+  } {
+    return {
+      signedParams: buildBinanceSignedParams({ params, secret: this.secret }) as Record<string, string | number | boolean>,
+      headers: buildBinanceAuthHeaders(this.apiKey),
+    };
   }
 
   protected authHeaders(): Record<string, string> {
     return buildBinanceAuthHeaders(this.apiKey);
+  }
+
+  protected buildOptionalSymbolParams(
+    symbol?: string,
+  ): Record<string, string | number | boolean> {
+    const params: Record<string, string | number | boolean> = {};
+
+    if (symbol !== undefined) {
+      params.symbol = symbol;
+    }
+
+    return params;
   }
 
   async fetchExchangeInfo(): Promise<BinanceExchangeInfoRaw> {
@@ -132,13 +151,7 @@ abstract class BinanceBaseHttpClient extends BaseHttpClient {
   }
 
   async getOpenOrders(symbol?: string): Promise<Record<string, unknown>[]> {
-    const params: Record<string, string | number | boolean> = {};
-
-    if (symbol !== undefined) {
-      params.symbol = symbol;
-    }
-
-    return this.signedGet<Record<string, unknown>[]>(this.endpoints.openOrders, params);
+    return this.signedGet<Record<string, unknown>[]>(this.endpoints.openOrders, this.buildOptionalSymbolParams(symbol));
   }
 
   async fetchAccount(): Promise<BinanceAccountRaw> {
@@ -163,4 +176,4 @@ abstract class BinanceBaseHttpClient extends BaseHttpClient {
 }
 
 export { BinanceBaseHttpClient };
-export type { BinanceEndpoints, BinanceListenKeyResponse };
+export type { BinanceHttpClientArgs, BinanceEndpoints, BinanceListenKeyResponse };

@@ -1,4 +1,3 @@
-import type { RawData } from 'ws';
 import { ReliableWebSocket } from '@solncebro/websocket-engine';
 import type { WebSocketOpenContext } from '@solncebro/websocket-engine';
 
@@ -7,16 +6,13 @@ import type { KlineHandler } from '../types/exchange';
 import { normalizeBinanceKlineWebSocketMessage, normalizeBinanceTickers } from '../normalizers/binanceNormalizer';
 import type { BinanceTicker24hrRaw, BinanceWebSocketKlineRaw } from '../normalizers/binanceNormalizer';
 import { resolveUnifiedBinanceInterval } from './binanceWebSocketUtils';
+import { parseWebSocketMessage } from './parseWebSocketMessage';
 
 interface BinanceSpotWebSocketEnvelope {
   stream?: string;
   data?: unknown;
   e?: string;
   [key: string]: unknown;
-}
-
-function parseBinanceSpotMessage(rawData: RawData): BinanceSpotWebSocketEnvelope {
-  return JSON.parse(rawData.toString()) as BinanceSpotWebSocketEnvelope;
 }
 
 class BinanceSpotPublicStream {
@@ -97,7 +93,7 @@ class BinanceSpotPublicStream {
       label: 'BinanceSpotPublicStream',
       url: this.webSocketUrl,
       logger: this.logger,
-      parseMessage: parseBinanceSpotMessage,
+      parseMessage: (rawData) => parseWebSocketMessage<BinanceSpotWebSocketEnvelope>(rawData),
       onMessage: (message) => this.handleMessage(message),
       onOpen: (context) => this.handleOpen(context),
       onReconnectSuccess: () => this.resubscribeAll(),
@@ -119,10 +115,10 @@ class BinanceSpotPublicStream {
 
   private handleMessage(message: BinanceSpotWebSocketEnvelope): void {
     if (message.e === '24hrMiniTicker' && Array.isArray(message.data)) {
-      const tickers = normalizeBinanceTickers(message.data as BinanceTicker24hrRaw[]);
+      const tickerBySymbol = normalizeBinanceTickers(message.data as BinanceTicker24hrRaw[]);
 
       for (const handler of this.tickerHandlerSet) {
-        handler(tickers);
+        handler(tickerBySymbol);
       }
 
       return;
@@ -133,10 +129,10 @@ class BinanceSpotPublicStream {
     }
 
     if (message.stream === '!miniTicker@arr' && Array.isArray(message.data)) {
-      const tickers = normalizeBinanceTickers(message.data as BinanceTicker24hrRaw[]);
+      const tickerBySymbol = normalizeBinanceTickers(message.data as BinanceTicker24hrRaw[]);
 
       for (const handler of this.tickerHandlerSet) {
-        handler(tickers);
+        handler(tickerBySymbol);
       }
 
       return;

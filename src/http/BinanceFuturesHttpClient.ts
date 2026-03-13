@@ -6,7 +6,7 @@ import type { BinanceEndpoints, BinanceHttpClientArgs } from './BinanceBaseHttpC
 import { BinanceBaseHttpClient } from './BinanceBaseHttpClient';
 import { BINANCE_REQUEST_TIMEOUT } from '../constants/binance';
 
-export class BinanceFuturesHttpClient extends BinanceBaseHttpClient {
+class BinanceFuturesHttpClient extends BinanceBaseHttpClient {
   protected readonly endpoints: BinanceEndpoints = {
     exchangeInfo: '/fapi/v1/exchangeInfo',
     ticker24hr: '/fapi/v1/ticker/24hr',
@@ -24,13 +24,7 @@ export class BinanceFuturesHttpClient extends BinanceBaseHttpClient {
   }
 
   async fetchFundingInfo(symbol?: string): Promise<BinanceFundingInfoRaw[]> {
-    const params: Record<string, string | number | boolean> = {};
-
-    if (symbol !== undefined) {
-      params.symbol = symbol;
-    }
-
-    return this.get<BinanceFundingInfoRaw[]>('/fapi/v1/fundingInfo', params);
+    return this.get<BinanceFundingInfoRaw[]>('/fapi/v1/fundingInfo', this.buildOptionalSymbolParams(symbol));
   }
 
   async fetchPositionMode(): Promise<Record<string, unknown>> {
@@ -40,15 +34,9 @@ export class BinanceFuturesHttpClient extends BinanceBaseHttpClient {
   async fetchMarkPrice(
     symbol?: string,
   ): Promise<Record<string, unknown> | Array<Record<string, unknown>>> {
-    const params: Record<string, string | number | boolean> = {};
-
-    if (symbol !== undefined) {
-      params.symbol = symbol;
-    }
-
     return this.get<Record<string, unknown> | Array<Record<string, unknown>>>(
       '/fapi/v1/premiumIndex',
-      params,
+      this.buildOptionalSymbolParams(symbol),
     );
   }
 
@@ -116,13 +104,7 @@ export class BinanceFuturesHttpClient extends BinanceBaseHttpClient {
   }
 
   async fetchPositionRisk(symbol?: string): Promise<BinancePositionRiskRaw[]> {
-    const params: Record<string, string | number | boolean> = {};
-
-    if (symbol !== undefined) {
-      params.symbol = symbol;
-    }
-
-    return this.signedGet<BinancePositionRiskRaw[]>('/fapi/v2/positionRisk', params);
+    return this.signedGet<BinancePositionRiskRaw[]>('/fapi/v2/positionRisk', this.buildOptionalSymbolParams(symbol));
   }
 
   async fetchCommissionRate(symbol: string): Promise<Record<string, unknown>> {
@@ -164,3 +146,5 @@ export class BinanceFuturesHttpClient extends BinanceBaseHttpClient {
     );
   }
 }
+
+export { BinanceFuturesHttpClient };

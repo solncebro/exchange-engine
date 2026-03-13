@@ -19,18 +19,35 @@ import {
 } from '../normalizers/binanceNormalizer';
 import { BINANCE_ORDER_TYPE_REVERSE, BINANCE_WORKING_TYPE } from '../constants/mappings';
 import { BinanceUserDataStream } from '../ws/BinanceUserDataStream';
+import { BinanceTradeStream } from '../ws/BinanceTradeStream';
 import { BaseExchangeClient } from './BaseExchangeClient';
+
+interface BinanceBaseClientArgs<T extends BinanceBaseHttpClient> {
+  exchangeArgs: ExchangeArgs;
+  httpClient: T;
+  publicStream: PublicStreamLike;
+  tradeWebSocketUrl: string;
+}
 
 abstract class BinanceBaseClient<T extends BinanceBaseHttpClient> extends BaseExchangeClient {
   protected readonly httpClient: T;
   protected userDataStream: BinanceUserDataStream | null = null;
 
   private readonly publicStream: PublicStreamLike;
+  private readonly tradeStream: BinanceTradeStream;
 
-  constructor(args: ExchangeArgs, httpClient: T, publicStream: PublicStreamLike) {
-    super(args);
-    this.httpClient = httpClient;
-    this.publicStream = publicStream;
+  constructor(args: BinanceBaseClientArgs<T>) {
+    super(args.exchangeArgs);
+    this.httpClient = args.httpClient;
+    this.publicStream = args.publicStream;
+
+    this.tradeStream = new BinanceTradeStream({
+      url: args.tradeWebSocketUrl,
+      apiKey: args.exchangeArgs.config.apiKey,
+      secret: args.exchangeArgs.config.secret,
+      logger: args.exchangeArgs.logger,
+      onNotify: args.exchangeArgs.onNotify,
+    });
   }
 
   protected getPublicStream(): PublicStreamLike {
@@ -65,9 +82,7 @@ abstract class BinanceBaseClient<T extends BinanceBaseHttpClient> extends BaseEx
     return normalizeBinanceBalance(raw);
   }
 
-  async createOrderWebSocket(args: CreateOrderWebSocketArgs): Promise<Order> {
-    this.logger.debug(`Creating order via REST: ${args.symbol}`);
-
+  protected buildBinanceOrderParams(args: CreateOrderWebSocketArgs): Record<string, unknown> {
     const binanceType = BINANCE_ORDER_TYPE_REVERSE[args.type] ?? args.type.toUpperCase();
 
     const orderParams: Record<string, unknown> = {
@@ -109,6 +124,27 @@ abstract class BinanceBaseClient<T extends BinanceBaseHttpClient> extends BaseEx
       orderParams.timeInForce = args.timeInForce ?? TimeInForceEnum.Gtc;
     }
 
+    return orderParams;
+  }
+
+  isTradeWebSocketConnected(): boolean {
+    return this.tradeStream.isConnected();
+  }
+
+  async connectTradeWebSocket(): Promise<void> {
+    await this.tradeStream.connect();
+  }
+
+  async createOrderWebSocket(args: CreateOrderWebSocketArgs): Promise<Order> {
+    const orderParams = this.buildBinanceOrderParams(args);
+
+    if (this.tradeStream.isConnected()) {
+      this.logger.debug(`Creating order via WebSocket: ${args.symbol}`);
+
+      return this.tradeStream.createOrder(orderParams);
+    }
+
+    this.logger.debug(`Creating order via REST: ${args.symbol}`);
     const raw = await this.httpClient.createOrder(orderParams);
 
     return normalizeBinanceOrder(raw);
@@ -116,6 +152,7 @@ abstract class BinanceBaseClient<T extends BinanceBaseHttpClient> extends BaseEx
 
   async close(): Promise<void> {
     this.logger.info(`Closing Binance ${this.marketLabel} connection`);
+    this.tradeStream.disconnect();
 
     if (this.userDataStream) {
       this.userDataStream.close();

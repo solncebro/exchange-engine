@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] - 2026-03-13
+
+### Added
+- `isTradeWebSocketConnected()` and `connectTradeWebSocket()` methods on `ExchangeClient` interface
+- `BinanceTradeStream` — WebSocket-based order execution for Binance (parity with Bybit)
+
+### Internal
+- Extracted `BybitBaseClient` — common base for `BybitLinear` and `BybitSpot`
+- Extracted `BaseTradeStream<T>` — common base for `BinanceTradeStream` and `BybitTradeStream`
+- Extracted `parseWebSocketMessage<T>()` — generic WebSocket parser replacing 7 duplicate functions
+- Extracted `buildCategoryParams()` in `BybitHttpClient` — deduplicated 7 methods
+- Extracted `buildOptionalSymbolParams()` in `BinanceBaseHttpClient` — deduplicated 4 methods
+- `BaseExchangeClient`: futures-specific methods now have default `throw` implementations instead of `abstract`
+- `BaseHttpClient`: extracted `executeRequest()` pattern for non-GET HTTP methods
+- `BinanceBaseHttpClient`: extracted `signRequest()` method
+- Shared test fixtures: `mockAxios.ts`, `mockTradeSymbol.ts`
+
 ## [0.3.1] - 2026-03-12
 
 ### Added
@@ -116,6 +133,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Private endpoints (balance, position, orders) require valid credentials
 - WebSocket subscriptions are stateless and can be re-established on reconnect
 
+[0.3.2]: https://github.com/solncebro/exchange-engine/releases/tag/v0.3.2
 [0.3.1]: https://github.com/solncebro/exchange-engine/releases/tag/v0.3.1
 [0.3.0]: https://github.com/solncebro/exchange-engine/releases/tag/v0.3.0
 [0.2.0]: https://github.com/solncebro/exchange-engine/releases/tag/v0.2.0

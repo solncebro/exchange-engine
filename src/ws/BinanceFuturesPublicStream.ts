@@ -1,4 +1,3 @@
-import type { RawData } from 'ws';
 import { ReliableWebSocket } from '@solncebro/websocket-engine';
 
 import type { ExchangeLogger, KlineInterval, TickerBySymbol } from '../types/common';
@@ -6,6 +5,7 @@ import type { KlineHandler } from '../types/exchange';
 import { normalizeBinanceKlineWebSocketMessage, normalizeBinanceTickers } from '../normalizers/binanceNormalizer';
 import type { BinanceTicker24hrRaw, BinanceWebSocketKlineRaw } from '../normalizers/binanceNormalizer';
 import { resolveUnifiedBinanceInterval } from './binanceWebSocketUtils';
+import { parseWebSocketMessage } from './parseWebSocketMessage';
 
 const MAX_STREAMS_PER_CONNECTION = 200;
 
@@ -18,10 +18,6 @@ interface FuturesConnection {
   webSocket: ReliableWebSocket<BinanceCombinedMessage>;
   label: string;
   streamList: string[];
-}
-
-function parseBinanceCombinedMessage(rawData: RawData): BinanceCombinedMessage {
-  return JSON.parse(rawData.toString()) as BinanceCombinedMessage;
 }
 
 function buildKlineStreamList(klineHandlerByKey: Map<string, Set<KlineHandler>>): string[] {
@@ -145,7 +141,7 @@ class BinanceFuturesPublicStream {
       label,
       url,
       logger: this.logger,
-      parseMessage: parseBinanceCombinedMessage,
+      parseMessage: (rawData) => parseWebSocketMessage<BinanceCombinedMessage>(rawData),
       onMessage: (message) => this.handleMessage(message),
       onNotify: this.onNotify,
       configuration: {
@@ -207,10 +203,10 @@ class BinanceFuturesPublicStream {
     }
 
     if (Array.isArray(message.data)) {
-      const tickers = normalizeBinanceTickers(message.data as BinanceTicker24hrRaw[]);
+      const tickerBySymbol = normalizeBinanceTickers(message.data as BinanceTicker24hrRaw[]);
 
       for (const handler of this.tickerHandlerSet) {
-        handler(tickers);
+        handler(tickerBySymbol);
       }
 
       return;
@@ -242,4 +238,3 @@ class BinanceFuturesPublicStream {
 }
 
 export { BinanceFuturesPublicStream };
-export type { BinanceCombinedMessage };

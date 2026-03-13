@@ -1,4 +1,3 @@
-import type { RawData } from 'ws';
 import { ReliableWebSocket } from '@solncebro/websocket-engine';
 import type { WebSocketOpenContext } from '@solncebro/websocket-engine';
 
@@ -10,6 +9,7 @@ import {
   authenticateBybitWebSocket,
 } from './bybitWebSocketUtils';
 import type { BybitBaseWebSocketMessage } from './bybitWebSocketUtils';
+import { parseWebSocketMessage } from './parseWebSocketMessage';
 
 interface BybitPrivateMessage extends BybitBaseWebSocketMessage {
   topic?: string;
@@ -21,10 +21,6 @@ interface BybitPrivateStreamArgs {
   logger: ExchangeLogger;
   onNotify?: (message: string) => void | Promise<void>;
   onMessage: (event: Record<string, unknown>) => void;
-}
-
-function parseBybitPrivateMessage(rawData: RawData): BybitPrivateMessage {
-  return JSON.parse(rawData.toString()) as BybitPrivateMessage;
 }
 
 class BybitPrivateStream {
@@ -52,7 +48,7 @@ class BybitPrivateStream {
       label: 'BybitPrivateStream',
       url: BYBIT_PRIVATE_WEBSOCKET_URL,
       logger: this.logger,
-      parseMessage: parseBybitPrivateMessage,
+      parseMessage: (rawData) => parseWebSocketMessage<BybitPrivateMessage>(rawData),
       onMessage: (message) => this.handleMessage(message),
       onOpen: (context) => this.authenticate(context),
       onNotify: this.onNotify,
@@ -88,4 +84,3 @@ class BybitPrivateStream {
 }
 
 export { BybitPrivateStream };
-export type { BybitPrivateStreamArgs };

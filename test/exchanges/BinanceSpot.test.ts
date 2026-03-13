@@ -1,20 +1,17 @@
 import axios from 'axios';
 import { BinanceSpot } from '../../src/exchanges/BinanceSpot';
 import { createMockLogger } from '../fixtures/mockLogger';
+import { createMockAxiosInstance } from '../fixtures/mockAxios';
 import { MarginModeEnum } from '../../src/types/common';
 
 jest.mock('axios');
 jest.mock('../../src/ws/BinanceSpotPublicStream');
+jest.mock('../../src/ws/BinanceTradeStream');
 
 const mockedAxios = axios as jest.Mocked<typeof axios>;
 
 function createClient() {
-  const mockInstance: Record<string, jest.Mock> = {
-    get: jest.fn().mockResolvedValue({ data: {} }),
-    post: jest.fn().mockResolvedValue({ data: {} }),
-    put: jest.fn().mockResolvedValue({ data: {} }),
-    delete: jest.fn().mockResolvedValue({ data: {} }),
-  };
+  const mockInstance = createMockAxiosInstance();
   mockedAxios.create.mockReturnValue(mockInstance as any);
 
   const client = new BinanceSpot({
@@ -29,7 +26,7 @@ describe('BinanceSpot', () => {
   it('throws "Not supported" for fetchFundingRateHistory', async () => {
     const { client } = createClient();
 
-    await expect(client.fetchFundingRateHistory()).rejects.toThrow('Not supported for spot market');
+    await expect(client.fetchFundingRateHistory('BTCUSDT')).rejects.toThrow('Not supported for spot market');
   });
 
   it('throws "Not supported" for fetchPosition', async () => {

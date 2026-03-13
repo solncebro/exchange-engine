@@ -12,7 +12,12 @@ import type {
   TradeSymbolBySymbol,
   TickerBySymbol,
   BalanceByAsset,
+  Position,
+  Order,
+  FundingRateHistory,
+  FundingInfo,
 } from '../types/common';
+import { MarginModeEnum, PositionModeEnum } from '../types/common';
 import type { PublicStreamLike } from '../types/stream';
 import { loadKlinesInChunks } from '../utils/klineLoader';
 import { amountToPrecision, priceToPrecision } from '../precision/precision';
@@ -165,15 +170,39 @@ abstract class BaseExchangeClient implements ExchangeClient {
     return parseFloat(tradeSymbol.filter.minNotional);
   }
 
+  abstract isTradeWebSocketConnected(): boolean;
+  abstract connectTradeWebSocket(): Promise<void>;
+
   abstract createOrderWebSocket(...args: Parameters<ExchangeClient['createOrderWebSocket']>): ReturnType<ExchangeClient['createOrderWebSocket']>;
-  abstract fetchOrderHistory(...args: Parameters<ExchangeClient['fetchOrderHistory']>): ReturnType<ExchangeClient['fetchOrderHistory']>;
-  abstract fetchFundingRateHistory(...args: Parameters<ExchangeClient['fetchFundingRateHistory']>): ReturnType<ExchangeClient['fetchFundingRateHistory']>;
-  abstract fetchFundingInfo(...args: Parameters<ExchangeClient['fetchFundingInfo']>): ReturnType<ExchangeClient['fetchFundingInfo']>;
-  abstract fetchPositionMode(): ReturnType<ExchangeClient['fetchPositionMode']>;
-  abstract fetchPosition(...args: Parameters<ExchangeClient['fetchPosition']>): ReturnType<ExchangeClient['fetchPosition']>;
-  abstract setLeverage(...args: Parameters<ExchangeClient['setLeverage']>): ReturnType<ExchangeClient['setLeverage']>;
-  abstract setMarginMode(...args: Parameters<ExchangeClient['setMarginMode']>): ReturnType<ExchangeClient['setMarginMode']>;
   abstract close(): Promise<void>;
+
+  async fetchOrderHistory(_symbol: string, _options?: FetchPageWithLimitArgs): Promise<Order[]> {
+    throw new Error(`Not supported for ${this.marketLabel} market`);
+  }
+
+  async fetchFundingRateHistory(_symbol: string, _options?: FetchPageWithLimitArgs): Promise<FundingRateHistory[]> {
+    throw new Error(`Not supported for ${this.marketLabel} market`);
+  }
+
+  async fetchFundingInfo(_symbol?: string): Promise<FundingInfo[]> {
+    throw new Error(`Not supported for ${this.marketLabel} market`);
+  }
+
+  async fetchPositionMode(): Promise<PositionModeEnum> {
+    throw new Error(`Not supported for ${this.marketLabel} market`);
+  }
+
+  async fetchPosition(_symbol: string): Promise<Position> {
+    throw new Error(`Not supported for ${this.marketLabel} market`);
+  }
+
+  async setLeverage(_leverage: number, _symbol: string): Promise<void> {
+    throw new Error(`Not supported for ${this.marketLabel} market`);
+  }
+
+  async setMarginMode(_marginMode: MarginModeEnum, _symbol: string): Promise<void> {
+    throw new Error(`Not supported for ${this.marketLabel} market`);
+  }
 }
 
 export { BaseExchangeClient };

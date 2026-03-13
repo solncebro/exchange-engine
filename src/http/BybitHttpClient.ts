@@ -80,7 +80,7 @@ interface BybitCreateOrderApiResponse {
   result: BybitOrderResponseRaw;
 }
 
-export class BybitHttpClient extends BaseHttpClient {
+class BybitHttpClient extends BaseHttpClient {
   private readonly secret: string;
 
   constructor(args: BybitHttpClientArgs) {
@@ -125,30 +125,35 @@ export class BybitHttpClient extends BaseHttpClient {
     return this.post<T>(path, body, headers);
   }
 
-  async fetchInstrumentsInfo(
+  private buildCategoryParams(
     category: string,
-    options?: SymbolFilterArgs,
-  ): Promise<BybitListResponse<BybitInstrumentInfoRaw>> {
+    options?: SymbolLimitFilterArgs,
+  ): Record<string, string | number | boolean> {
     const params: Record<string, string | number | boolean> = { category };
 
     if (options?.symbol !== undefined) {
       params.symbol = options.symbol;
     }
 
-    return this.authenticatedGet('/v5/market/instruments-info', params);
+    if (options?.limit !== undefined) {
+      params.limit = options.limit;
+    }
+
+    return params;
+  }
+
+  async fetchInstrumentsInfo(
+    category: string,
+    options?: SymbolFilterArgs,
+  ): Promise<BybitListResponse<BybitInstrumentInfoRaw>> {
+    return this.authenticatedGet('/v5/market/instruments-info', this.buildCategoryParams(category, options));
   }
 
   async fetchTickers(
     category: string,
     options?: SymbolFilterArgs,
   ): Promise<BybitListResponse<BybitTickerRaw>> {
-    const params: Record<string, string | number | boolean> = { category };
-
-    if (options?.symbol !== undefined) {
-      params.symbol = options.symbol;
-    }
-
-    return this.authenticatedGet('/v5/market/tickers', params);
+    return this.authenticatedGet('/v5/market/tickers', this.buildCategoryParams(category, options));
   }
 
   async fetchOrderBook(
@@ -254,34 +259,14 @@ export class BybitHttpClient extends BaseHttpClient {
     category: string,
     options?: SymbolLimitFilterArgs,
   ): Promise<BybitListResponse<Record<string, unknown>>> {
-    const params: Record<string, string | number | boolean> = { category };
-
-    if (options?.symbol !== undefined) {
-      params.symbol = options.symbol;
-    }
-
-    if (options?.limit !== undefined) {
-      params.limit = options.limit;
-    }
-
-    return this.authenticatedGet('/v5/order/realtime', params);
+    return this.authenticatedGet('/v5/order/realtime', this.buildCategoryParams(category, options));
   }
 
   async getOrderHistory(
     category: string,
     options?: SymbolLimitFilterArgs,
   ): Promise<BybitListResponse<BybitOrderResponseRaw>> {
-    const params: Record<string, string | number | boolean> = { category };
-
-    if (options?.symbol !== undefined) {
-      params.symbol = options.symbol;
-    }
-
-    if (options?.limit !== undefined) {
-      params.limit = options.limit;
-    }
-
-    return this.authenticatedGet('/v5/order/history', params);
+    return this.authenticatedGet('/v5/order/history', this.buildCategoryParams(category, options));
   }
 
   async createBatchOrders(
@@ -302,17 +287,7 @@ export class BybitHttpClient extends BaseHttpClient {
     category: string,
     options?: SymbolLimitFilterArgs,
   ): Promise<BybitListResponse<BybitPositionRaw>> {
-    const params: Record<string, string | number | boolean> = { category };
-
-    if (options?.symbol !== undefined) {
-      params.symbol = options.symbol;
-    }
-
-    if (options?.limit !== undefined) {
-      params.limit = options.limit;
-    }
-
-    return this.authenticatedGet('/v5/position/list', params);
+    return this.authenticatedGet('/v5/position/list', this.buildCategoryParams(category, options));
   }
 
   async setLeverage(args: SetBybitLeverageArgs): Promise<Record<string, unknown>> {
@@ -342,17 +317,7 @@ export class BybitHttpClient extends BaseHttpClient {
     category: string,
     options?: SymbolLimitFilterArgs,
   ): Promise<BybitListResponse<Record<string, unknown>>> {
-    const params: Record<string, string | number | boolean> = { category };
-
-    if (options?.symbol !== undefined) {
-      params.symbol = options.symbol;
-    }
-
-    if (options?.limit !== undefined) {
-      params.limit = options.limit;
-    }
-
-    return this.authenticatedGet('/v5/position/closed-pnl', params);
+    return this.authenticatedGet('/v5/position/closed-pnl', this.buildCategoryParams(category, options));
   }
 
   async fetchWalletBalance(
@@ -369,13 +334,7 @@ export class BybitHttpClient extends BaseHttpClient {
     category: string,
     options?: SymbolFilterArgs,
   ): Promise<BybitResponse<Record<string, unknown>>> {
-    const params: Record<string, string | number | boolean> = { category };
-
-    if (options?.symbol !== undefined) {
-      params.symbol = options.symbol;
-    }
-
-    return this.authenticatedGet('/v5/account/fee-rate', params);
+    return this.authenticatedGet('/v5/account/fee-rate', this.buildCategoryParams(category, options));
   }
 
   async setMarginMode(mode: string): Promise<Record<string, unknown>> {
@@ -398,3 +357,5 @@ export class BybitHttpClient extends BaseHttpClient {
     return this.authenticatedGet('/v5/account/transaction-log', params);
   }
 }
+
+export { BybitHttpClient };

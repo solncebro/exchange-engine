@@ -1,4 +1,4 @@
-import axios, { AxiosInstance, AxiosError } from 'axios';
+import axios, { AxiosInstance, AxiosError, AxiosResponse } from 'axios';
 import { HttpsAgent as KeepAliveHttpsAgent } from 'agentkeepalive';
 import { ExchangeLogger } from '../types/common';
 
@@ -47,7 +47,7 @@ interface BaseHttpClientArgs {
   httpsAgent?: unknown;
 }
 
-export abstract class BaseHttpClient {
+abstract class BaseHttpClient {
   protected readonly axiosInstance: AxiosInstance;
   protected readonly logger: ExchangeLogger;
   protected readonly apiKey: string;
@@ -90,82 +90,53 @@ export abstract class BaseHttpClient {
     throw new Error('Unreachable');
   }
 
-  protected async post<T>(
+  protected post<T>(
     url: string,
     data?: Record<string, unknown>,
     headers?: Record<string, string>
   ): Promise<T> {
-    try {
-      this.logger.debug(`POST ${url} with data: ${JSON.stringify(data)}`);
-      const response = await this.axiosInstance.post<T>(url, data, { headers });
-
-      return response.data;
-    } catch (error) {
-      this.handleError(error as AxiosError);
-
-      throw error;
-    }
+    return this.executeRequest(`POST ${url}`, () => this.axiosInstance.post<T>(url, data, { headers }));
   }
 
-  protected async postWithParams<T>(
+  protected postWithParams<T>(
     url: string,
     params?: Record<string, string | number | boolean>,
     headers?: Record<string, string>
   ): Promise<T> {
-    try {
-      this.logger.debug(`POST ${url} with params: ${JSON.stringify(params)}`);
-      const response = await this.axiosInstance.post<T>(url, null, { params, headers });
-
-      return response.data;
-    } catch (error) {
-      this.handleError(error as AxiosError);
-
-      throw error;
-    }
+    return this.executeRequest(`POST ${url}`, () => this.axiosInstance.post<T>(url, null, { params, headers }));
   }
 
-  protected async put<T>(
+  protected put<T>(
     url: string,
     data?: Record<string, unknown>,
     headers?: Record<string, string>
   ): Promise<T> {
-    try {
-      this.logger.debug(`PUT ${url} with data: ${JSON.stringify(data)}`);
-      const response = await this.axiosInstance.put<T>(url, data, { headers });
-
-      return response.data;
-    } catch (error) {
-      this.handleError(error as AxiosError);
-
-      throw error;
-    }
+    return this.executeRequest(`PUT ${url}`, () => this.axiosInstance.put<T>(url, data, { headers }));
   }
 
-  protected async putWithParams<T>(
+  protected putWithParams<T>(
     url: string,
     params?: Record<string, string | number | boolean>,
     headers?: Record<string, string>
   ): Promise<T> {
-    try {
-      this.logger.debug(`PUT ${url} with params: ${JSON.stringify(params)}`);
-      const response = await this.axiosInstance.put<T>(url, null, { params, headers });
-
-      return response.data;
-    } catch (error) {
-      this.handleError(error as AxiosError);
-
-      throw error;
-    }
+    return this.executeRequest(`PUT ${url}`, () => this.axiosInstance.put<T>(url, null, { params, headers }));
   }
 
-  protected async delete<T>(
+  protected delete<T>(
     url: string,
     params?: Record<string, string | number | boolean>,
     headers?: Record<string, string>
   ): Promise<T> {
+    return this.executeRequest(`DELETE ${url}`, () => this.axiosInstance.delete<T>(url, { params, headers }));
+  }
+
+  private async executeRequest<T>(
+    label: string,
+    fn: () => Promise<AxiosResponse<T>>,
+  ): Promise<T> {
     try {
-      this.logger.debug(`DELETE ${url} with params: ${JSON.stringify(params)}`);
-      const response = await this.axiosInstance.delete<T>(url, { params, headers });
+      this.logger.debug(label);
+      const response = await fn();
 
       return response.data;
     } catch (error) {
@@ -187,3 +158,5 @@ export abstract class BaseHttpClient {
     }
   }
 }
+
+export { BaseHttpClient };

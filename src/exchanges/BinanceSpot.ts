@@ -1,6 +1,4 @@
 import type { ExchangeArgs } from '../types/exchange';
-import type { Position, Order, FundingRateHistory, FundingInfo } from '../types/common';
-import { MarginModeEnum, PositionModeEnum } from '../types/common';
 import { BinanceSpotHttpClient } from '../http/BinanceSpotHttpClient';
 import { BinanceSpotPublicStream } from '../ws/BinanceSpotPublicStream';
 import {
@@ -8,6 +6,8 @@ import {
   BINANCE_SPOT_BASE_URL,
   BINANCE_DEMO_SPOT_BASE_URL,
   BINANCE_SPOT_WEBSOCKET_STREAM_URL,
+  BINANCE_SPOT_TRADE_WEBSOCKET_URL,
+  BINANCE_DEMO_SPOT_TRADE_WEBSOCKET_URL,
 } from '../constants/binance';
 import { BinanceBaseClient } from './BinanceBaseClient';
 
@@ -16,9 +16,15 @@ class BinanceSpot extends BinanceBaseClient<BinanceSpotHttpClient> {
   protected readonly klineLimit = BINANCE_KLINE_LIMIT_SPOT;
 
   constructor(args: ExchangeArgs) {
-    const baseUrl = args.config.isDemoMode === true
+    const isDemoMode = args.config.isDemoMode === true;
+
+    const baseUrl = isDemoMode
       ? BINANCE_DEMO_SPOT_BASE_URL
       : BINANCE_SPOT_BASE_URL;
+
+    const tradeWebSocketUrl = isDemoMode
+      ? BINANCE_DEMO_SPOT_TRADE_WEBSOCKET_URL
+      : BINANCE_SPOT_TRADE_WEBSOCKET_URL;
 
     const httpClient = new BinanceSpotHttpClient({
       baseUrl,
@@ -30,35 +36,12 @@ class BinanceSpot extends BinanceBaseClient<BinanceSpotHttpClient> {
 
     const publicStream = new BinanceSpotPublicStream(BINANCE_SPOT_WEBSOCKET_STREAM_URL, args.logger, args.onNotify);
 
-    super(args, httpClient, publicStream);
-  }
-
-  async fetchFundingRateHistory(): Promise<FundingRateHistory[]> {
-    throw new Error('Not supported for spot market');
-  }
-
-  async fetchFundingInfo(): Promise<FundingInfo[]> {
-    throw new Error('Not supported for spot market');
-  }
-
-  async fetchPositionMode(): Promise<PositionModeEnum> {
-    throw new Error('Not supported for spot market');
-  }
-
-  async fetchPosition(_symbol: string): Promise<Position> {
-    throw new Error('Not supported for spot market');
-  }
-
-  async setLeverage(_leverage: number, _symbol: string): Promise<void> {
-    throw new Error('Not supported for spot market');
-  }
-
-  async setMarginMode(_marginMode: MarginModeEnum, _symbol: string): Promise<void> {
-    throw new Error('Not supported for spot market');
-  }
-
-  async fetchOrderHistory(_symbol: string): Promise<Order[]> {
-    throw new Error('Not supported for spot market');
+    super({
+      exchangeArgs: args,
+      httpClient,
+      publicStream,
+      tradeWebSocketUrl,
+    });
   }
 }
 

@@ -1,7 +1,7 @@
-import type { RawData } from 'ws';
 import { ReliableWebSocket } from '@solncebro/websocket-engine';
 
 import type { ExchangeLogger } from '../types/common';
+import { parseWebSocketMessage } from './parseWebSocketMessage';
 
 interface BinanceUserDataStreamArgs {
   listenKey: string;
@@ -9,10 +9,6 @@ interface BinanceUserDataStreamArgs {
   logger: ExchangeLogger;
   onNotify?: (message: string) => void | Promise<void>;
   onMessage: (event: Record<string, unknown>) => void;
-}
-
-function parseUserDataMessage(rawData: RawData): Record<string, unknown> {
-  return JSON.parse(rawData.toString()) as Record<string, unknown>;
 }
 
 class BinanceUserDataStream {
@@ -42,7 +38,7 @@ class BinanceUserDataStream {
       label: 'BinanceUserDataStream',
       url,
       logger: this.logger,
-      parseMessage: parseUserDataMessage,
+      parseMessage: (rawData) => parseWebSocketMessage<Record<string, unknown>>(rawData),
       onMessage: (message) => this.onMessageHandler(message),
       onNotify: this.onNotify,
     });
@@ -63,4 +59,3 @@ class BinanceUserDataStream {
 }
 
 export { BinanceUserDataStream };
-export type { BinanceUserDataStreamArgs };
