@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-03-14
+
+### Added
+- Structured logging: `ExchangeLogger` overloaded signatures `(contextObj, message)`
+- API response validation: `BinanceBaseHttpClient` + `BybitHttpClient` throw `ExchangeError` on invalid responses
+- `fetchAllInstrumentsInfo(category)` in `BybitHttpClient` with cursor pagination
+- `triggerDirection` field in `CreateOrderWebSocketArgs`
+- `BINANCE_ORDER_STATUS` mapping constant
+- `exchangeLabel` abstract field + `getTradeSymbolOrWarn()` helper in `BaseExchangeClient`
+- WebSocket error protection: try-catch in all WS message handlers
+- Comprehensive WebSocket test suite (8 new test files, 76+ new tests)
+
+### Changed
+- Type extraction: 11 `.types.ts` files co-located with source modules
+- `normalizeBinanceOrder()` uses `BINANCE_ORDER_STATUS` mapping
+- `BybitTradeStream` returns minimal `Order` object (id + clientOrderId only)
+- Bybit WebSocket auth uses `expires = Date.now() + 10000`
+- `parseWebSocketMessage` throws descriptive error on invalid JSON
+
 ## [0.4.0] - 2026-03-14
 
 ### Breaking Changes
@@ -153,6 +172,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Private endpoints (balance, position, orders) require valid credentials
 - WebSocket subscriptions are stateless and can be re-established on reconnect
 
+[0.4.1]: https://github.com/solncebro/exchange-engine/releases/tag/v0.4.1
+[0.4.0]: https://github.com/solncebro/exchange-engine/releases/tag/v0.4.0
 [0.3.3]: https://github.com/solncebro/exchange-engine/releases/tag/v0.3.3
 [0.3.2]: https://github.com/solncebro/exchange-engine/releases/tag/v0.3.2
 [0.3.1]: https://github.com/solncebro/exchange-engine/releases/tag/v0.3.1

@@ -149,7 +149,6 @@ describe('BaseHttpClient', () => {
       const error500 = createAxiosError(500);
       mockInstance.get.mockRejectedValue(error500);
 
-      // Mock setTimeout to resolve immediately to avoid real delays
       jest.spyOn(global, 'setTimeout').mockImplementation(((fn: () => void) => {
         fn();
         return 0 as unknown as NodeJS.Timeout;
@@ -275,7 +274,10 @@ describe('BaseHttpClient', () => {
       mockInstance.post.mockRejectedValue(createAxiosError(400));
 
       await expect(client.testPost('/test')).rejects.toThrow();
-      expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('HTTP 400'));
+      expect(logger.error).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 400 }),
+        expect.stringContaining('HTTP 400'),
+      );
     });
 
     it('logs "No response" on network error', async () => {
@@ -283,7 +285,10 @@ describe('BaseHttpClient', () => {
       mockInstance.post.mockRejectedValue(networkError);
 
       await expect(client.testPost('/test')).rejects.toThrow();
-      expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('No response'));
+      expect(logger.error).toHaveBeenCalledWith(
+        expect.objectContaining({ errorMessage: expect.any(String) }),
+        expect.stringContaining('No response'),
+      );
     });
 
     it('logs "Request error" on setup error', async () => {
@@ -291,7 +296,10 @@ describe('BaseHttpClient', () => {
       mockInstance.post.mockRejectedValue(error);
 
       await expect(client.testPost('/test')).rejects.toThrow();
-      expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('Request error'));
+      expect(logger.error).toHaveBeenCalledWith(
+        expect.objectContaining({ errorMessage: 'Bad config' }),
+        expect.stringContaining('Request error'),
+      );
     });
   });
 });

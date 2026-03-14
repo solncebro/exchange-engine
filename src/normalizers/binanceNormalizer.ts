@@ -12,7 +12,7 @@ import type {
   FundingInfo,
 } from '../types/common';
 import { TradeSymbolTypeEnum, PositionSideEnum, MarginModeEnum, TimeInForceEnum } from '../types/common';
-import { BINANCE_POSITION_SIDE, BINANCE_ORDER_SIDE, BINANCE_ORDER_TYPE, BINANCE_TIME_IN_FORCE } from '../constants/mappings';
+import { BINANCE_POSITION_SIDE, BINANCE_ORDER_SIDE, BINANCE_ORDER_TYPE, BINANCE_ORDER_STATUS, BINANCE_TIME_IN_FORCE } from '../constants/mappings';
 
 interface BinanceFilterRaw {
   filterType: string;
@@ -246,7 +246,7 @@ export function normalizeBinanceOrder(raw: BinanceOrderResponseRaw): Order {
     amount: parseFloat(raw.origQty),
     filledAmount: parseFloat(raw.executedQty ?? '0'),
     filledQuoteAmount: parseFloat(raw.cumQuote ?? '0'),
-    status: raw.status.toLowerCase(),
+    status: BINANCE_ORDER_STATUS[raw.status] ?? raw.status.toLowerCase(),
     reduceOnly: raw.reduceOnly ?? false,
     timestamp: raw.time ?? raw.updateTime,
     updatedTimestamp: raw.updateTime,

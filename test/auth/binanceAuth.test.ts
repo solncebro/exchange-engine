@@ -1,7 +1,8 @@
 import {
+  buildBinanceAuthHeaders,
   buildBinanceSignature,
   buildBinanceSignedParams,
-  buildBinanceAuthHeaders,
+  buildBinanceWebSocketSignedParams,
 } from '../../src/auth/binanceAuth';
 import { hmacSha256 } from '../../src/utils/crypto';
 
@@ -24,6 +25,10 @@ describe('buildBinanceSignature', () => {
 describe('buildBinanceSignedParams', () => {
   beforeEach(() => {
     jest.spyOn(Date, 'now').mockReturnValue(1700000000000);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
   });
 
   it('adds timestamp to params', () => {
@@ -77,5 +82,64 @@ describe('buildBinanceAuthHeaders', () => {
     const result = buildBinanceAuthHeaders('myApiKey');
 
     expect(result).toEqual({ 'X-MBX-APIKEY': 'myApiKey' });
+  });
+});
+
+describe('buildBinanceWebSocketSignedParams', () => {
+  beforeEach(() => {
+    jest.spyOn(Date, 'now').mockReturnValue(1700000000000);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('sorts keys alphabetically and produces correct signature', () => {
+    const result = buildBinanceWebSocketSignedParams({
+      params: { z: 'value_z', a: 'value_a', m: 'value_m' },
+      secret: 'testSecret',
+    });
+
+    expect(result.a).toBe('value_a');
+    expect(result.m).toBe('value_m');
+    expect(result.z).toBe('value_z');
+
+    const sortedQueryString = 'a=value_a&m=value_m&recvWindow=5000&timestamp=1700000000000&z=value_z';
+    const expectedSignature = hmacSha256(sortedQueryString, 'testSecret');
+    expect(result.signature).toBe(expectedSignature);
+  });
+
+  it('produces different signature from REST for same params due to key ordering', () => {
+    const params = { symbol: 'BTCUSDT', side: 'BUY', quantity: '0.1' };
+    const secret = 'testSecret';
+
+    const wsResult = buildBinanceWebSocketSignedParams({ params, secret });
+    const restResult = buildBinanceSignedParams({ params, secret });
+
+    // WS sorts alphabetically: quantity, recvWindow, side, symbol, timestamp
+    // REST preserves insertion order: symbol, side, quantity, timestamp, recvWindow
+    expect(wsResult.signature).not.toBe(restResult.signature);
+  });
+
+  it('includes timestamp, recvWindow, and signature in result', () => {
+    const result = buildBinanceWebSocketSignedParams({
+      params: { symbol: 'BTCUSDT' },
+      secret: 'secret',
+    });
+
+    expect(result.timestamp).toBe(1700000000000);
+    expect(result.recvWindow).toBe(5000);
+    expect(result.signature).toBeDefined();
+    expect(result.symbol).toBe('BTCUSDT');
+  });
+
+  it('preserves apiKey when provided in params', () => {
+    const result = buildBinanceWebSocketSignedParams({
+      params: { apiKey: 'myKey', symbol: 'ETHUSDT' },
+      secret: 'secret',
+    });
+
+    expect(result.apiKey).toBe('myKey');
+    expect(result.symbol).toBe('ETHUSDT');
   });
 });

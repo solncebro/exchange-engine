@@ -1,6 +1,8 @@
 import axios, { AxiosInstance, AxiosError, AxiosResponse } from 'axios';
 import { HttpsAgent as KeepAliveHttpsAgent } from 'agentkeepalive';
-import { ExchangeLogger } from '../types/common';
+
+import type { ExchangeLogger } from '../types/common';
+import type { BaseHttpClientArgs } from './BaseHttpClient.types';
 
 const DEFAULT_HTTPS_AGENT = new KeepAliveHttpsAgent({
   maxSockets: 100,
@@ -39,14 +41,6 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-interface BaseHttpClientArgs {
-  baseUrl: string;
-  apiKey: string;
-  logger: ExchangeLogger;
-  timeout?: number;
-  httpsAgent?: unknown;
-}
-
 abstract class BaseHttpClient {
   protected readonly axiosInstance: AxiosInstance;
   protected readonly logger: ExchangeLogger;
@@ -67,10 +61,13 @@ abstract class BaseHttpClient {
     params?: Record<string, string | number | boolean>,
     headers?: Record<string, string>
   ): Promise<T> {
+
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+
       try {
-        this.logger.debug(`GET ${url} with params: ${JSON.stringify(params)}`);
+        this.logger.debug({ url, params }, `GET ${url}`);
         const response = await this.axiosInstance.get<T>(url, { params, headers });
+        this.logger.debug({ url, response: response.data as Record<string, unknown> }, `GET ${url} response`);
 
         return response.data;
       } catch (error) {
@@ -137,6 +134,7 @@ abstract class BaseHttpClient {
     try {
       this.logger.debug(label);
       const response = await fn();
+      this.logger.debug({ response: response.data as Record<string, unknown> }, `${label} response`);
 
       return response.data;
     } catch (error) {
@@ -149,12 +147,13 @@ abstract class BaseHttpClient {
   private handleError(error: AxiosError): void {
     if (error.response) {
       this.logger.error(
-        `HTTP ${error.response.status}: ${JSON.stringify(error.response.data)}`
+        { status: error.response.status, data: error.response.data as Record<string, unknown> },
+        `HTTP ${error.response.status}`,
       );
     } else if (error.request) {
-      this.logger.error(`No response: ${error.message}`);
+      this.logger.error({ errorMessage: error.message }, `No response: ${error.message}`);
     } else {
-      this.logger.error(`Request error: ${error.message}`);
+      this.logger.error({ errorMessage: error.message }, `Request error: ${error.message}`);
     }
   }
 }

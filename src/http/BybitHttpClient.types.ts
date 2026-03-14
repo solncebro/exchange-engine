@@ -55,6 +55,7 @@ export interface SwitchBybitIsolatedArgs {
 
 export interface BybitListResult<T> {
   list: T[];
+  nextPageCursor?: string;
 }
 
 export interface BybitListResponse<T> {
@@ -68,6 +69,11 @@ export interface BybitResponse<T> {
 export interface BybitOrderBookRaw {
   a: string[][];
   b: string[][];
+}
+
+export interface BybitApiResponse {
+  retCode: number;
+  retMsg: string;
 }
 
 export interface BybitCreateOrderApiResponse {

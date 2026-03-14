@@ -34,6 +34,7 @@ export interface CreateOrderWebSocketArgs {
   amount: number;
   price?: number;
   stopPrice?: number;
+  triggerDirection?: 1 | 2;
   closePosition?: boolean;
   workingType?: WorkingTypeEnum;
   positionSide?: PositionSideEnum;

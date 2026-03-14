@@ -1,4 +1,4 @@
-import type { CreateOrderWebSocketArgs, ExchangeArgs, FetchPageWithLimitArgs } from '../types/exchange';
+import type { CreateOrderWebSocketArgs, FetchPageWithLimitArgs } from '../types/exchange';
 import type {
   Kline,
   KlineInterval,
@@ -26,14 +26,10 @@ import {
   BYBIT_TRADE_WEBSOCKET_URL,
 } from '../constants/bybit';
 import { BaseExchangeClient } from './BaseExchangeClient';
-
-interface BybitBaseClientArgs {
-  exchangeArgs: ExchangeArgs;
-  category: string;
-  publicWebSocketUrl: string;
-}
+import type { BybitBaseClientArgs } from './BybitBaseClient.types';
 
 abstract class BybitBaseClient extends BaseExchangeClient {
+  protected readonly exchangeLabel = 'Bybit';
   protected readonly klineLimit = 200;
   protected readonly httpClient: BybitHttpClient;
 
@@ -80,9 +76,13 @@ abstract class BybitBaseClient extends BaseExchangeClient {
   }
 
   protected async fetchAndNormalizeTradeSymbols(): Promise<TradeSymbolBySymbol> {
-    const raw = await this.httpClient.fetchInstrumentsInfo(this.category);
+    const rawList = await this.httpClient.fetchAllInstrumentsInfo(this.category);
+    this.logger.info(
+      { instrumentCount: rawList.length },
+      `[Bybit] Fetched ${rawList.length} ${this.category} instruments`,
+    );
 
-    return normalizeBybitTradeSymbols(raw.result.list);
+    return normalizeBybitTradeSymbols(rawList);
   }
 
   protected async fetchAndNormalizeTickers(): Promise<TickerBySymbol> {
@@ -132,6 +132,10 @@ abstract class BybitBaseClient extends BaseExchangeClient {
       orderParams.triggerPrice = String(this.priceToPrecision(args.symbol, args.stopPrice));
     }
 
+    if (args.triggerDirection !== undefined) {
+      orderParams.triggerDirection = args.triggerDirection;
+    }
+
     if (args.reduceOnly !== undefined) {
       orderParams.reduceOnly = args.reduceOnly;
     }
@@ -159,24 +163,22 @@ abstract class BybitBaseClient extends BaseExchangeClient {
     await this.tradeStream.connect();
   }
 
-  protected async submitOrder(orderParams: Record<string, unknown>, symbol: string): Promise<Order> {
+  protected async submitOrder(orderParams: Record<string, unknown>, args: CreateOrderWebSocketArgs): Promise<Order> {
     if (this.tradeStream !== null) {
-      this.logger.debug(`Creating order via WebSocket: ${symbol}`);
+      this.logger.debug(`[Bybit] Creating order via WebSocket: ${args.symbol}`);
+      const order = await this.tradeStream.createOrder(orderParams);
 
-      return this.tradeStream.createOrder(orderParams);
+      return buildBybitOrderFromCreateResponse(args, order.id);
     }
 
-    this.logger.debug(`Creating order via REST: ${symbol}`);
+    this.logger.debug(`[Bybit] Creating order via REST: ${args.symbol}`);
     const raw = await this.httpClient.createOrder(orderParams);
 
-    return buildBybitOrderFromCreateResponse(
-      { symbol, type: orderParams.orderType as string, side: orderParams.side as string } as CreateOrderWebSocketArgs,
-      raw.result.orderId,
-    );
+    return buildBybitOrderFromCreateResponse(args, raw.result.orderId);
   }
 
   async close(): Promise<void> {
-    this.logger.info(`Closing Bybit ${this.marketLabel} connection`);
+    this.logger.info(`[Bybit] Closing ${this.marketLabel} connection`);
 
     if (this.tradeStream !== null) {
       this.tradeStream.disconnect();

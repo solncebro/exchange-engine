@@ -6,14 +6,8 @@ import type { KlineHandler } from '../types/exchange';
 import { normalizeBinanceKlineWebSocketMessage, normalizeBinanceTickers } from '../normalizers/binanceNormalizer';
 import type { BinanceTicker24hrRaw, BinanceWebSocketKlineRaw } from '../normalizers/binanceNormalizer';
 import { resolveUnifiedBinanceInterval } from './binanceWebSocketUtils';
+import type { BinanceSpotWebSocketEnvelope } from './BinanceSpotPublicStream.types';
 import { parseWebSocketMessage } from './parseWebSocketMessage';
-
-interface BinanceSpotWebSocketEnvelope {
-  stream?: string;
-  data?: unknown;
-  e?: string;
-  [key: string]: unknown;
-}
 
 class BinanceSpotPublicStream {
   private webSocket: ReliableWebSocket<BinanceSpotWebSocketEnvelope> | null = null;
@@ -114,32 +108,36 @@ class BinanceSpotPublicStream {
   }
 
   private handleMessage(message: BinanceSpotWebSocketEnvelope): void {
-    if (message.e === '24hrMiniTicker' && Array.isArray(message.data)) {
-      const tickerBySymbol = normalizeBinanceTickers(message.data as BinanceTicker24hrRaw[]);
+    try {
+      if (message.e === '24hrMiniTicker' && Array.isArray(message.data)) {
+        const tickerBySymbol = normalizeBinanceTickers(message.data as BinanceTicker24hrRaw[]);
 
-      for (const handler of this.tickerHandlerSet) {
-        handler(tickerBySymbol);
+        for (const handler of this.tickerHandlerSet) {
+          handler(tickerBySymbol);
+        }
+
+        return;
       }
 
-      return;
-    }
-
-    if (!message.stream) {
-      return;
-    }
-
-    if (message.stream === '!miniTicker@arr' && Array.isArray(message.data)) {
-      const tickerBySymbol = normalizeBinanceTickers(message.data as BinanceTicker24hrRaw[]);
-
-      for (const handler of this.tickerHandlerSet) {
-        handler(tickerBySymbol);
+      if (!message.stream) {
+        return;
       }
 
-      return;
-    }
+      if (message.stream === '!miniTicker@arr' && Array.isArray(message.data)) {
+        const tickerBySymbol = normalizeBinanceTickers(message.data as BinanceTicker24hrRaw[]);
 
-    if (message.stream.includes('@kline_')) {
-      this.handleKlineFromStream(message.stream, message.data);
+        for (const handler of this.tickerHandlerSet) {
+          handler(tickerBySymbol);
+        }
+
+        return;
+      }
+
+      if (message.stream.includes('@kline_')) {
+        this.handleKlineFromStream(message.stream, message.data);
+      }
+    } catch (error) {
+      this.logger.error(`BinanceSpotPublicStream: error handling message: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 

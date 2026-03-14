@@ -103,12 +103,12 @@ export const BINANCE_RAW_ACCOUNT: BinanceAccountRaw = {
   ],
 };
 
-export const BINANCE_RAW_FUNDING_RATE_HISTORY: BinanceFundingRateHistoryRaw[] = [
+export const BINANCE_RAW_FUNDING_RATE_HISTORY_LIST: BinanceFundingRateHistoryRaw[] = [
   { symbol: 'BTCUSDT', fundingRate: '0.00010000', fundingTime: 1700006400000, markPrice: '65500.00' },
   { symbol: 'BTCUSDT', fundingRate: '-0.00005000', fundingTime: 1700035200000, markPrice: '' },
 ];
 
-export const BINANCE_RAW_FUNDING_INFO: BinanceFundingInfoRaw[] = [
+export const BINANCE_RAW_FUNDING_INFO_LIST: BinanceFundingInfoRaw[] = [
   { symbol: 'BTCUSDT', adjustedFundingRateCap: '0.02000000', adjustedFundingRateFloor: '-0.02000000', fundingIntervalHours: 8 },
   { symbol: 'ETHUSDT', adjustedFundingRateCap: '0.01500000', adjustedFundingRateFloor: '-0.01500000', fundingIntervalHours: 4 },
 ];

@@ -1,20 +1,7 @@
 import { ReliableWebSocket, WebSocketStatus } from '@solncebro/websocket-engine';
 
 import type { ExchangeLogger, Order } from '../types/common';
-
-interface BaseTradeStreamArgs {
-  url: string;
-  apiKey: string;
-  secret: string;
-  logger: ExchangeLogger;
-  onNotify?: (message: string) => void | Promise<void>;
-}
-
-interface PendingRequest {
-  resolve: (order: Order) => void;
-  reject: (error: Error) => void;
-  timeout: NodeJS.Timeout;
-}
+import type { BaseTradeStreamArgs, PendingRequest } from './BaseTradeStream.types';
 
 const ORDER_TIMEOUT_MS = 30000;
 
@@ -82,6 +69,19 @@ abstract class BaseTradeStream<TMessage> {
     requestId: string,
   ): unknown;
 
+  protected takePendingRequest(requestId: string): PendingRequest | null {
+    const pending = this.pendingRequestByRequestId.get(requestId);
+
+    if (!pending) {
+      return null;
+    }
+
+    clearTimeout(pending.timeout);
+    this.pendingRequestByRequestId.delete(requestId);
+
+    return pending;
+  }
+
   private async ensureConnected(): Promise<void> {
     if (this.webSocket !== null) {
       return;
@@ -102,19 +102,21 @@ abstract class BaseTradeStream<TMessage> {
 
   private sendOrderRequest(request: unknown, requestId: string): Promise<Order> {
     return new Promise<Order>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        this.pendingRequestByRequestId.delete(requestId);
-        reject(new Error(`Order creation timeout after ${ORDER_TIMEOUT_MS}ms`));
-      }, ORDER_TIMEOUT_MS);
-
-      this.pendingRequestByRequestId.set(requestId, { resolve, reject, timeout });
-
-      if (this.webSocket === null) {
-        reject(new Error('WebSocket is not connected'));
+      if (this.webSocket === null || !this.isConnected()) {
+        reject(new Error(`${this.label}: WebSocket is not connected`));
 
         return;
       }
 
+      const timeout = setTimeout(() => {
+        this.pendingRequestByRequestId.delete(requestId);
+        this.logger.error({ requestId, timeoutMs: ORDER_TIMEOUT_MS }, `${this.label}: Order creation timeout`);
+        reject(new Error(`${this.label}: Order creation timeout after ${ORDER_TIMEOUT_MS}ms`));
+      }, ORDER_TIMEOUT_MS);
+
+      this.pendingRequestByRequestId.set(requestId, { resolve, reject, timeout });
+
+      this.logger.info({ requestId, request }, `${this.label}: Sending order request`);
       this.webSocket.sendToConnectedSocket(request);
     });
   }

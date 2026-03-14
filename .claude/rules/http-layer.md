@@ -55,6 +55,9 @@ Rate limiting — **только реактивный** (нет proactive thrott
 - `signedDelete<T>(path, params?)` — то же для DELETE
 - `authHeaders()` → `{ 'X-MBX-APIKEY': apiKey }`
 
+### Валидация ответов:
+- `validateResponse(data)` — бросает `ExchangeError` при `code < 0` в ответе Binance API
+
 ### Private хелперы:
 - `signRequest(params)` → `{ signedParams, headers }` — единая точка подписи, используется всеми signed-методами
 - `buildOptionalSymbolParams(symbol?)` → `Record<string, ...>` — protected, строит params с optional symbol (используется в `getOpenOrders` и наследниках)
@@ -123,6 +126,9 @@ order, openOrders, account, listenKey
 
 Ключевое отличие от Binance: **signature в заголовках**, а не в query string.
 
+### Валидация ответов:
+- `validateResponse(data)` — бросает `ExchangeError` при `retCode !== 0` в ответе Bybit API
+
 ### Приватные хелперы:
 - `authenticatedGet<T>(path, params)` — строит query string → подписывает → GET
 - `authenticatedPost<T>(path, body)` — JSON.stringify body → подписывает → POST
@@ -143,6 +149,7 @@ order, openOrders, account, listenKey
 - `setLeverage(args)` → POST `/v5/position/set-leverage`
 - `switchIsolated(args)` → POST `/v5/position/switch-isolated`
 - `fetchWalletBalance(accountType)` → GET `/v5/account/wallet-balance`
+- `fetchAllInstrumentsInfo(category)` → пагинация через cursor, возвращает полный список инструментов
 
 ## Паттерн для optional symbol
 
@@ -168,3 +175,10 @@ async fetchSomething(symbol: string, options?: FetchPageWithLimitArgs): Promise<
   return this.get<...>('/endpoint', params);
 }
 ```
+
+## Type Extraction
+
+Типы вынесены в co-located `.types.ts` файлы:
+- `BaseHttpClient.types.ts` — BaseHttpClientArgs
+- `BinanceBaseHttpClient.types.ts` — BinanceEndpoints, BinanceBaseHttpClientArgs
+- `BybitHttpClient.types.ts` — BybitHttpClientArgs

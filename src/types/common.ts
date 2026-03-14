@@ -67,10 +67,15 @@ export interface ExchangeConfig {
 }
 
 export interface ExchangeLogger {
+  debug(obj: Record<string, unknown>, message: string): void;
   debug(message: string, ...args: unknown[]): void;
+  info(obj: Record<string, unknown>, message: string): void;
   info(message: string, ...args: unknown[]): void;
+  warn(obj: Record<string, unknown>, message: string): void;
   warn(message: string, ...args: unknown[]): void;
+  error(obj: Record<string, unknown>, message: string): void;
   error(message: string, ...args: unknown[]): void;
+  fatal(obj: Record<string, unknown>, message: string): void;
   fatal(message: string, ...args: unknown[]): void;
 }
 

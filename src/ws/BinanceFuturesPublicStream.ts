@@ -5,20 +5,10 @@ import type { KlineHandler } from '../types/exchange';
 import { normalizeBinanceKlineWebSocketMessage, normalizeBinanceTickers } from '../normalizers/binanceNormalizer';
 import type { BinanceTicker24hrRaw, BinanceWebSocketKlineRaw } from '../normalizers/binanceNormalizer';
 import { resolveUnifiedBinanceInterval } from './binanceWebSocketUtils';
+import type { BinanceCombinedMessage, FuturesConnection } from './BinanceFuturesPublicStream.types';
 import { parseWebSocketMessage } from './parseWebSocketMessage';
 
 const MAX_STREAMS_PER_CONNECTION = 200;
-
-interface BinanceCombinedMessage {
-  stream?: string;
-  data?: unknown;
-}
-
-interface FuturesConnection {
-  webSocket: ReliableWebSocket<BinanceCombinedMessage>;
-  label: string;
-  streamList: string[];
-}
 
 function buildKlineStreamList(klineHandlerByKey: Map<string, Set<KlineHandler>>): string[] {
   const streamList: string[] = [];
@@ -202,37 +192,41 @@ class BinanceFuturesPublicStream {
       return;
     }
 
-    if (Array.isArray(message.data)) {
-      const tickerBySymbol = normalizeBinanceTickers(message.data as BinanceTicker24hrRaw[]);
+    try {
+      if (Array.isArray(message.data)) {
+        const tickerBySymbol = normalizeBinanceTickers(message.data as BinanceTicker24hrRaw[]);
 
-      for (const handler of this.tickerHandlerSet) {
-        handler(tickerBySymbol);
-      }
+        for (const handler of this.tickerHandlerSet) {
+          handler(tickerBySymbol);
+        }
 
-      return;
-    }
-
-    if (message.stream && message.stream.includes('@continuousKline_')) {
-      const klineRaw = (message.data as Record<string, unknown>)['k'] as BinanceWebSocketKlineRaw;
-
-      if (!klineRaw) {
         return;
       }
 
-      const kline = normalizeBinanceKlineWebSocketMessage(klineRaw);
-      const continuousKlineIndex = message.stream.indexOf('@continuousKline_');
-      const symbolLower = message.stream.slice(0, continuousKlineIndex).replace(/_perpetual$/, '');
-      const symbol = symbolLower.toUpperCase();
-      const binanceInterval = message.stream.slice(continuousKlineIndex + '@continuousKline_'.length);
-      const unifiedInterval = resolveUnifiedBinanceInterval(binanceInterval);
-      const key = `${symbol}_${unifiedInterval}`;
-      const handlerSet = this.klineHandlerByKey.get(key);
+      if (message.stream && message.stream.includes('@continuousKline_')) {
+        const klineRaw = (message.data as Record<string, unknown>)['k'] as BinanceWebSocketKlineRaw;
 
-      if (handlerSet) {
-        for (const handler of handlerSet) {
-          handler(symbol, kline);
+        if (!klineRaw) {
+          return;
+        }
+
+        const kline = normalizeBinanceKlineWebSocketMessage(klineRaw);
+        const continuousKlineIndex = message.stream.indexOf('@continuousKline_');
+        const symbolLower = message.stream.slice(0, continuousKlineIndex).replace(/_perpetual$/, '');
+        const symbol = symbolLower.toUpperCase();
+        const binanceInterval = message.stream.slice(continuousKlineIndex + '@continuousKline_'.length);
+        const unifiedInterval = resolveUnifiedBinanceInterval(binanceInterval);
+        const key = `${symbol}_${unifiedInterval}`;
+        const handlerSet = this.klineHandlerByKey.get(key);
+
+        if (handlerSet) {
+          for (const handler of handlerSet) {
+            handler(symbol, kline);
+          }
         }
       }
+    } catch (error) {
+      this.logger.error(`BinanceFuturesPublicStream: error handling message: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 }

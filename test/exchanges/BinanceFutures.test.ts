@@ -4,13 +4,13 @@ import { createMockLogger } from '../fixtures/mockLogger';
 import { createMockAxiosInstance } from '../fixtures/mockAxios';
 import {
   BINANCE_RAW_POSITION_RISK,
-  BINANCE_RAW_FUNDING_RATE_HISTORY,
+  BINANCE_RAW_FUNDING_RATE_HISTORY_LIST,
   BINANCE_RAW_EXCHANGE_INFO,
   BINANCE_RAW_TICKER_LIST,
   BINANCE_RAW_KLINE_LIST,
   BINANCE_RAW_ACCOUNT,
   BINANCE_RAW_ORDER_RESPONSE,
-  BINANCE_RAW_FUNDING_INFO,
+  BINANCE_RAW_FUNDING_INFO_LIST,
   BINANCE_RAW_POSITION_MODE_HEDGE,
   BINANCE_RAW_POSITION_MODE_ONE_WAY,
 } from '../fixtures/binanceRaw';
@@ -93,7 +93,7 @@ describe('BinanceFutures', () => {
   describe('fetchFundingRateHistory', () => {
     it('returns normalized funding rate history', async () => {
       const { client, mockInstance } = createClient();
-      mockInstance.get.mockResolvedValue({ data: BINANCE_RAW_FUNDING_RATE_HISTORY });
+      mockInstance.get.mockResolvedValue({ data: BINANCE_RAW_FUNDING_RATE_HISTORY_LIST });
 
       const result = await client.fetchFundingRateHistory('BTCUSDT');
 
@@ -106,7 +106,7 @@ describe('BinanceFutures', () => {
 
     it('returns null markPrice for empty string', async () => {
       const { client, mockInstance } = createClient();
-      mockInstance.get.mockResolvedValue({ data: BINANCE_RAW_FUNDING_RATE_HISTORY });
+      mockInstance.get.mockResolvedValue({ data: BINANCE_RAW_FUNDING_RATE_HISTORY_LIST });
 
       const result = await client.fetchFundingRateHistory('BTCUSDT');
 
@@ -559,7 +559,7 @@ describe('BinanceFutures', () => {
   describe('fetchFundingInfo', () => {
     it('returns normalized funding info', async () => {
       const { client, mockInstance } = createClient();
-      mockInstance.get.mockResolvedValue({ data: BINANCE_RAW_FUNDING_INFO });
+      mockInstance.get.mockResolvedValue({ data: BINANCE_RAW_FUNDING_INFO_LIST });
 
       const result = await client.fetchFundingInfo();
 
@@ -572,7 +572,7 @@ describe('BinanceFutures', () => {
 
     it('passes symbol to httpClient when provided', async () => {
       const { client, mockInstance } = createClient();
-      mockInstance.get.mockResolvedValue({ data: [BINANCE_RAW_FUNDING_INFO[0]] });
+      mockInstance.get.mockResolvedValue({ data: [BINANCE_RAW_FUNDING_INFO_LIST[0]] });
 
       const result = await client.fetchFundingInfo('BTCUSDT');
 

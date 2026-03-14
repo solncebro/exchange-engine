@@ -24,7 +24,7 @@ class BybitSpot extends BybitBaseClient {
       orderParams.marketUnit = 'baseCoin';
     }
 
-    return this.submitOrder(orderParams, args.symbol);
+    return this.submitOrder(orderParams, args);
   }
 }
 

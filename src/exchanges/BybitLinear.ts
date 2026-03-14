@@ -21,7 +21,7 @@ class BybitLinear extends BybitBaseClient {
   async createOrderWebSocket(args: CreateOrderWebSocketArgs): Promise<Order> {
     const orderParams = this.buildBybitOrderParams(args);
 
-    return this.submitOrder(orderParams, args.symbol);
+    return this.submitOrder(orderParams, args);
   }
 
   async fetchOrderHistory(symbol: string, options?: FetchPageWithLimitArgs): Promise<Order[]> {

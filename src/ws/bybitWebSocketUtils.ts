@@ -1,14 +1,8 @@
-import type { WebSocketOpenContext } from '@solncebro/websocket-engine';
-import type { ExchangeLogger } from '../types/common';
 import { hmacSha256 } from '../utils/crypto';
-
-interface BybitBaseWebSocketMessage {
-  op?: string;
-  data?: unknown;
-  success?: boolean;
-  ret_msg?: string;
-  [key: string]: unknown;
-}
+import type {
+  AuthenticateBybitWebSocketArgs,
+  BybitBaseWebSocketMessage,
+} from './bybitWebSocketUtils.types';
 
 const BYBIT_PING_INTERVAL = 20000;
 
@@ -21,29 +15,35 @@ const BYBIT_HEARTBEAT_CONFIG = {
   isResponse: isBybitPongResponse,
 };
 
-interface AuthenticateBybitWebSocketArgs {
-  context: WebSocketOpenContext<BybitBaseWebSocketMessage>;
-  apiKey: string;
-  secret: string;
-  label: string;
-  logger: ExchangeLogger;
-}
-
 async function authenticateBybitWebSocket(args: AuthenticateBybitWebSocketArgs): Promise<void> {
   const { context, apiKey, secret, label, logger } = args;
-  const timestamp = Date.now();
-  const payload = `GET/realtime${timestamp}`;
+  const expires = Date.now() + 10000;
+  const payload = `GET/realtime${expires}`;
   const signature = hmacSha256(payload, secret);
 
   context.send({
     op: 'auth',
-    args: [apiKey, timestamp, signature],
+    args: [apiKey, expires, signature],
   });
 
-  await context.waitForMessage(
-    (message) => message.op === 'auth' && message.success === true,
-    10000,
-  );
+  await context.waitForMessage((message) => {
+    if (message.op === 'auth') {
+      const record = message as Record<string, unknown>;
+      const retCode = record.ret_code ?? record.retCode;
+
+      if (message.success || retCode === 0) {
+        return true;
+      }
+
+      const errorMessage = message.ret_msg ?? record.retMsg ?? 'unknown error';
+      const errorDetails = retCode !== undefined ? ` (code: ${retCode})` : '';
+
+      logger.error(`Bybit auth response: ${JSON.stringify(message)}`);
+      throw new Error(`Bybit auth failed: ${errorMessage}${errorDetails}`);
+    }
+
+    return false;
+  }, 10000);
 
   logger.info(`${label} authenticated`);
 }
@@ -54,4 +54,4 @@ export {
   BYBIT_PING_INTERVAL,
   authenticateBybitWebSocket,
 };
-export type { BybitBaseWebSocketMessage, AuthenticateBybitWebSocketArgs };
+export type { BybitBaseWebSocketMessage, AuthenticateBybitWebSocketArgs } from './bybitWebSocketUtils.types';

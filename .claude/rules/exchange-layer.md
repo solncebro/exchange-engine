@@ -85,6 +85,10 @@ Precision:
 - `createOrderWebSocket()`
 - `close()`
 
+### Новые поля и методы:
+- `abstract exchangeLabel: string` — строковый идентификатор биржи для логирования и ExchangeError
+- `getTradeSymbolOrWarn(symbol)` — protected helper, возвращает TradeSymbol или логирует warning и возвращает undefined
+
 ### Default throw (переопределяются только в futures-классах):
 - `fetchOrderHistory()`, `fetchFundingRateHistory()`, `fetchFundingInfo()`, `fetchPositionMode()`
 - `fetchPosition()`, `setLeverage()`, `setMarginMode()`
@@ -128,8 +132,9 @@ Precision:
 
 Реализует `createOrderWebSocket()` через `BybitTradeStream` с fallback на REST:
 1. Формирует params через `buildBybitOrderParams()`: `{ category, symbol, orderType, side, qty, ... }`
-2. Если `tradeStream !== null` → отправляет через WebSocket
-3. Иначе fallback: `httpClient.createOrder()` → `buildBybitOrderFromCreateResponse()`
+2. `submitOrder(orderParams, args: CreateOrderWebSocketArgs)` — принимает аргументы как второй параметр
+3. Если `tradeStream !== null` → отправляет через WebSocket
+4. Иначе fallback: `httpClient.createOrder()` → `buildBybitOrderFromCreateResponse()`
 
 Реализует `isTradeWebSocketConnected()` и `connectTradeWebSocket()` через `BybitTradeStream`.
 
@@ -162,3 +167,13 @@ Precision:
 - `loadTradeSymbols(true)` — принудительная перезагрузка
 - Используется в `amountToPrecision()`, `priceToPrecision()`, `getMinOrderQty()`, `getMinNotional()`
 - Автоматического TTL нет — потребитель управляет сам
+
+## Structured Logging
+
+ExchangeLogger поддерживает overloaded signatures:
+- `logger.info(message: string)` — простое сообщение
+- `logger.info(context: Record<string, unknown>, message: string)` — сообщение с контекстным объектом
+
+## CreateOrderWebSocketArgs
+
+- `triggerDirection?: 1 | 2` — направление триггера для условных ордеров (1 = rise, 2 = fall)

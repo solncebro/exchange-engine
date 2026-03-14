@@ -1,4 +1,4 @@
-import type { CreateOrderWebSocketArgs, ExchangeArgs, FetchPageWithLimitArgs } from '../types/exchange';
+import type { CreateOrderWebSocketArgs, FetchPageWithLimitArgs } from '../types/exchange';
 import type {
   Kline,
   KlineInterval,
@@ -21,15 +21,10 @@ import { BINANCE_ORDER_TYPE_REVERSE, BINANCE_WORKING_TYPE } from '../constants/m
 import { BinanceUserDataStream } from '../ws/BinanceUserDataStream';
 import { BinanceTradeStream } from '../ws/BinanceTradeStream';
 import { BaseExchangeClient } from './BaseExchangeClient';
-
-interface BinanceBaseClientArgs<T extends BinanceBaseHttpClient> {
-  exchangeArgs: ExchangeArgs;
-  httpClient: T;
-  publicStream: PublicStreamLike;
-  tradeWebSocketUrl: string;
-}
+import type { BinanceBaseClientArgs } from './BinanceBaseClient.types';
 
 abstract class BinanceBaseClient<T extends BinanceBaseHttpClient> extends BaseExchangeClient {
+  protected readonly exchangeLabel = 'Binance';
   protected readonly httpClient: T;
   protected userDataStream: BinanceUserDataStream | null = null;
 
@@ -56,6 +51,10 @@ abstract class BinanceBaseClient<T extends BinanceBaseHttpClient> extends BaseEx
 
   protected async fetchAndNormalizeTradeSymbols(): Promise<TradeSymbolBySymbol> {
     const raw = await this.httpClient.fetchExchangeInfo();
+    this.logger.info(
+      { instrumentCount: raw.symbols.length },
+      `[Binance] Fetched ${raw.symbols.length} instruments`,
+    );
 
     return normalizeBinanceTradeSymbols(raw);
   }
@@ -139,19 +138,19 @@ abstract class BinanceBaseClient<T extends BinanceBaseHttpClient> extends BaseEx
     const orderParams = this.buildBinanceOrderParams(args);
 
     if (this.tradeStream.isConnected()) {
-      this.logger.debug(`Creating order via WebSocket: ${args.symbol}`);
+      this.logger.debug(`[Binance] Creating order via WebSocket: ${args.symbol}`);
 
       return this.tradeStream.createOrder(orderParams);
     }
 
-    this.logger.debug(`Creating order via REST: ${args.symbol}`);
+    this.logger.debug(`[Binance] Creating order via REST: ${args.symbol}`);
     const raw = await this.httpClient.createOrder(orderParams);
 
     return normalizeBinanceOrder(raw);
   }
 
   async close(): Promise<void> {
-    this.logger.info(`Closing Binance ${this.marketLabel} connection`);
+    this.logger.info(`[Binance] Closing ${this.marketLabel} connection`);
     this.tradeStream.disconnect();
 
     if (this.userDataStream) {

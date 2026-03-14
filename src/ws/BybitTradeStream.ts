@@ -2,8 +2,7 @@ import type { WebSocketOpenContext } from '@solncebro/websocket-engine';
 import { ReliableWebSocket } from '@solncebro/websocket-engine';
 
 import { ExchangeError } from '../errors/ExchangeError';
-import type { BybitOrderResponseRaw } from '../normalizers/bybitNormalizer';
-import { normalizeBybitOrder } from '../normalizers/bybitNormalizer';
+import { OrderSideEnum, OrderTypeEnum, TimeInForceEnum } from '../types/common';
 import { BaseTradeStream } from './BaseTradeStream';
 import type { BybitTradeMessage } from './BybitTradeStream.types';
 import {
@@ -75,20 +74,36 @@ class BybitTradeStream extends BaseTradeStream<BybitTradeMessage> {
     }
 
     if (message.op === 'order.create' && message.reqId) {
-      const pending = this.pendingRequestByRequestId.get(message.reqId);
+      this.logger.info({ rawMessage: message }, '[Bybit] Order response received');
+
+      const pending = this.takePendingRequest(message.reqId);
 
       if (!pending) {
         return;
       }
 
-      clearTimeout(pending.timeout);
-      this.pendingRequestByRequestId.delete(message.reqId);
-
-      if (message.success && message.data) {
-        const order = normalizeBybitOrder(message.data as BybitOrderResponseRaw);
-        pending.resolve(order);
+      if ((message.success || message.retCode === 0) && message.data) {
+        const data = message.data as { orderId: string; orderLinkId?: string };
+        pending.resolve({
+          id: data.orderId,
+          clientOrderId: data.orderLinkId ?? '',
+          symbol: '',
+          side: OrderSideEnum.Buy,
+          type: OrderTypeEnum.Market,
+          timeInForce: TimeInForceEnum.Gtc,
+          price: 0,
+          avgPrice: 0,
+          stopPrice: 0,
+          amount: 0,
+          filledAmount: 0,
+          filledQuoteAmount: 0,
+          status: 'open',
+          reduceOnly: false,
+          timestamp: Date.now(),
+          updatedTimestamp: Date.now(),
+        });
       } else {
-        pending.reject(new ExchangeError(message.reason ?? message.ret_msg ?? 'Order creation failed', (message.ret_code as string | number) ?? 'UNKNOWN', 'bybit'));
+        pending.reject(new ExchangeError(message.retMsg ?? 'Order creation failed', message.retCode ?? 'UNKNOWN', 'bybit'));
       }
     }
   }

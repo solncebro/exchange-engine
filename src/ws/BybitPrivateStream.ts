@@ -8,20 +8,8 @@ import {
   BYBIT_PING_INTERVAL,
   authenticateBybitWebSocket,
 } from './bybitWebSocketUtils';
-import type { BybitBaseWebSocketMessage } from './bybitWebSocketUtils';
+import type { BybitPrivateMessage, BybitPrivateStreamArgs } from './BybitPrivateStream.types';
 import { parseWebSocketMessage } from './parseWebSocketMessage';
-
-interface BybitPrivateMessage extends BybitBaseWebSocketMessage {
-  topic?: string;
-}
-
-interface BybitPrivateStreamArgs {
-  apiKey: string;
-  secret: string;
-  logger: ExchangeLogger;
-  onNotify?: (message: string) => void | Promise<void>;
-  onMessage: (event: Record<string, unknown>) => void;
-}
 
 class BybitPrivateStream {
   private webSocket: ReliableWebSocket<BybitPrivateMessage> | null = null;
@@ -79,7 +67,11 @@ class BybitPrivateStream {
       return;
     }
 
-    this.onMessageHandler(message as Record<string, unknown>);
+    try {
+      this.onMessageHandler(message as Record<string, unknown>);
+    } catch (error) {
+      this.logger.error(`BybitPrivateStream: error handling message: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 }
 

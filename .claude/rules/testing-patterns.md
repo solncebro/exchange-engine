@@ -113,7 +113,7 @@ import { createMockAxiosInstance, setupMockAxios } from '../fixtures/mockAxios';
 Константы с raw API-данными, именование: `EXCHANGE_RAW_ENTITY`:
 - `BINANCE_RAW_EXCHANGE_INFO`, `BINANCE_RAW_TICKER_LIST`, `BINANCE_RAW_KLINE_LIST`
 - `BINANCE_RAW_POSITION_RISK`, `BINANCE_RAW_ORDER_RESPONSE`, `BINANCE_RAW_ACCOUNT`
-- `BINANCE_RAW_FUNDING_RATE_HISTORY`, `BINANCE_RAW_FUNDING_INFO`
+- `BINANCE_RAW_FUNDING_RATE_HISTORY_LIST`, `BINANCE_RAW_FUNDING_INFO_LIST`
 - `BINANCE_RAW_POSITION_MODE_HEDGE`, `BINANCE_RAW_POSITION_MODE_ONE_WAY`
 - `BYBIT_RAW_INSTRUMENT_LIST`, `BYBIT_RAW_TICKER_LIST`, etc.
 
@@ -190,3 +190,60 @@ expect(btc.symbol).toBe('BTCUSDT');
 - Тесты в `test/`, smoke test исключён из основного прогона
 - Coverage собирается из `src/**/*.ts`, исключая: `index.ts`, `types/**`, `constants/**`, `ws/**`
 - `clearMocks: true`, `restoreMocks: true`
+
+## Мокирование ReliableWebSocket
+
+Паттерн мокирования для WebSocket стримов:
+
+```typescript
+let capturedOnMessage: ((message: any) => void) | undefined;
+let capturedOnOpen: ((context: any) => Promise<void>) | undefined;
+let capturedOnReconnectSuccess: (() => void) | undefined;
+
+const mockWebSocket = {
+  close: jest.fn(),
+  sendToConnectedSocket: jest.fn(),
+};
+
+jest.mock('@solncebro/websocket-engine', () => {
+  const actual = jest.requireActual('@solncebro/websocket-engine');
+  return {
+    ...actual,
+    ReliableWebSocket: jest.fn().mockImplementation((args: any) => {
+      capturedOnMessage = args.onMessage;
+      capturedOnOpen = args.onOpen;
+      capturedOnReconnectSuccess = args.onReconnectSuccess;
+      return mockWebSocket;
+    }),
+  };
+});
+```
+
+### Тестирование абстрактных классов
+
+Создать TestStream подкласс в тест-файле:
+
+```typescript
+class TestTradeStream extends BaseTradeStream<any> {
+  protected readonly label = 'TestTradeStream';
+  protected async initConnection(): Promise<void> { /* mock */ }
+  protected buildOrderRequest(params, requestId): unknown { return {}; }
+}
+```
+
+## Тест-файлы WebSocket
+
+| Файл | Покрытие |
+|------|----------|
+| BaseTradeStream.test.ts | connect, disconnect, isConnected, createOrder, takePendingRequest |
+| BinanceFuturesPublicStream.test.ts | tickers, klines, dynamic subscribe, chunking, close |
+| BinanceSpotPublicStream.test.ts | tickers, klines, resubscribeAll, handleMessage, close |
+| BybitPublicStream.test.ts | tickers (linear/spot), klines, resubscribeAll, close |
+| BinanceUserDataStream.test.ts | connect, onMessage, close, isConnected |
+| BybitPrivateStream.test.ts | connect, auth, handleMessage filtering, close |
+| BinanceTradeStream.handleMessage.test.ts | request-response matching, ExchangeError |
+| BinanceTradeStream.initConnection.test.ts | connection creation, buildOrderRequest signing |
+| BybitTradeStream.handleMessage.test.ts | dual format responses, auth filtering |
+| BybitTradeStream.initConnection.test.ts | connection with auth, buildOrderRequest format |
+| parseWebSocketMessage.test.ts | JSON parsing, error handling |
+| bybitWebSocketUtils.test.ts | pong detection, HMAC authentication |

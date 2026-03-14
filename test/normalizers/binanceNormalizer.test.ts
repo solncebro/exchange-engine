@@ -18,8 +18,8 @@ import {
   BINANCE_RAW_POSITION_RISK,
   BINANCE_RAW_ORDER_RESPONSE,
   BINANCE_RAW_ACCOUNT,
-  BINANCE_RAW_FUNDING_RATE_HISTORY,
-  BINANCE_RAW_FUNDING_INFO,
+  BINANCE_RAW_FUNDING_RATE_HISTORY_LIST,
+  BINANCE_RAW_FUNDING_INFO_LIST,
 } from '../fixtures/binanceRaw';
 
 describe('normalizeBinanceTradeSymbols', () => {
@@ -306,10 +306,52 @@ describe('normalizeBinanceOrder', () => {
     expect(result.filledQuoteAmount).toBe(6495);
   });
 
-  it('lowercases status', () => {
+  it('maps FILLED status to closed', () => {
     const result = normalizeBinanceOrder(BINANCE_RAW_ORDER_RESPONSE);
 
-    expect(result.status).toBe('filled');
+    expect(result.status).toBe('closed');
+  });
+
+  it('maps NEW status to open', () => {
+    const raw = { ...BINANCE_RAW_ORDER_RESPONSE, status: 'NEW' };
+    const result = normalizeBinanceOrder(raw);
+
+    expect(result.status).toBe('open');
+  });
+
+  it('maps PARTIALLY_FILLED status to open', () => {
+    const raw = { ...BINANCE_RAW_ORDER_RESPONSE, status: 'PARTIALLY_FILLED' };
+    const result = normalizeBinanceOrder(raw);
+
+    expect(result.status).toBe('open');
+  });
+
+  it('maps CANCELED status to canceled', () => {
+    const raw = { ...BINANCE_RAW_ORDER_RESPONSE, status: 'CANCELED' };
+    const result = normalizeBinanceOrder(raw);
+
+    expect(result.status).toBe('canceled');
+  });
+
+  it('maps REJECTED status to rejected', () => {
+    const raw = { ...BINANCE_RAW_ORDER_RESPONSE, status: 'REJECTED' };
+    const result = normalizeBinanceOrder(raw);
+
+    expect(result.status).toBe('rejected');
+  });
+
+  it('maps EXPIRED status to canceled', () => {
+    const raw = { ...BINANCE_RAW_ORDER_RESPONSE, status: 'EXPIRED' };
+    const result = normalizeBinanceOrder(raw);
+
+    expect(result.status).toBe('canceled');
+  });
+
+  it('falls back to lowercase for unknown status', () => {
+    const raw = { ...BINANCE_RAW_ORDER_RESPONSE, status: 'SOME_NEW_STATUS' };
+    const result = normalizeBinanceOrder(raw);
+
+    expect(result.status).toBe('some_new_status');
   });
 
   it('preserves reduceOnly', () => {
@@ -364,43 +406,43 @@ describe('normalizeBinanceBalance', () => {
 
 describe('normalizeBinanceFundingRateHistory', () => {
   it('returns array of FundingRateHistory objects', () => {
-    const result = normalizeBinanceFundingRateHistory(BINANCE_RAW_FUNDING_RATE_HISTORY);
+    const result = normalizeBinanceFundingRateHistory(BINANCE_RAW_FUNDING_RATE_HISTORY_LIST);
 
     expect(result).toHaveLength(2);
   });
 
   it('parses fundingRate as number', () => {
-    const [first] = normalizeBinanceFundingRateHistory(BINANCE_RAW_FUNDING_RATE_HISTORY);
+    const [first] = normalizeBinanceFundingRateHistory(BINANCE_RAW_FUNDING_RATE_HISTORY_LIST);
 
     expect(first.fundingRate).toBe(0.0001);
   });
 
   it('parses negative fundingRate', () => {
-    const [, second] = normalizeBinanceFundingRateHistory(BINANCE_RAW_FUNDING_RATE_HISTORY);
+    const [, second] = normalizeBinanceFundingRateHistory(BINANCE_RAW_FUNDING_RATE_HISTORY_LIST);
 
     expect(second.fundingRate).toBe(-0.00005);
   });
 
   it('preserves fundingTime', () => {
-    const [first] = normalizeBinanceFundingRateHistory(BINANCE_RAW_FUNDING_RATE_HISTORY);
+    const [first] = normalizeBinanceFundingRateHistory(BINANCE_RAW_FUNDING_RATE_HISTORY_LIST);
 
     expect(first.fundingTime).toBe(1700006400000);
   });
 
   it('parses markPrice when present', () => {
-    const [first] = normalizeBinanceFundingRateHistory(BINANCE_RAW_FUNDING_RATE_HISTORY);
+    const [first] = normalizeBinanceFundingRateHistory(BINANCE_RAW_FUNDING_RATE_HISTORY_LIST);
 
     expect(first.markPrice).toBe(65500);
   });
 
   it('returns null markPrice for empty string', () => {
-    const [, second] = normalizeBinanceFundingRateHistory(BINANCE_RAW_FUNDING_RATE_HISTORY);
+    const [, second] = normalizeBinanceFundingRateHistory(BINANCE_RAW_FUNDING_RATE_HISTORY_LIST);
 
     expect(second.markPrice).toBeNull();
   });
 
   it('preserves symbol', () => {
-    const [first] = normalizeBinanceFundingRateHistory(BINANCE_RAW_FUNDING_RATE_HISTORY);
+    const [first] = normalizeBinanceFundingRateHistory(BINANCE_RAW_FUNDING_RATE_HISTORY_LIST);
 
     expect(first.symbol).toBe('BTCUSDT');
   });
@@ -408,37 +450,37 @@ describe('normalizeBinanceFundingRateHistory', () => {
 
 describe('normalizeBinanceFundingInfo', () => {
   it('returns array of FundingInfo objects', () => {
-    const result = normalizeBinanceFundingInfo(BINANCE_RAW_FUNDING_INFO);
+    const result = normalizeBinanceFundingInfo(BINANCE_RAW_FUNDING_INFO_LIST);
 
     expect(result).toHaveLength(2);
   });
 
   it('preserves symbol', () => {
-    const [first] = normalizeBinanceFundingInfo(BINANCE_RAW_FUNDING_INFO);
+    const [first] = normalizeBinanceFundingInfo(BINANCE_RAW_FUNDING_INFO_LIST);
 
     expect(first.symbol).toBe('BTCUSDT');
   });
 
   it('preserves fundingIntervalHours as number', () => {
-    const [first] = normalizeBinanceFundingInfo(BINANCE_RAW_FUNDING_INFO);
+    const [first] = normalizeBinanceFundingInfo(BINANCE_RAW_FUNDING_INFO_LIST);
 
     expect(first.fundingIntervalHours).toBe(8);
   });
 
   it('parses adjustedFundingRateCap as number', () => {
-    const [first] = normalizeBinanceFundingInfo(BINANCE_RAW_FUNDING_INFO);
+    const [first] = normalizeBinanceFundingInfo(BINANCE_RAW_FUNDING_INFO_LIST);
 
     expect(first.adjustedFundingRateCap).toBe(0.02);
   });
 
   it('parses adjustedFundingRateFloor as number', () => {
-    const [first] = normalizeBinanceFundingInfo(BINANCE_RAW_FUNDING_INFO);
+    const [first] = normalizeBinanceFundingInfo(BINANCE_RAW_FUNDING_INFO_LIST);
 
     expect(first.adjustedFundingRateFloor).toBe(-0.02);
   });
 
   it('parses second entry correctly', () => {
-    const [, second] = normalizeBinanceFundingInfo(BINANCE_RAW_FUNDING_INFO);
+    const [, second] = normalizeBinanceFundingInfo(BINANCE_RAW_FUNDING_INFO_LIST);
 
     expect(second.symbol).toBe('ETHUSDT');
     expect(second.fundingIntervalHours).toBe(4);

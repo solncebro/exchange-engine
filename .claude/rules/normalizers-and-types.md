@@ -41,7 +41,7 @@ BinanceTicker24hrRaw { symbol, lastPrice: string, priceChangePercent: string, ti
   - NaN liquidationPrice → 0
   - Сохраняет raw в `info`
 - `normalizeBinanceOrder(raw)` → `Order`
-  - Маппинг через `BINANCE_ORDER_SIDE` и `BINANCE_ORDER_TYPE`
+  - Маппинг через `BINANCE_ORDER_SIDE`, `BINANCE_ORDER_TYPE` и `BINANCE_ORDER_STATUS` (константы из `src/constants/mappings.ts`)
   - `orderId` number → string
 - `normalizeBinanceBalance(raw)` → `BalanceByAsset` (Map)
   - Пропускает нулевые балансы (`free + locked === 0`)
@@ -86,6 +86,11 @@ BinanceTicker24hrRaw { symbol, lastPrice: string, priceChangePercent: string, ti
 - `TradeSymbolBySymbol = Map<string, TradeSymbol>`
 - `BalanceByAsset = Map<string, Balance>`
 
+### ExchangeLogger (overloaded signatures):
+- `logger.info(message: string)` — простое сообщение
+- `logger.info(context: Record<string, unknown>, message: string)` — сообщение с контекстным объектом
+- Аналогично для `debug`, `warn`, `error`, `fatal`
+
 ### Тип-литерал:
 - `KlineInterval` — union `'1m' | '3m' | '5m' | '15m' | '30m' | '1h' | '2h' | '4h' | '6h' | '12h' | '1d' | '3d' | '1w' | '1M'`
 
@@ -95,6 +100,7 @@ BinanceTicker24hrRaw { symbol, lastPrice: string, priceChangePercent: string, ti
 BINANCE_POSITION_SIDE: { LONG → Long, SHORT → Short, BOTH → Both }
 BINANCE_ORDER_SIDE: { BUY → Buy, SELL → Sell }
 BINANCE_ORDER_TYPE: { MARKET → Market, LIMIT → Limit }
+BINANCE_ORDER_STATUS: { NEW → 'open', PARTIALLY_FILLED → 'open', FILLED → 'closed', CANCELED → 'canceled', REJECTED → 'rejected', EXPIRED → 'canceled', EXPIRED_IN_MATCH → 'canceled' }
 BYBIT_POSITION_SIDE: { Buy → Long, Sell → Short }
 BYBIT_ORDER_SIDE: { Buy → Buy, Sell → Sell }
 BYBIT_ORDER_TYPE: { Market → Market, Limit → Limit }

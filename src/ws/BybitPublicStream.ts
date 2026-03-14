@@ -6,13 +6,8 @@ import { normalizeBybitKlineWebSocketMessage, normalizeBybitTickers } from '../n
 import type { BybitTickerRaw, BybitWebSocketKlineRaw } from '../normalizers/bybitNormalizer';
 import { BYBIT_KLINE_INTERVAL } from '../constants/bybit';
 import { BYBIT_HEARTBEAT_CONFIG, BYBIT_PING_INTERVAL } from './bybitWebSocketUtils';
-import type { BybitBaseWebSocketMessage } from './bybitWebSocketUtils';
+import type { BybitWebSocketMessage } from './BybitPublicStream.types';
 import { parseWebSocketMessage } from './parseWebSocketMessage';
-
-interface BybitWebSocketMessage extends BybitBaseWebSocketMessage {
-  topic?: string;
-  ret_code?: number;
-}
 
 function resolveUnifiedInterval(bybitInterval: string): KlineInterval {
   for (const [unified, bybit] of Object.entries(BYBIT_KLINE_INTERVAL)) {
@@ -143,18 +138,22 @@ class BybitPublicStream {
 
     const topic = message.topic;
 
-    if (topic.startsWith('tickers.')) {
-      const tickerBySymbol = normalizeBybitTickers(message.data as BybitTickerRaw[]);
+    try {
+      if (topic.startsWith('tickers.')) {
+        const tickerBySymbol = normalizeBybitTickers(message.data as BybitTickerRaw[]);
 
-      for (const handler of this.tickerHandlerSet) {
-        handler(tickerBySymbol);
+        for (const handler of this.tickerHandlerSet) {
+          handler(tickerBySymbol);
+        }
+
+        return;
       }
 
-      return;
-    }
-
-    if (topic.startsWith('kline.')) {
-      this.handleKlineMessage(topic, message.data as BybitWebSocketKlineRaw[]);
+      if (topic.startsWith('kline.')) {
+        this.handleKlineMessage(topic, message.data as BybitWebSocketKlineRaw[]);
+      }
+    } catch (error) {
+      this.logger.error(`BybitPublicStream: error handling message for topic ${topic}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 

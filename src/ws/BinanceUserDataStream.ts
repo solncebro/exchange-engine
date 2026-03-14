@@ -1,15 +1,8 @@
 import { ReliableWebSocket } from '@solncebro/websocket-engine';
 
 import type { ExchangeLogger } from '../types/common';
+import type { BinanceUserDataStreamArgs } from './BinanceUserDataStream.types';
 import { parseWebSocketMessage } from './parseWebSocketMessage';
-
-interface BinanceUserDataStreamArgs {
-  listenKey: string;
-  baseWebSocketUrl: string;
-  logger: ExchangeLogger;
-  onNotify?: (message: string) => void | Promise<void>;
-  onMessage: (event: Record<string, unknown>) => void;
-}
 
 class BinanceUserDataStream {
   private webSocket: ReliableWebSocket<Record<string, unknown>> | null = null;
@@ -39,7 +32,13 @@ class BinanceUserDataStream {
       url,
       logger: this.logger,
       parseMessage: (rawData) => parseWebSocketMessage<Record<string, unknown>>(rawData),
-      onMessage: (message) => this.onMessageHandler(message),
+      onMessage: (message) => {
+        try {
+          this.onMessageHandler(message);
+        } catch (error) {
+          this.logger.error(`BinanceUserDataStream: error handling message: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      },
       onNotify: this.onNotify,
     });
 

@@ -50,18 +50,21 @@ class BinanceTradeStream extends BaseTradeStream<BinanceTradeWebSocketResponse> 
       return;
     }
 
-    const pending = this.pendingRequestByRequestId.get(message.id);
+    const pending = this.takePendingRequest(message.id);
 
     if (!pending) {
       return;
     }
 
-    clearTimeout(pending.timeout);
-    this.pendingRequestByRequestId.delete(message.id);
+    this.logger.info({ rawMessage: message }, '[Binance] Order response received');
 
     if (message.status === 200 && message.result) {
-      const order = normalizeBinanceOrder(message.result);
-      pending.resolve(order);
+      try {
+        const order = normalizeBinanceOrder(message.result);
+        pending.resolve(order);
+      } catch (error) {
+        pending.reject(error instanceof Error ? error : new Error(String(error)));
+      }
     } else {
       const errorMessage = message.error?.msg ?? 'Order creation failed';
       const errorCode = message.error?.code ?? message.status;

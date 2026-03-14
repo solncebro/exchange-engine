@@ -64,6 +64,7 @@ close(): void
 - `createOrder(orderParams)` → `Promise<Order>` — async request-response
 - `ensureConnected()` — lazy connection с dedup промисов
 - `sendOrderRequest(request, requestId)` — timeout 30s, pending requests в `Map<reqId, PendingRequest>`
+- `takePendingRequest(requestId)` — protected метод, возвращает и удаляет pending request из Map
 
 Абстрактные методы (реализуются подклассами):
 - `initConnection()` — создание WebSocket и подключение
@@ -90,9 +91,10 @@ close(): void
 
 - **URL**: `wss://stream.bybit.com/v5/trade`
 - **Только production** — в demo mode `tradeStream = null`, fallback на REST
-- Аутентификация при каждом open через `authenticateBybitWebSocket()`
+- Аутентификация при каждом open через `authenticateBybitWebSocket()` (`expires = Date.now() + 10000`)
 - Request format: `{ op: 'order.create', args: [...], reqId, header: { X-BAPI-* } }`
 - Response matching по `reqId` = `requestId`
+- Возвращает минимальный Order (только id + clientOrderId), не полную нормализацию
 - **Heartbeat**: `{ op: 'ping' }`, интервал 20s
 - Ошибки выбрасываются как `ExchangeError` с полями `code` и `exchange`
 
@@ -111,6 +113,10 @@ function parseWebSocketMessage<T>(rawData: RawData): T
 - Фильтрует `message.op === 'auth'` — не передаёт в хендлер
 - **Heartbeat**: `{ op: 'ping' }`, интервал 20s
 
+## Error Protection
+
+Все message handlers во всех WebSocket стримах обёрнуты в try-catch. При ошибке в handler логируется сообщение через `logger.error()` и стрим продолжает работать.
+
 ## Паттерн конвертации интервалов (Bybit)
 
 Binance использует строки `'1m'`, `'1h'`, `'1d'` напрямую.
@@ -118,3 +124,16 @@ Bybit конвертирует через маппинг `BYBIT_KLINE_INTERVAL`:
 ```
 '1m' → '1', '5m' → '5', '1h' → '60', '4h' → '240', '1d' → 'D', '1w' → 'W'
 ```
+
+## Type Extraction
+
+Типы вынесены в co-located `.types.ts` файлы:
+- `BaseTradeStream.types.ts` — BaseTradeStreamArgs, PendingRequest
+- `BinanceFuturesPublicStream.types.ts` — BinanceCombinedMessage, FuturesConnection
+- `BinanceSpotPublicStream.types.ts` — BinanceSpotWebSocketEnvelope
+- `BinanceUserDataStream.types.ts` — BinanceUserDataStreamArgs
+- `BinanceTradeStream.types.ts` — BinanceTradeWebSocketResponse, BinanceWebSocketError
+- `BybitPublicStream.types.ts` — BybitWebSocketMessage
+- `BybitPrivateStream.types.ts` — BybitPrivateMessage, BybitPrivateStreamArgs
+- `BybitTradeStream.types.ts` — BybitTradeMessage
+- `bybitWebSocketUtils.types.ts` — BybitBaseWebSocketMessage, AuthenticateBybitWebSocketArgs

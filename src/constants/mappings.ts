@@ -22,6 +22,16 @@ export const BYBIT_ORDER_STATUS: Record<string, string> = {
   Deactivated: 'canceled',
 };
 
+export const BINANCE_ORDER_STATUS: Record<string, string> = {
+  NEW: 'open',
+  PARTIALLY_FILLED: 'open',
+  FILLED: 'closed',
+  CANCELED: 'canceled',
+  REJECTED: 'rejected',
+  EXPIRED: 'canceled',
+  EXPIRED_IN_MATCH: 'canceled',
+};
+
 export const BINANCE_ORDER_SIDE: Record<string, OrderSideEnum> = {
   BUY: OrderSideEnum.Buy,
   SELL: OrderSideEnum.Sell,

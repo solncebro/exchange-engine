@@ -76,11 +76,9 @@ Backoff: 1s → 2s → 4s (exponential)
 - Binance: `MARKET → Market`, `LIMIT → Limit`
 - Bybit: `Market → Market`, `Limit → Limit`
 
-### Order Status (Bybit only)
-- `New` / `PartiallyFilled` / `Untriggered` → `'open'`
-- `Filled` → `'closed'`
-- `Cancelled` / `PartiallyFilledCanceled` / `Deactivated` → `'canceled'`
-- `Rejected` → `'rejected'`
+### Order Status
+- Binance: `NEW` / `PARTIALLY_FILLED` → `'open'`, `FILLED` → `'closed'`, `CANCELED` / `EXPIRED` / `EXPIRED_IN_MATCH` → `'canceled'`, `REJECTED` → `'rejected'`
+- Bybit: `New` / `PartiallyFilled` / `Untriggered` → `'open'`, `Filled` → `'closed'`, `Cancelled` / `PartiallyFilledCanceled` / `Deactivated` → `'canceled'`, `Rejected` → `'rejected'`
 
 ## Precision (src/precision/precision.ts)
 

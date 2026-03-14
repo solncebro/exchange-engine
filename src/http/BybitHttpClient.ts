@@ -10,8 +10,9 @@ import type {
 } from '../normalizers/bybitNormalizer';
 import { applyTimeRangeOptions } from '../utils/httpParams';
 import { BaseHttpClient } from './BaseHttpClient';
+
 import type {
-  BybitCreateOrderApiResponse,
+  BybitApiResponse,
   BybitHttpClientArgs,
   BybitListResponse,
   BybitOrderBookRaw,
@@ -53,22 +54,34 @@ class BybitHttpClient extends BaseHttpClient {
     return urlParams.toString();
   }
 
-  private authenticatedGet<T>(
+  private async authenticatedGet<T>(
     path: string,
     params: Record<string, string | number | boolean>,
   ): Promise<T> {
     const headers = this.buildAuthHeaders(this.toQueryString(params));
+    const response = await this.get<T & BybitApiResponse>(path, params, headers);
 
-    return this.get<T>(path, params, headers);
+    this.validateResponse(response);
+
+    return response;
   }
 
-  private authenticatedPost<T>(
+  private async authenticatedPost<T>(
     path: string,
     body: Record<string, unknown>,
   ): Promise<T> {
     const headers = this.buildAuthHeaders(JSON.stringify(body));
+    const response = await this.post<T & BybitApiResponse>(path, body, headers);
 
-    return this.post<T>(path, body, headers);
+    this.validateResponse(response);
+
+    return response;
+  }
+
+  private validateResponse(response: BybitApiResponse): void {
+    if (response.retCode !== undefined && response.retCode !== 0) {
+      throw new ExchangeError(`Bybit API error ${response.retCode}: ${response.retMsg}`, response.retCode, 'bybit');
+    }
   }
 
   private buildCategoryParams(
@@ -93,6 +106,29 @@ class BybitHttpClient extends BaseHttpClient {
     options?: SymbolFilterArgs,
   ): Promise<BybitListResponse<BybitInstrumentInfoRaw>> {
     return this.authenticatedGet('/v5/market/instruments-info', this.buildCategoryParams(category, options));
+  }
+
+  async fetchAllInstrumentsInfo(category: string): Promise<BybitInstrumentInfoRaw[]> {
+    const allInstrumentList: BybitInstrumentInfoRaw[] = [];
+    let cursor: string | undefined;
+
+    do {
+      const params: Record<string, string | number | boolean> = { category, limit: 1000 };
+
+      if (cursor) {
+        params.cursor = cursor;
+      }
+
+      const response = await this.authenticatedGet<BybitListResponse<BybitInstrumentInfoRaw>>(
+        '/v5/market/instruments-info',
+        params,
+      );
+
+      allInstrumentList.push(...response.result.list);
+      cursor = response.result.nextPageCursor ?? undefined;
+    } while (cursor);
+
+    return allInstrumentList;
   }
 
   async fetchTickers(
@@ -168,16 +204,7 @@ class BybitHttpClient extends BaseHttpClient {
   }
 
   async createOrder(params: Record<string, unknown>): Promise<BybitResponse<BybitOrderResponseRaw>> {
-    const response = await this.authenticatedPost<BybitCreateOrderApiResponse>(
-      '/v5/order/create',
-      params,
-    );
-
-    if (response.retCode !== 0) {
-      throw new ExchangeError(`Bybit API error ${response.retCode}: ${response.retMsg}`, response.retCode, 'bybit');
-    }
-
-    return response;
+    return this.authenticatedPost('/v5/order/create', params);
   }
 
   async amendOrder(params: Record<string, unknown>): Promise<BybitResponse<Record<string, unknown>>> {

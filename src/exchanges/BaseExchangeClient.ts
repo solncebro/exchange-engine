@@ -9,6 +9,7 @@ import type {
   ExchangeLogger,
   Kline,
   KlineInterval,
+  TradeSymbol,
   TradeSymbolBySymbol,
   TickerBySymbol,
   BalanceByAsset,
@@ -29,6 +30,7 @@ abstract class BaseExchangeClient implements ExchangeClient {
   protected readonly logger: ExchangeLogger;
   protected readonly onNotify?: (message: string) => void | Promise<void>;
 
+  protected abstract readonly exchangeLabel: string;
   protected abstract readonly marketLabel: string;
   protected abstract readonly klineLimit: number;
 
@@ -53,21 +55,23 @@ abstract class BaseExchangeClient implements ExchangeClient {
       return this.tradeSymbols;
     }
 
-    this.logger.info(`Loading ${this.marketLabel} trade symbols`);
-
     const normalized = await this.fetchAndNormalizeTradeSymbols();
 
     for (const [symbol, tradeSymbol] of normalized) {
       this.tradeSymbols.set(symbol, tradeSymbol);
     }
 
-    this.logger.info(`Loaded ${this.tradeSymbols.size} ${this.marketLabel} trade symbols`);
+    const symbolList = [...this.tradeSymbols.keys()];
+    this.logger.info(
+      { symbolCount: this.tradeSymbols.size, symbolList },
+      `[${this.exchangeLabel}] Fetched ${this.tradeSymbols.size} ${this.marketLabel} trade symbols`,
+    );
 
     return this.tradeSymbols;
   }
 
   async fetchTickers(): Promise<TickerBySymbol> {
-    this.logger.debug(`Fetching ${this.marketLabel} tickers`);
+    this.logger.debug(`[${this.exchangeLabel}] Fetching ${this.marketLabel} tickers`);
 
     return this.fetchAndNormalizeTickers();
   }
@@ -77,7 +81,7 @@ abstract class BaseExchangeClient implements ExchangeClient {
     interval: KlineInterval,
     options?: FetchPageWithLimitArgs,
   ): Promise<Kline[]> {
-    this.logger.debug(`Fetching klines for ${symbol} ${interval}`);
+    this.logger.debug(`[${this.exchangeLabel}] Fetching klines for ${symbol} ${interval}`);
     const resolvedOptions: FetchPageWithLimitArgs = {
       ...options,
       limit: options?.limit ?? this.klineLimit,
@@ -103,7 +107,7 @@ abstract class BaseExchangeClient implements ExchangeClient {
   }
 
   async fetchBalance(): Promise<BalanceByAsset> {
-    this.logger.debug('Fetching balance');
+    this.logger.debug(`[${this.exchangeLabel}] Fetching balance`);
 
     return this.fetchAndNormalizeBalance();
   }
@@ -123,11 +127,9 @@ abstract class BaseExchangeClient implements ExchangeClient {
   }
 
   amountToPrecision(symbol: string, amount: number): number {
-    const tradeSymbol = this.tradeSymbols.get(symbol);
+    const tradeSymbol = this.getTradeSymbolOrWarn(symbol, 'amountToPrecision');
 
     if (!tradeSymbol) {
-      this.logger.warn(`TradeSymbol ${symbol} not found, using raw amount`);
-
       return amount;
     }
 
@@ -135,11 +137,9 @@ abstract class BaseExchangeClient implements ExchangeClient {
   }
 
   priceToPrecision(symbol: string, price: number): number {
-    const tradeSymbol = this.tradeSymbols.get(symbol);
+    const tradeSymbol = this.getTradeSymbolOrWarn(symbol, 'priceToPrecision');
 
     if (!tradeSymbol) {
-      this.logger.warn(`TradeSymbol ${symbol} not found, using raw price`);
-
       return price;
     }
 
@@ -147,11 +147,9 @@ abstract class BaseExchangeClient implements ExchangeClient {
   }
 
   getMinOrderQty(symbol: string): number {
-    const tradeSymbol = this.tradeSymbols.get(symbol);
+    const tradeSymbol = this.getTradeSymbolOrWarn(symbol, 'getMinOrderQty');
 
     if (!tradeSymbol) {
-      this.logger.warn(`TradeSymbol ${symbol} not found, returning 0 for minOrderQty`);
-
       return 0;
     }
 
@@ -159,15 +157,28 @@ abstract class BaseExchangeClient implements ExchangeClient {
   }
 
   getMinNotional(symbol: string): number {
-    const tradeSymbol = this.tradeSymbols.get(symbol);
+    const tradeSymbol = this.getTradeSymbolOrWarn(symbol, 'getMinNotional');
 
     if (!tradeSymbol) {
-      this.logger.warn(`TradeSymbol ${symbol} not found, returning 0 for minNotional`);
-
       return 0;
     }
 
     return parseFloat(tradeSymbol.filter.minNotional);
+  }
+
+  private getTradeSymbolOrWarn(symbol: string, methodName: string): TradeSymbol | null {
+    const tradeSymbol = this.tradeSymbols.get(symbol);
+
+    if (!tradeSymbol) {
+      this.logger.warn(
+        { symbol, loadedSymbolCount: this.tradeSymbols.size, availableSymbolList: [...this.tradeSymbols.keys()] },
+        `[${this.exchangeLabel}] TradeSymbol ${symbol} not found for ${methodName}`,
+      );
+
+      return null;
+    }
+
+    return tradeSymbol;
   }
 
   abstract isTradeWebSocketConnected(): boolean;

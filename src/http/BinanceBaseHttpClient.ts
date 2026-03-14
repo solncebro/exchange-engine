@@ -1,4 +1,3 @@
-import type { ExchangeLogger } from '../types/common';
 import type {
   BinanceExchangeInfoRaw,
   BinanceTicker24hrRaw,
@@ -7,32 +6,15 @@ import type {
 } from '../normalizers/binanceNormalizer';
 import type { FetchPageWithLimitArgs } from '../types/exchange';
 import { buildBinanceSignedParams, buildBinanceAuthHeaders } from '../auth/binanceAuth';
+import { ExchangeError } from '../errors/ExchangeError';
 import { applyTimeRangeOptions } from '../utils/httpParams';
 import { BaseHttpClient } from './BaseHttpClient';
-
-interface BinanceHttpClientArgs {
-  baseUrl: string;
-  apiKey: string;
-  secret: string;
-  logger: ExchangeLogger;
-  httpsAgent?: unknown;
-}
-
-interface BinanceListenKeyResponse {
-  listenKey: string;
-}
-
-interface BinanceEndpoints {
-  exchangeInfo: string;
-  ticker24hr: string;
-  depth: string;
-  klines: string;
-  trades: string;
-  order: string;
-  openOrders: string;
-  account: string;
-  listenKey: string;
-}
+import type {
+  BinanceEndpoints,
+  BinanceErrorResponse,
+  BinanceHttpClientArgs,
+  BinanceListenKeyResponse,
+} from './BinanceBaseHttpClient.types';
 
 abstract class BinanceBaseHttpClient extends BaseHttpClient {
   protected readonly secret: string;
@@ -43,31 +25,50 @@ abstract class BinanceBaseHttpClient extends BaseHttpClient {
     this.secret = args.secret;
   }
 
-  protected signedGet<T>(
+  protected async signedGet<T>(
     path: string,
     params: Record<string, string | number | boolean> = {},
   ): Promise<T> {
     const { signedParams, headers } = this.signRequest(params);
+    const response = await this.get<T>(path, signedParams, headers);
 
-    return this.get<T>(path, signedParams, headers);
+    this.validateResponse(response);
+
+    return response;
   }
 
-  protected signedPost<T>(
+  protected async signedPost<T>(
     path: string,
     params: Record<string, string | number | boolean> = {},
   ): Promise<T> {
     const { signedParams, headers } = this.signRequest(params);
+    const response = await this.postWithParams<T>(path, signedParams, headers);
 
-    return this.postWithParams<T>(path, signedParams, headers);
+    this.validateResponse(response);
+
+    return response;
   }
 
-  protected signedDelete<T>(
+  protected async signedDelete<T>(
     path: string,
     params: Record<string, string | number | boolean> = {},
   ): Promise<T> {
     const { signedParams, headers } = this.signRequest(params);
+    const response = await this.delete<T>(path, signedParams, headers);
 
-    return this.delete<T>(path, signedParams, headers);
+    this.validateResponse(response);
+
+    return response;
+  }
+
+  private validateResponse(response: unknown): void {
+    if (response && typeof response === 'object' && 'code' in response) {
+      const { code, msg } = response as BinanceErrorResponse;
+
+      if (code < 0) {
+        throw new ExchangeError(`Binance API error ${code}: ${msg}`, code, 'binance');
+      }
+    }
   }
 
   private signRequest(params: Record<string, string | number | boolean>): {
@@ -176,4 +177,4 @@ abstract class BinanceBaseHttpClient extends BaseHttpClient {
 }
 
 export { BinanceBaseHttpClient };
-export type { BinanceHttpClientArgs, BinanceEndpoints, BinanceListenKeyResponse };
+export type { BinanceHttpClientArgs, BinanceEndpoints, BinanceListenKeyResponse } from './BinanceBaseHttpClient.types';
