@@ -7,8 +7,9 @@ BaseExchangeClient (abstract, implements ExchangeClient)
 ├── BinanceBaseClient<T extends BinanceBaseHttpClient> (abstract)
 │   ├── BinanceFutures
 │   └── BinanceSpot
-├── BybitLinear
-└── BybitSpot
+├── BybitBaseClient (abstract)
+│   ├── BybitLinear
+│   └── BybitSpot
 ```
 
 ## ExchangeClient интерфейс (src/types/exchange.ts)
@@ -35,6 +36,11 @@ BaseExchangeClient (abstract, implements ExchangeClient)
 
 Ордера:
   createOrderWebSocket(args): Promise<Order>
+  fetchOrderHistory(symbol, options?): Promise<Order[]>
+
+Trade WebSocket:
+  isTradeWebSocketConnected(): boolean
+  connectTradeWebSocket(): Promise<void>
 
 Настройки:
   setLeverage(leverage, symbol): Promise<void>
@@ -74,10 +80,14 @@ Precision:
 - `protected fetchAndNormalizeTickers(): Promise<TickerBySymbol>`
 - `protected fetchAndNormalizeKlines(symbol, interval, options?): Promise<Kline[]>`
 - `protected fetchAndNormalizeBalance(): Promise<BalanceByAsset>`
+- `isTradeWebSocketConnected(): boolean`
+- `connectTradeWebSocket(): Promise<void>`
 - `createOrderWebSocket()`
-- `fetchFundingRateHistory()`, `fetchFundingInfo()`, `fetchPositionMode()`
-- `fetchPosition()`, `setLeverage()`, `setMarginMode()`
 - `close()`
+
+### Default throw (переопределяются только в futures-классах):
+- `fetchOrderHistory()`, `fetchFundingRateHistory()`, `fetchFundingInfo()`, `fetchPositionMode()`
+- `fetchPosition()`, `setLeverage()`, `setMarginMode()`
 
 ## BinanceBaseClient — шаблонный метод
 
@@ -89,11 +99,14 @@ Precision:
 - `fetchAndNormalizeKlines()` → `httpClient.fetchKlines()` → `normalizeBinanceKlines()`
 - `fetchAndNormalizeBalance()` → `httpClient.fetchAccount()` → `normalizeBinanceBalance()`
 
-Реализует `createOrderWebSocket()` через REST (несмотря на название):
-1. Формирует params: `{ symbol, side (uppercase), type (uppercase), quantity, price, timeInForce }`
+Реализует `createOrderWebSocket()` через `BinanceTradeStream` с fallback на REST:
+1. Формирует params через `buildBinanceOrderParams()`: `{ symbol, side, type, quantity, price, timeInForce, ... }`
 2. Форматирует через `amountToPrecision()` + `priceToPrecision()`
 3. Для limit ордеров добавляет `timeInForce = GTC` если не указан
-4. Вызывает `httpClient.createOrder()` → `normalizeBinanceOrder()`
+4. Если `tradeStream.isConnected()` → отправляет через WebSocket
+5. Иначе fallback: `httpClient.createOrder()` → `normalizeBinanceOrder()`
+
+Реализует `isTradeWebSocketConnected()` и `connectTradeWebSocket()` через `BinanceTradeStream`.
 
 ## Конкретные классы — отличия
 
@@ -107,19 +120,31 @@ Precision:
 - Фьючерсные методы → `throw new Error('Not supported for spot market')`
 - HTTP: `BinanceSpotHttpClient`, WS: `BinanceSpotPublicStream`
 
+## BybitBaseClient — общая Bybit логика
+
+Промежуточный абстрактный класс для `BybitLinear` и `BybitSpot`. Наследует `BaseExchangeClient`.
+
+Реализует все `protected fetchAndNormalize*()` методы через `BybitHttpClient` + `bybitNormalizer`.
+
+Реализует `createOrderWebSocket()` через `BybitTradeStream` с fallback на REST:
+1. Формирует params через `buildBybitOrderParams()`: `{ category, symbol, orderType, side, qty, ... }`
+2. Если `tradeStream !== null` → отправляет через WebSocket
+3. Иначе fallback: `httpClient.createOrder()` → `buildBybitOrderFromCreateResponse()`
+
+Реализует `isTradeWebSocketConnected()` и `connectTradeWebSocket()` через `BybitTradeStream`.
+
+В demo mode `tradeStream = null` — все ордера через REST.
+
 ### BybitLinear
-- `marketLabel = 'linear'`, `klineLimit = 200`
-- Наследует `BaseExchangeClient` напрямую (НЕ через BinanceBaseClient)
-- Реализует все `fetchAndNormalize*()` сам через `BybitHttpClient`
-- **Ордера через WebSocket** в production (`BybitTradeStream`), fallback на REST в demo mode
-- `fetchFundingRateHistory()`, `fetchFundingInfo()`, `fetchPositionMode()` → `throw 'Not implemented for Bybit'`
+- `marketLabel = 'linear'`
+- Наследует `BybitBaseClient`
+- Реализует фьючерсные методы (position, leverage, marginMode)
 
 ### BybitSpot
-- `marketLabel = 'spot'`, `klineLimit = 200`
-- Наследует `BaseExchangeClient` напрямую
-- Ордера **всегда через REST** (нет tradeStream)
+- `marketLabel = 'spot'`
+- Наследует `BybitBaseClient`
 - Для market ордеров устанавливает `marketUnit = 'baseCoin'`
-- Фьючерсные методы → `throw 'Not supported for spot market'`
+- Фьючерсные методы наследуют default throw из `BaseExchangeClient`
 
 ## Demo mode
 

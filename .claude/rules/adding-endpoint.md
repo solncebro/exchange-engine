@@ -17,12 +17,16 @@ export interface NewEntity {
 Добавить сигнатуру метода в интерфейс `ExchangeClient` в `src/types/exchange.ts`.
 При необходимости добавить import нового типа.
 
-### 3. Абстрактный метод в BaseExchangeClient
+### 3. Default throw метод в BaseExchangeClient
 
 Добавить в `src/exchanges/BaseExchangeClient.ts`:
 ```typescript
-abstract fetchNewEntity(...args: Parameters<ExchangeClient['fetchNewEntity']>): ReturnType<ExchangeClient['fetchNewEntity']>;
+async fetchNewEntity(_symbol: string): Promise<NewEntity[]> {
+  throw new Error(`Not supported for ${this.marketLabel} market`);
+}
 ```
+
+Этот подход позволяет spot-классам наследовать throw без явных заглушек.
 
 ### 4. Raw-интерфейс + нормализатор
 
@@ -61,12 +65,11 @@ async fetchNewEntity(symbol?: string): Promise<NewEntity[]> {
 }
 ```
 
-### 7. Заглушки в остальных классах
+### 7. Реализация в других классах
 
-Во всех классах, которые не поддерживают этот метод:
-- `BinanceSpot.ts` → `throw new Error('Not supported for spot market')`
-- `BybitLinear.ts` → `throw new Error('Not implemented for Bybit')`
-- `BybitSpot.ts` → `throw new Error('Not supported for spot market')`
+- `BinanceSpot.ts` — если метод futures-only, заглушка не нужна (наследует default throw из BaseExchangeClient)
+- `BybitLinear.ts` — реализация через `BybitBaseClient` или собственная, если метод поддерживается
+- `BybitSpot.ts` — если метод futures-only, наследует default throw
 
 ### 8. Экспорты
 
@@ -146,11 +149,11 @@ yarn build          # компиляция без ошибок
 
 - [ ] Тип в `common.ts`
 - [ ] Метод в `ExchangeClient` интерфейсе
-- [ ] `abstract` в `BaseExchangeClient`
+- [ ] Default throw в `BaseExchangeClient`
 - [ ] Raw-интерфейс + нормализатор
 - [ ] HTTP-метод
 - [ ] Exchange-метод (BinanceFutures)
-- [ ] Заглушки (BinanceSpot, BybitLinear, BybitSpot)
+- [ ] Реализация/наследование default throw (BinanceSpot, BybitLinear, BybitSpot)
 - [ ] Экспорт из `types/index.ts` и `src/index.ts`
 - [ ] Фикстуры
 - [ ] Тесты: нормализатор, HTTP, exchange

@@ -95,6 +95,19 @@ const [url, options] = mockInstance.delete.mock.calls[0];
 expect(options.params.signature).toBeDefined();
 ```
 
+## Shared test utilities (test/fixtures/)
+
+### mockAxios.ts
+
+Общий хелпер для мокирования axios во всех HTTP- и exchange-тестах:
+```typescript
+import { createMockAxiosInstance, setupMockAxios } from '../fixtures/mockAxios';
+```
+
+### mockTradeSymbol.ts
+
+Готовые TradeSymbol фикстуры для тестирования precision и order methods.
+
 ## Фикстуры (test/fixtures/)
 
 Константы с raw API-данными, именование: `EXCHANGE_RAW_ENTITY`:

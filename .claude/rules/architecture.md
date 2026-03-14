@@ -15,15 +15,16 @@ Exchange (фабрика)
 │   ├── BinanceBaseClient<T> (абстрактный, шаблонный метод)
 │   │   ├── BinanceFutures
 │   │   └── BinanceSpot
-│   ├── BybitLinear
-│   └── BybitSpot
+│   ├── BybitBaseClient (абстрактный, общая Bybit логика)
+│   │   ├── BybitLinear
+│   │   └── BybitSpot
 │
 ├── HTTP-клиенты (src/http/)
-│   ├── BaseHttpClient (retry, rate limits, axios)
-│   ├── BinanceBaseHttpClient (signing, общие эндпоинты)
+│   ├── BaseHttpClient (retry, rate limits, axios, executeRequest)
+│   ├── BinanceBaseHttpClient (signing, signRequest, buildOptionalSymbolParams)
 │   │   ├── BinanceFuturesHttpClient (фьючерсные эндпоинты)
 │   │   └── BinanceSpotHttpClient (спотовые эндпоинты)
-│   └── BybitHttpClient (единый для spot/linear)
+│   └── BybitHttpClient (единый для spot/linear, buildCategoryParams)
 │
 ├── Нормализаторы (src/normalizers/)
 │   ├── binanceNormalizer.ts — raw Binance → унифицированные типы
@@ -34,8 +35,11 @@ Exchange (фабрика)
 │   ├── BinanceSpotPublicStream — klines + тикеры (динамические подписки)
 │   ├── BinanceUserDataStream — listenKey user data
 │   ├── BybitPublicStream — klines + тикеры (topic-based)
-│   ├── BybitTradeStream — async ордера через WS (только production)
-│   └── BybitPrivateStream — приватные события
+│   ├── BybitPrivateStream — приватные события
+│   ├── BaseTradeStream<T> — абстрактная база для trade WS
+│   │   ├── BinanceTradeStream — ордера через WS (Binance spot + futures)
+│   │   └── BybitTradeStream — ордера через WS (только production)
+│   └── parseWebSocketMessage<T> — generic JSON parser для всех стримов
 │
 ├── Авторизация (src/auth/)
 │   ├── binanceAuth.ts — HMAC-SHA256 query string signing
@@ -45,6 +49,9 @@ Exchange (фабрика)
 │   ├── common.ts — все enum, interface, type (Ticker, Kline, Position, Order...)
 │   ├── exchange.ts — ExchangeClient интерфейс + args types
 │   └── stream.ts — PublicStreamLike интерфейс
+│
+├── Ошибки (src/errors/)
+│   └── ExchangeError.ts — кастомный Error с полями `code` и `exchange`
 │
 ├── Утилиты (src/utils/, src/precision/, src/constants/)
 │   ├── precision.ts — roundToStep для amount/price

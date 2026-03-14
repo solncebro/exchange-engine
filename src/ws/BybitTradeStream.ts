@@ -1,21 +1,17 @@
 import type { WebSocketOpenContext } from '@solncebro/websocket-engine';
 import { ReliableWebSocket } from '@solncebro/websocket-engine';
 
+import { ExchangeError } from '../errors/ExchangeError';
 import type { BybitOrderResponseRaw } from '../normalizers/bybitNormalizer';
 import { normalizeBybitOrder } from '../normalizers/bybitNormalizer';
-import type { BybitBaseWebSocketMessage } from './bybitWebSocketUtils';
+import { BaseTradeStream } from './BaseTradeStream';
+import type { BybitTradeMessage } from './BybitTradeStream.types';
 import {
   BYBIT_HEARTBEAT_CONFIG,
   BYBIT_PING_INTERVAL,
   authenticateBybitWebSocket,
 } from './bybitWebSocketUtils';
-import { BaseTradeStream } from './BaseTradeStream';
 import { parseWebSocketMessage } from './parseWebSocketMessage';
-
-interface BybitTradeMessage extends BybitBaseWebSocketMessage {
-  reason?: string;
-  reqId?: string;
-}
 
 class BybitTradeStream extends BaseTradeStream<BybitTradeMessage> {
   protected readonly label = 'BybitTradeStream';
@@ -92,7 +88,7 @@ class BybitTradeStream extends BaseTradeStream<BybitTradeMessage> {
         const order = normalizeBybitOrder(message.data as BybitOrderResponseRaw);
         pending.resolve(order);
       } else {
-        pending.reject(new Error(message.reason ?? message.ret_msg ?? 'Order creation failed'));
+        pending.reject(new ExchangeError(message.reason ?? message.ret_msg ?? 'Order creation failed', (message.ret_code as string | number) ?? 'UNKNOWN', 'bybit'));
       }
     }
   }

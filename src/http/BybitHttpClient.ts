@@ -1,84 +1,30 @@
-import type { ExchangeLogger } from '../types/common';
-import type { FetchPageWithLimitArgs } from '../types/exchange';
+import { buildBybitAuthHeaders } from '../auth/bybitAuth';
+import { BYBIT_REQUEST_TIMEOUT } from '../constants/bybit';
+import { ExchangeError } from '../errors/ExchangeError';
 import type {
   BybitInstrumentInfoRaw,
-  BybitTickerRaw,
-  BybitPositionRaw,
   BybitOrderResponseRaw,
+  BybitPositionRaw,
+  BybitTickerRaw,
   BybitWalletBalanceRaw,
 } from '../normalizers/bybitNormalizer';
-import { buildBybitAuthHeaders } from '../auth/bybitAuth';
 import { applyTimeRangeOptions } from '../utils/httpParams';
-import { BYBIT_REQUEST_TIMEOUT } from '../constants/bybit';
 import { BaseHttpClient } from './BaseHttpClient';
-
-interface BybitHttpClientArgs {
-  baseUrl: string;
-  apiKey: string;
-  secret: string;
-  logger: ExchangeLogger;
-  httpsAgent?: unknown;
-}
-
-interface SymbolFilterArgs {
-  symbol?: string;
-}
-
-interface SymbolLimitFilterArgs {
-  symbol?: string;
-  limit?: number;
-}
-
-interface PeriodFilterArgs {
-  period?: string;
-  limit?: number;
-}
-
-interface CategoryFilterArgs {
-  category?: string;
-  limit?: number;
-}
-
-interface FetchBybitKlineArgs {
-  category: string;
-  symbol: string;
-  interval: string;
-  options?: FetchPageWithLimitArgs;
-}
-
-interface SetBybitLeverageArgs {
-  category: string;
-  symbol: string;
-  buyLeverage: number;
-  sellLeverage: number;
-}
-
-interface SwitchBybitIsolatedArgs {
-  category: string;
-  symbol: string;
-  tradeMode: number;
-  buyLeverage: number;
-  sellLeverage: number;
-}
-
-interface BybitListResponse<T> {
-  result: { list: T[] };
-}
-
-interface BybitResponse<T> {
-  result: T;
-}
-
-interface BybitOrderBookRaw {
-  a: string[][];
-  b: string[][];
-}
-
-interface BybitCreateOrderApiResponse {
-  retCode: number;
-  retMsg: string;
-  result: BybitOrderResponseRaw;
-}
+import type {
+  BybitCreateOrderApiResponse,
+  BybitHttpClientArgs,
+  BybitListResponse,
+  BybitOrderBookRaw,
+  BybitResponse,
+  CategoryFilterArgs,
+  FetchBybitKlineArgs,
+  FetchPageWithLimitArgs,
+  PeriodFilterArgs,
+  SetBybitLeverageArgs,
+  SwitchBybitIsolatedArgs,
+  SymbolFilterArgs,
+  SymbolLimitFilterArgs,
+} from './BybitHttpClient.types';
 
 class BybitHttpClient extends BaseHttpClient {
   private readonly secret: string;
@@ -228,7 +174,7 @@ class BybitHttpClient extends BaseHttpClient {
     );
 
     if (response.retCode !== 0) {
-      throw new Error(`Bybit API error ${response.retCode}: ${response.retMsg}`);
+      throw new ExchangeError(`Bybit API error ${response.retCode}: ${response.retMsg}`, response.retCode, 'bybit');
     }
 
     return response;

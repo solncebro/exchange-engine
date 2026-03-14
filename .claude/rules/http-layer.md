@@ -22,6 +22,12 @@ BaseHttpClient (abstract)
 - `putWithParams<T>(url, params?, headers?): Promise<T>`
 - `delete<T>(url, params?, headers?): Promise<T>`
 
+### Private хелпер:
+- `executeRequest<T>(label, fn): Promise<T>` — общая обёртка для non-GET методов (logging + error handling). Все методы кроме `get` делегируют в `executeRequest`.
+
+### BybitHttpClient ошибки:
+- Выбрасывает `ExchangeError` (из `src/errors/ExchangeError.ts`) с полями `code` и `exchange` для структурированной обработки ошибок.
+
 ### Retry-логика (только для GET)
 
 Константы:
@@ -48,6 +54,10 @@ Rate limiting — **только реактивный** (нет proactive thrott
 - `signedPost<T>(path, params?)` — то же для POST
 - `signedDelete<T>(path, params?)` — то же для DELETE
 - `authHeaders()` → `{ 'X-MBX-APIKEY': apiKey }`
+
+### Private хелперы:
+- `signRequest(params)` → `{ signedParams, headers }` — единая точка подписи, используется всеми signed-методами
+- `buildOptionalSymbolParams(symbol?)` → `Record<string, ...>` — protected, строит params с optional symbol (используется в `getOpenOrders` и наследниках)
 
 ### Binance signing (src/auth/binanceAuth.ts):
 1. Добавить `timestamp = Date.now()` и `recvWindow = 5000` к params
@@ -117,12 +127,19 @@ order, openOrders, account, listenKey
 - `authenticatedGet<T>(path, params)` — строит query string → подписывает → GET
 - `authenticatedPost<T>(path, body)` — JSON.stringify body → подписывает → POST
 
+### Private хелпер:
+- `buildCategoryParams(category, options?)` → `Record<string, ...>` — строит params с `{ category }` + optional `symbol` и `limit`. Используется в 7 методах: `fetchInstrumentsInfo`, `fetchTickers`, `getOpenOrders`, `getOrderHistory`, `getPositionList`, `getClosedPnl`, `fetchFeeRate`.
+
 ### Все методы используют категорию:
 - `fetchInstrumentsInfo(category, options?)` — market data
 - `fetchTickers(category, options?)` — тикеры
 - `fetchKline(args)` — свечи (с конвертацией интервалов)
 - `createOrder(params)` → POST `/v5/order/create`
+- `getOpenOrders(category, options?)` → GET `/v5/order/realtime`
+- `getOrderHistory(category, options?)` → GET `/v5/order/history`
 - `getPositionList(category, options?)` → GET `/v5/position/list`
+- `getClosedPnl(category, options?)` → GET `/v5/position/closed-pnl`
+- `fetchFeeRate(category, options?)` → GET `/v5/account/fee-rate`
 - `setLeverage(args)` → POST `/v5/position/set-leverage`
 - `switchIsolated(args)` → POST `/v5/position/switch-isolated`
 - `fetchWalletBalance(accountType)` → GET `/v5/account/wallet-balance`

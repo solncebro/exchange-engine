@@ -24,17 +24,26 @@ yarn type-check         # Проверка типов (без emit)
 Exchange (фабрика) → ExchangeClient (интерфейс)
   ├── BaseExchangeClient (абстрактный, общая логика)
   │   ├── BinanceBaseClient → BinanceFutures / BinanceSpot
-  │   └── BybitLinear / BybitSpot
+  │   └── BybitBaseClient → BybitLinear / BybitSpot
   │
   ├── HTTP-клиенты (src/http/)
-  │   ├── BaseHttpClient (retry, rate limits, axios)
-  │   └── BinanceFuturesHttpClient / BinanceSpotHttpClient / BybitHttpClient
+  │   ├── BaseHttpClient (retry, rate limits, axios, executeRequest)
+  │   ├── BinanceBaseHttpClient (signing, signRequest, buildOptionalSymbolParams)
+  │   │   ├── BinanceFuturesHttpClient
+  │   │   └── BinanceSpotHttpClient
+  │   └── BybitHttpClient (buildCategoryParams)
   │
   ├── Нормализаторы (src/normalizers/)
   │   Raw-типы биржи → унифицированные типы (Ticker, Kline, Position, ...)
   │
+  ├── Ошибки (src/errors/)
+  │   └── ExchangeError — кастомный Error с полями `code` и `exchange`
+  │
   └── WebSocket-стримы (src/ws/)
-      Публичные стримы (тикеры, klines) + user data стримы
+      ├── Публичные стримы (тикеры, klines)
+      ├── BaseTradeStream → BinanceTradeStream / BybitTradeStream
+      ├── User data стримы (BinanceUserDataStream, BybitPrivateStream)
+      └── parseWebSocketMessage — generic WS parser
 ```
 
 ### Ключевые паттерны
@@ -53,7 +62,9 @@ Exchange (фабрика) → ExchangeClient (интерфейс)
 
 Во время разработки **обязательно** опирайся на скилл `code-style` — он содержит все правила форматирования, именования, типизации и структуры кода. Применяй его при написании, редактировании и ревью любого кода.
 
-После завершения любой задачи (фича, багфикс, рефакторинг) **обязательно** запусти агент `code-style-enforcer` для проверки всех изменённых файлов на соответствие стилю кода. Агент найдёт и исправит все нарушения автоматически.
+После завершения любой задачи (фича, багфикс, рефакторинг):
+1. **Обязательно** запусти агент `code-style-enforcer` для проверки всех изменённых файлов на соответствие стилю кода.
+2. **Обязательно** примени скилл `sync-docs` — синхронизируй `.claude/rules/` и `CLAUDE.md` с фактическим состоянием кода. Документация всегда должна отражать текущую архитектуру.
 
 ## Детальная документация
 

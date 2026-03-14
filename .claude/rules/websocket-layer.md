@@ -55,17 +55,54 @@ close(): void
 - Все сообщения передаются в `onMessage` хендлер без фильтрации
 - **listenKey refresh** НЕ управляется этим классом — ответственность вызывающего (каждые 30 мин)
 
+## BaseTradeStream<T> (src/ws/BaseTradeStream.ts)
+
+Абстрактный базовый класс для `BinanceTradeStream` и `BybitTradeStream`.
+
+Общая инфраструктура:
+- `connect()` / `disconnect()` / `isConnected()` — управление жизненным циклом
+- `createOrder(orderParams)` → `Promise<Order>` — async request-response
+- `ensureConnected()` — lazy connection с dedup промисов
+- `sendOrderRequest(request, requestId)` — timeout 30s, pending requests в `Map<reqId, PendingRequest>`
+
+Абстрактные методы (реализуются подклассами):
+- `initConnection()` — создание WebSocket и подключение
+- `buildOrderRequest(orderParams, requestId)` — формирование запроса
+- `label` — имя для логирования
+
+## Binance Trade Stream
+
+Наследует `BaseTradeStream<BinanceTradeWebSocketResponse>`.
+
+- **URL futures**: `wss://ws-fapi.binance.com/ws-fapi/v1`
+- **URL spot**: `wss://ws-api.binance.com:443/ws-api/v3`
+- **Demo URLs**: testnet-варианты обоих
+- Создаётся в `BinanceBaseClient` — одинаково для spot и futures
+- Signing: HMAC-SHA256 через `buildBinanceWebSocketSignedParams()` — params в payload
+- Request format: `{ id, method: 'order.place', params: { ...orderParams, apiKey, signature, timestamp } }`
+- Response matching по `id` = `requestId`
+- Нормализация ответа через `normalizeBinanceOrder()`
+- Ошибки выбрасываются как `ExchangeError` с полями `code` и `exchange`
+
 ## Bybit Trade Stream
+
+Наследует `BaseTradeStream<BybitTradeMessage>`.
 
 - **URL**: `wss://stream.bybit.com/v5/trade`
 - **Только production** — в demo mode `tradeStream = null`, fallback на REST
 - Аутентификация при каждом open через `authenticateBybitWebSocket()`
-- **Async request-response** паттерн для ордеров:
-  1. Генерирует уникальный `reqId` (timestamp + random)
-  2. Отправляет `{ op: 'order.create', args: [...], reqId, header: {...} }`
-  3. Ожидает ответ с matching `reqId` (timeout 30s)
-  4. Pending requests хранятся в `Map<reqId, PendingRequest>`
+- Request format: `{ op: 'order.create', args: [...], reqId, header: { X-BAPI-* } }`
+- Response matching по `reqId` = `requestId`
 - **Heartbeat**: `{ op: 'ping' }`, интервал 20s
+- Ошибки выбрасываются как `ExchangeError` с полями `code` и `exchange`
+
+## parseWebSocketMessage<T> (src/ws/parseWebSocketMessage.ts)
+
+Generic JSON parser, используется всеми WebSocket стримами:
+```typescript
+function parseWebSocketMessage<T>(rawData: RawData): T
+```
+Заменяет 7 ранее идентичных parse-функций. Каждый стрим вызывает через inline arrow: `(rawData) => parseWebSocketMessage<SpecificType>(rawData)`.
 
 ## Bybit Private Stream
 

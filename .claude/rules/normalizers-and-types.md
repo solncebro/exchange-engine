@@ -62,20 +62,21 @@ BinanceTicker24hrRaw { symbol, lastPrice: string, priceChangePercent: string, ti
 ### Enums:
 - `ExchangeNameEnum` — Binance, Bybit
 - `OrderSideEnum` — Buy, Sell
-- `OrderTypeEnum` — Market, Limit
+- `OrderTypeEnum` — Market, Limit, StopMarket, TakeProfitMarket, Stop, TakeProfit, TrailingStop
 - `MarginModeEnum` — Isolated, Cross
 - `PositionSideEnum` — Long, Short, Both
 - `PositionModeEnum` — Hedge, OneWay
 - `TradeSymbolTypeEnum` — Spot, Swap, Future
 - `TimeInForceEnum` — Gtc, Ioc, Fok, PostOnly
+- `WorkingTypeEnum` — MarkPrice, ContractPrice
 
 ### Интерфейсы:
-- `Ticker` — `{ symbol, close, percentage, timestamp }`
+- `Ticker` — `{ symbol, lastPrice, openPrice, highPrice, lowPrice, priceChangePercent, volume, quoteVolume, timestamp }`
 - `Kline` — `{ openTimestamp, openPrice, highPrice, lowPrice, closePrice, volume, closeTimestamp, quoteAssetVolume, numberOfTrades, takerBuyBaseAssetVolume, takerBuyQuoteAssetVolume }`
 - `TradeSymbol` — `{ symbol, baseAsset, quoteAsset, settle, isActive, type, isLinear, contractSize, filter }`
 - `TradeSymbolFilter` — `{ tickSize, stepSize, minQty, maxQty, minNotional }` (все string)
 - `Position` — `{ symbol, side, contracts, entryPrice, markPrice, unrealizedPnl, leverage, marginMode, liquidationPrice, info }`
-- `Order` — `{ id, symbol, side, type, amount, price, status, timestamp }`
+- `Order` — `{ id, clientOrderId, symbol, side, type, amount, price, avgPrice, stopPrice, filledAmount, filledQuoteAmount, status, timeInForce, reduceOnly, timestamp, updatedTimestamp }`
 - `Balance` — `{ asset, free, locked, total }`
 - `FundingRateHistory` — `{ symbol, fundingRate, fundingTime, markPrice: number | null }`
 - `FundingInfo` — `{ symbol, fundingIntervalHours, adjustedFundingRateCap, adjustedFundingRateFloor }`

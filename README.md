@@ -336,14 +336,17 @@ These differences are transparent — the same code works for both.
 
 ## Error Handling
 
-All errors are logged and thrown. Wrap calls in try-catch:
+Exchange-specific errors are thrown as `ExchangeError` with structured `code` and `exchange` fields:
 
 ```typescript
+import { ExchangeError } from '@solncebro/exchange-engine';
+
 try {
   await exchange.futures.setLeverage(100, 'BTCUSDT');
 } catch (error) {
-  console.error(`Failed to set leverage: ${error.message}`);
-  // error has code, status, response fields for detailed handling
+  if (error instanceof ExchangeError) {
+    console.error(`[${error.exchange}] Error ${error.code}: ${error.message}`);
+  }
 }
 ```
 

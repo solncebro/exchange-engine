@@ -1,20 +1,11 @@
 import { ReliableWebSocket } from '@solncebro/websocket-engine';
 
 import { buildBinanceWebSocketSignedParams } from '../auth/binanceAuth';
-import type { BinanceOrderResponseRaw } from '../normalizers/binanceNormalizer';
+import { ExchangeError } from '../errors/ExchangeError';
 import { normalizeBinanceOrder } from '../normalizers/binanceNormalizer';
 import { BaseTradeStream } from './BaseTradeStream';
+import type { BinanceTradeWebSocketResponse } from './BinanceTradeStream.types';
 import { parseWebSocketMessage } from './parseWebSocketMessage';
-
-interface BinanceTradeWebSocketResponse {
-  id: string;
-  status: number;
-  result?: BinanceOrderResponseRaw;
-  error?: {
-    code: number;
-    msg: string;
-  };
-}
 
 class BinanceTradeStream extends BaseTradeStream<BinanceTradeWebSocketResponse> {
   protected readonly label = 'BinanceTradeStream';
@@ -74,7 +65,7 @@ class BinanceTradeStream extends BaseTradeStream<BinanceTradeWebSocketResponse> 
     } else {
       const errorMessage = message.error?.msg ?? 'Order creation failed';
       const errorCode = message.error?.code ?? message.status;
-      pending.reject(new Error(`Binance WS order error [${errorCode}]: ${errorMessage}`));
+      pending.reject(new ExchangeError(`Binance WS order error [${errorCode}]: ${errorMessage}`, errorCode, 'binance'));
     }
   }
 }

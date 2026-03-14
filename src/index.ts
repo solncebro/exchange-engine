@@ -1,3 +1,4 @@
+export { ExchangeError } from './errors/ExchangeError';
 export { Exchange } from './exchanges/Exchange';
 
 export type {
