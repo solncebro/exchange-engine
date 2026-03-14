@@ -89,15 +89,15 @@ abstract class BinanceBaseClient<T extends BinanceBaseHttpClient> extends BaseEx
       symbol: args.symbol,
       side: args.side.toUpperCase(),
       type: binanceType,
-      quantity: this.amountToPrecision(args.symbol, args.amount),
+      quantity: String(this.amountToPrecision(args.symbol, args.amount)),
     };
 
     if (args.price !== undefined && args.price > 0) {
-      orderParams.price = this.priceToPrecision(args.symbol, args.price);
+      orderParams.price = String(this.priceToPrecision(args.symbol, args.price));
     }
 
     if (args.stopPrice !== undefined && args.stopPrice > 0) {
-      orderParams.stopPrice = this.priceToPrecision(args.symbol, args.stopPrice);
+      orderParams.stopPrice = String(this.priceToPrecision(args.symbol, args.stopPrice));
     }
 
     if (args.closePosition !== undefined) {

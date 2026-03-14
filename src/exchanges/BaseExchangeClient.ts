@@ -122,25 +122,25 @@ abstract class BaseExchangeClient implements ExchangeClient {
     this.getPublicStream().unsubscribeKlines(args.symbol, args.interval, args.handler);
   }
 
-  amountToPrecision(symbol: string, amount: number): string {
+  amountToPrecision(symbol: string, amount: number): number {
     const tradeSymbol = this.tradeSymbols.get(symbol);
 
     if (!tradeSymbol) {
       this.logger.warn(`TradeSymbol ${symbol} not found, using raw amount`);
 
-      return String(amount);
+      return amount;
     }
 
     return amountToPrecision(tradeSymbol, amount);
   }
 
-  priceToPrecision(symbol: string, price: number): string {
+  priceToPrecision(symbol: string, price: number): number {
     const tradeSymbol = this.tradeSymbols.get(symbol);
 
     if (!tradeSymbol) {
       this.logger.warn(`TradeSymbol ${symbol} not found, using raw price`);
 
-      return String(price);
+      return price;
     }
 
     return priceToPrecision(tradeSymbol, price);

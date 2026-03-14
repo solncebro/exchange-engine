@@ -76,8 +76,8 @@ export interface ExchangeClient {
   fetchPosition(symbol: string): Promise<Position>;
   setLeverage(leverage: number, symbol: string): Promise<void>;
   setMarginMode(marginMode: MarginModeEnum, symbol: string): Promise<void>;
-  amountToPrecision(symbol: string, amount: number): string;
-  priceToPrecision(symbol: string, price: number): string;
+  amountToPrecision(symbol: string, amount: number): number;
+  priceToPrecision(symbol: string, price: number): number;
   getMinOrderQty(symbol: string): number;
   getMinNotional(symbol: string): number;
   fetchFundingInfo(symbol?: string): Promise<FundingInfo[]>;

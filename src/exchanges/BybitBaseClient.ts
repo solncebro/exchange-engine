@@ -121,15 +121,15 @@ abstract class BybitBaseClient extends BaseExchangeClient {
       symbol: args.symbol,
       orderType: isMarket ? 'Market' : 'Limit',
       side: args.side === OrderSideEnum.Buy ? 'Buy' : 'Sell',
-      qty: this.amountToPrecision(args.symbol, args.amount),
+      qty: String(this.amountToPrecision(args.symbol, args.amount)),
     };
 
     if (args.price !== undefined && args.price > 0) {
-      orderParams.price = this.priceToPrecision(args.symbol, args.price);
+      orderParams.price = String(this.priceToPrecision(args.symbol, args.price));
     }
 
     if (args.stopPrice !== undefined && args.stopPrice > 0) {
-      orderParams.triggerPrice = this.priceToPrecision(args.symbol, args.stopPrice);
+      orderParams.triggerPrice = String(this.priceToPrecision(args.symbol, args.stopPrice));
     }
 
     if (args.reduceOnly !== undefined) {

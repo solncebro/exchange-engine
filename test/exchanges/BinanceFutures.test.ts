@@ -276,7 +276,7 @@ describe('BinanceFutures', () => {
 
       const [, , options] = mockInstance.post.mock.calls[0];
 
-      expect(options.params.price).toBe('65000.0');
+      expect(options.params.price).toBe('65000');
       expect(options.params.timeInForce).toBe('GTC');
     });
 
@@ -297,7 +297,7 @@ describe('BinanceFutures', () => {
 
       const [, , options] = mockInstance.post.mock.calls[0];
 
-      expect(options.params.stopPrice).toBe('60000.0');
+      expect(options.params.stopPrice).toBe('60000');
     });
 
     it('sends closePosition when provided', async () => {
@@ -432,7 +432,7 @@ describe('BinanceFutures', () => {
 
       const result = client.amountToPrecision('BTCUSDT', 0.12345);
 
-      expect(result).toBe('0.123');
+      expect(result).toBe(0.123);
     });
 
     it('returns raw amount for unknown symbol', () => {
@@ -440,7 +440,7 @@ describe('BinanceFutures', () => {
 
       const result = client.amountToPrecision('UNKNOWN', 0.12345);
 
-      expect(result).toBe('0.12345');
+      expect(result).toBe(0.12345);
     });
   });
 
@@ -452,7 +452,7 @@ describe('BinanceFutures', () => {
 
       const result = client.priceToPrecision('BTCUSDT', 65432.123);
 
-      expect(result).toBe('65432.1');
+      expect(result).toBe(65432.1);
     });
 
     it('returns raw price for unknown symbol', () => {
@@ -460,7 +460,7 @@ describe('BinanceFutures', () => {
 
       const result = client.priceToPrecision('UNKNOWN', 65432.123);
 
-      expect(result).toBe('65432.123');
+      expect(result).toBe(65432.123);
     });
   });
 

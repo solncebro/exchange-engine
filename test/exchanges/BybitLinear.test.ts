@@ -156,7 +156,7 @@ describe('BybitLinear', () => {
 
       const [, body] = mockInstance.post.mock.calls[0];
 
-      expect(body.triggerPrice).toBe('60000.0');
+      expect(body.triggerPrice).toBe('60000');
     });
 
     it('sends reduceOnly when provided', async () => {
