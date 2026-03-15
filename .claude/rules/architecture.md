@@ -95,4 +95,4 @@ exchange.close()  // → закрывает оба
 - **Коллекции — Map с именованием "By"**: `TickerBySymbol`, `BalanceByAsset`, `TradeSymbolBySymbol`
 - **Spot-классы выбрасывают ошибку** для фьючерсных методов: `"Not supported for spot market"`
 - **Demo mode** — переключается в конструкторе через `isDemoMode`, влияет на URL (не runtime toggle)
-- **Кеширование tradeSymbols** — ленивая загрузка, `Map` на инстансе, инвалидация через `shouldReload=true`
+- **tradeSymbols** — `Map` на инстансе, `loadTradeSymbols()` всегда загружает свежие данные (очищает Map перед заполнением)

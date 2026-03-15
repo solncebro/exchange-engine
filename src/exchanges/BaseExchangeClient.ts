@@ -50,12 +50,9 @@ abstract class BaseExchangeClient implements ExchangeClient {
   ): Promise<Kline[]>;
   protected abstract fetchAndNormalizeBalance(): Promise<BalanceByAsset>;
 
-  async loadTradeSymbols(shouldReload: boolean = false): Promise<TradeSymbolBySymbol> {
-    if (!shouldReload && this.tradeSymbols.size > 0) {
-      return this.tradeSymbols;
-    }
-
+  async loadTradeSymbols(): Promise<TradeSymbolBySymbol> {
     const normalized = await this.fetchAndNormalizeTradeSymbols();
+    this.tradeSymbols.clear();
 
     for (const [symbol, tradeSymbol] of normalized) {
       this.tradeSymbols.set(symbol, tradeSymbol);

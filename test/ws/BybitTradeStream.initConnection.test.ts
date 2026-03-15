@@ -50,7 +50,7 @@ describe('BybitTradeStream', () => {
 
       expect(ReliableWebSocket).toHaveBeenCalledWith(
         expect.objectContaining({
-          label: 'BybitTradeStream',
+          label: '[Bybit] Trade stream',
           url,
           heartbeat: expect.objectContaining({
             buildPayload: expect.any(Function),
@@ -74,7 +74,7 @@ describe('BybitTradeStream', () => {
           context: mockContext,
           apiKey: 'testApiKey',
           secret: 'testSecret',
-          label: 'BybitTradeStream',
+          label: '[Bybit] Trade stream',
         }),
       );
     });

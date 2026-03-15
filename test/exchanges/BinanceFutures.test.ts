@@ -155,25 +155,33 @@ describe('BinanceFutures', () => {
       expect(btc!.type).toBe(TradeSymbolTypeEnum.Swap);
     });
 
-    it('returns cached symbols on second call', async () => {
+    it('always fetches fresh data on each call', async () => {
       const { client, mockInstance } = createClient();
       mockInstance.get.mockResolvedValue({ data: BINANCE_RAW_EXCHANGE_INFO });
 
       await client.loadTradeSymbols();
-      const result = await client.loadTradeSymbols();
-
-      expect(result.size).toBe(2);
-      expect(mockInstance.get).toHaveBeenCalledTimes(1);
-    });
-
-    it('reloads when shouldReload is true', async () => {
-      const { client, mockInstance } = createClient();
-      mockInstance.get.mockResolvedValue({ data: BINANCE_RAW_EXCHANGE_INFO });
-
       await client.loadTradeSymbols();
-      await client.loadTradeSymbols(true);
 
       expect(mockInstance.get).toHaveBeenCalledTimes(2);
+    });
+
+    it('clears previous symbols before populating', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: BINANCE_RAW_EXCHANGE_INFO });
+
+      await client.loadTradeSymbols();
+
+      expect(client.tradeSymbols.size).toBe(2);
+
+      const singleSymbolData = {
+        symbols: [BINANCE_RAW_EXCHANGE_INFO.symbols[0]],
+      };
+
+      mockInstance.get.mockResolvedValue({ data: singleSymbolData });
+
+      await client.loadTradeSymbols();
+
+      expect(client.tradeSymbols.size).toBe(1);
     });
   });
 

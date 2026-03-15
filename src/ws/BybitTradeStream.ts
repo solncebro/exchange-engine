@@ -13,7 +13,7 @@ import {
 import { parseWebSocketMessage } from './parseWebSocketMessage';
 
 class BybitTradeStream extends BaseTradeStream<BybitTradeMessage> {
-  protected readonly label = 'BybitTradeStream';
+  protected readonly label = '[Bybit] Trade stream';
 
   protected buildOrderRequest(
     orderParams: Record<string, unknown>,

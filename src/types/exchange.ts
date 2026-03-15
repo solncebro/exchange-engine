@@ -68,7 +68,7 @@ export interface ExchangeClient {
   readonly apiKey: string;
   readonly tradeSymbols: TradeSymbolBySymbol;
 
-  loadTradeSymbols(shouldReload?: boolean): Promise<TradeSymbolBySymbol>;
+  loadTradeSymbols(): Promise<TradeSymbolBySymbol>;
   fetchTickers(): Promise<TickerBySymbol>;
   fetchKlines(symbol: string, interval: KlineInterval, options?: FetchPageWithLimitArgs): Promise<Kline[]>;
   fetchAllKlines(symbolList: string[], interval: KlineInterval, options?: FetchAllKlinesOptions): Promise<Map<string, Kline[]>>;

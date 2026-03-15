@@ -8,7 +8,7 @@ import type { BinanceTradeWebSocketResponse } from './BinanceTradeStream.types';
 import { parseWebSocketMessage } from './parseWebSocketMessage';
 
 class BinanceTradeStream extends BaseTradeStream<BinanceTradeWebSocketResponse> {
-  protected readonly label = 'BinanceTradeStream';
+  protected readonly label = '[Binance] Trade stream';
 
   protected buildOrderRequest(
     orderParams: Record<string, unknown>,

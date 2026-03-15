@@ -22,7 +22,7 @@ BaseExchangeClient (abstract, implements ExchangeClient)
   tradeSymbols: TradeSymbolBySymbol (readonly, Map)
 
 Рыночные данные:
-  loadTradeSymbols(shouldReload?): Promise<TradeSymbolBySymbol>
+  loadTradeSymbols(): Promise<TradeSymbolBySymbol>
   fetchTickers(): Promise<TickerBySymbol>
   fetchKlines(symbol, interval, options?): Promise<Kline[]>
   fetchAllKlines(symbolList, interval): Promise<Map<string, Kline[]>>
@@ -64,7 +64,7 @@ Precision:
 ## BaseExchangeClient — что реализовано vs что абстрактно
 
 ### Реализовано (наследуется всеми):
-- `loadTradeSymbols()` — ленивая загрузка + кеш в `this.tradeSymbols` Map
+- `loadTradeSymbols()` — загрузка символов, очищает и перезаполняет `this.tradeSymbols` Map
 - `fetchTickers()` — делегирует в абстрактный `fetchAndNormalizeTickers()`
 - `fetchKlines()` — делегирует в абстрактный `fetchAndNormalizeKlines()`
 - `fetchAllKlines()` — батч-загрузка через `loadKlinesInChunks` утилиту (чанки по 200)
@@ -159,14 +159,11 @@ Precision:
 - Bybit Linear: другой baseUrl + другой WS URL, `tradeStream = null` (REST fallback)
 - Bybit Spot: другой baseUrl + другой WS URL
 
-## Кеширование tradeSymbols
+## tradeSymbols
 
 - `new Map()` при создании (пустой)
-- Заполняется при первом вызове `loadTradeSymbols()`
-- Повторные вызовы возвращают кеш
-- `loadTradeSymbols(true)` — принудительная перезагрузка
+- `loadTradeSymbols()` — всегда загружает свежие данные, очищает Map перед заполнением
 - Используется в `amountToPrecision()`, `priceToPrecision()`, `getMinOrderQty()`, `getMinNotional()`
-- Автоматического TTL нет — потребитель управляет сам
 
 ## Structured Logging
 

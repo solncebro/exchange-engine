@@ -44,7 +44,7 @@ describe('BinanceTradeStream', () => {
 
       expect(ReliableWebSocket).toHaveBeenCalledWith(
         expect.objectContaining({
-          label: 'BinanceTradeStream',
+          label: '[Binance] Trade stream',
           url,
         }),
       );
