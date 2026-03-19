@@ -30,7 +30,7 @@ describe('BybitTradeStream.handleMessage', () => {
 
   beforeEach(() => {
     jest.useFakeTimers();
-    stream = new BybitTradeStream({ url, logger: mockLogger, apiKey, secret });
+    stream = new BybitTradeStream({ url, label: '[Bybit] Trade stream', logger: mockLogger, apiKey, secret });
   });
 
   afterEach(() => {

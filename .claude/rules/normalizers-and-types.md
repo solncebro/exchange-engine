@@ -21,7 +21,8 @@ BinanceTicker24hrRaw { symbol, lastPrice: string, priceChangePercent: string, ti
 ### Raw-интерфейсы (export):
 - `BinanceExchangeInfoRaw` — `{ symbols: BinanceSymbolRaw[] }`
 - `BinanceTicker24hrRaw` — `{ symbol, lastPrice, priceChangePercent, time }`
-- `BinanceWebSocketKlineRaw` — `{ t, o, h, l, c, v, T, q, n, V, Q }` (короткие ключи)
+- `BinanceWebSocketKlineRaw` — `{ t, o, h, l, c, v, T, q, n, V, Q, x }` (короткие ключи, `x: boolean` — isClosed)
+- `BinanceContinuousKlineMessageRaw` — `{ e, E, ps, ct, k: BinanceWebSocketKlineRaw }`
 - `BinancePositionRiskRaw` — `{ symbol, positionSide, positionAmt, entryPrice, ... }`
 - `BinanceOrderResponseRaw` — `{ orderId, symbol, side, type, origQty, price, status, updateTime }`
 - `BinanceAccountRaw` — `{ balances: BinanceBalanceRaw[] }`
@@ -34,7 +35,7 @@ BinanceTicker24hrRaw { symbol, lastPrice: string, priceChangePercent: string, ti
   - Определяет тип: PERPETUAL → Swap, пустой/отсутствует contractType → Spot, остальное → Future
 - `normalizeBinanceTickers(rawList)` → `TickerBySymbol` (Map)
 - `normalizeBinanceKlines(rawList)` → `Kline[]` — массив массивов → массив объектов, parseFloat для строк
-- `normalizeBinanceKlineWebSocketMessage(raw)` → `Kline` — маппинг коротких ключей
+- `normalizeBinanceKlineWebSocketMessage(raw)` → `Kline` — маппинг коротких ключей, `raw.x → isClosed`
 - `normalizeBinancePosition(raw)` → `Position`
   - Маппинг через `BINANCE_POSITION_SIDE` (LONG→long, SHORT→short, BOTH→both)
   - `marginType === 'ISOLATED' ? MarginModeEnum.Isolated : MarginModeEnum.Cross`
@@ -52,10 +53,22 @@ BinanceTicker24hrRaw { symbol, lastPrice: string, priceChangePercent: string, ti
 
 ## bybitNormalizer.ts — аналогичная структура
 
-Тот же паттерн, но с Bybit-специфичными полями и маппингами:
+Тот же паттерн, но с Bybit-специфичными полями и маппингами.
+
+### Функции нормализации:
+- `normalizeBybitKlineWebSocketMessage(raw)` → `Kline` — маппинг полей, `raw.confirm → isClosed`
+
+### Маппинги:
 - `BYBIT_POSITION_SIDE`: Buy→Long, Sell→Short
 - `BYBIT_ORDER_SIDE`: Buy→Buy, Sell→Sell
 - `BYBIT_ORDER_STATUS`: New/PartiallyFilled/Untriggered→'open', Filled→'closed', Cancelled→'canceled'
+
+### Bybit Raw-типы (export):
+- `BybitWebSocketKlineRaw` — `{ start, open, high, low, close, volume, turnover, confirm: boolean, timestamp }`
+- `BybitPublicTradeDataRaw` — `{ T: number, s: string, p: string, v: string }`
+- `BybitWebSocketMessageRaw<T>` — `{ topic, type, ts, data: T[] }`
+- `BybitKlineMessageRaw` = `BybitWebSocketMessageRaw<BybitWebSocketKlineRaw>`
+- `BybitTradeMessageRaw` = `BybitWebSocketMessageRaw<BybitPublicTradeDataRaw>`
 
 ## Унифицированные типы (src/types/common.ts)
 
@@ -69,10 +82,13 @@ BinanceTicker24hrRaw { symbol, lastPrice: string, priceChangePercent: string, ti
 - `TradeSymbolTypeEnum` — Spot, Swap, Future
 - `TimeInForceEnum` — Gtc, Ioc, Fok, PostOnly
 - `WorkingTypeEnum` — MarkPrice, ContractPrice
+- `MarketTypeEnum` — Futures, Spot
+- `MARKET_TYPE_LIST: MarketTypeEnum[]` — `Object.values(MarketTypeEnum)`
+- `WebSocketConnectionTypeEnum` — Public, Trade, UserData
 
 ### Интерфейсы:
 - `Ticker` — `{ symbol, lastPrice, openPrice, highPrice, lowPrice, priceChangePercent, volume, quoteVolume, timestamp }`
-- `Kline` — `{ openTimestamp, openPrice, highPrice, lowPrice, closePrice, volume, closeTimestamp, quoteAssetVolume, numberOfTrades, takerBuyBaseAssetVolume, takerBuyQuoteAssetVolume }`
+- `Kline` — `{ openTimestamp, openPrice, highPrice, lowPrice, closePrice, volume, closeTimestamp, quoteAssetVolume, numberOfTrades, takerBuyBaseAssetVolume, takerBuyQuoteAssetVolume, isClosed?: boolean }`
 - `TradeSymbol` — `{ symbol, baseAsset, quoteAsset, settle, isActive, type, isLinear, contractSize, filter }`
 - `TradeSymbolFilter` — `{ tickSize, stepSize, minQty, maxQty, minNotional }` (все string)
 - `Position` — `{ symbol, side, contracts, entryPrice, markPrice, unrealizedPnl, leverage, marginMode, liquidationPrice, info }`
@@ -80,6 +96,7 @@ BinanceTicker24hrRaw { symbol, lastPrice: string, priceChangePercent: string, ti
 - `Balance` — `{ asset, free, locked, total }`
 - `FundingRateHistory` — `{ symbol, fundingRate, fundingTime, markPrice: number | null }`
 - `FundingInfo` — `{ symbol, fundingIntervalHours, adjustedFundingRateCap, adjustedFundingRateFloor }`
+- `WebSocketConnectionInfo` — `{ label, url, isConnected, type: WebSocketConnectionTypeEnum, subscriptionList: string[] }`
 
 ### Collection types (Map с "By" naming):
 - `TickerBySymbol = Map<string, Ticker>`
@@ -92,7 +109,7 @@ BinanceTicker24hrRaw { symbol, lastPrice: string, priceChangePercent: string, ti
 - Аналогично для `debug`, `warn`, `error`, `fatal`
 
 ### Тип-литерал:
-- `KlineInterval` — union `'1m' | '3m' | '5m' | '15m' | '30m' | '1h' | '2h' | '4h' | '6h' | '12h' | '1d' | '3d' | '1w' | '1M'`
+- `KlineInterval` — union `'1s' | '1m' | '3m' | '5m' | '15m' | '30m' | '1h' | '2h' | '4h' | '6h' | '12h' | '1d' | '3d' | '1w' | '1M'`
 
 ## Маппинги (src/constants/mappings.ts)
 

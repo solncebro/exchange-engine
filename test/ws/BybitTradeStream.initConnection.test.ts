@@ -40,7 +40,7 @@ describe('BybitTradeStream', () => {
   describe('initConnection', () => {
     it('creates ReliableWebSocket with heartbeat', async () => {
       const { ReliableWebSocket } = require('@solncebro/websocket-engine');
-      const stream = new BybitTradeStream({ url, logger: mockLogger, apiKey, secret });
+      const stream = new BybitTradeStream({ url, label: '[Bybit] Trade stream', logger: mockLogger, apiKey, secret });
 
       // Trigger initConnection, simulate open with auth
       const connectPromise = stream.connect();
@@ -62,7 +62,7 @@ describe('BybitTradeStream', () => {
 
     it('authenticates on open', async () => {
       const { authenticateBybitWebSocket } = require('../../src/ws/bybitWebSocketUtils');
-      const stream = new BybitTradeStream({ url, logger: mockLogger, apiKey, secret });
+      const stream = new BybitTradeStream({ url, label: '[Bybit] Trade stream', logger: mockLogger, apiKey, secret });
 
       const connectPromise = stream.connect();
       const mockContext = { send: jest.fn(), waitForMessage: jest.fn().mockResolvedValue(undefined) };
@@ -83,7 +83,7 @@ describe('BybitTradeStream', () => {
   describe('buildOrderRequest', () => {
     it('returns order request with op, args, header, and reqId', () => {
       jest.spyOn(Date, 'now').mockReturnValue(1700000000000);
-      const stream = new BybitTradeStream({ url, logger: mockLogger, apiKey, secret });
+      const stream = new BybitTradeStream({ url, label: '[Bybit] Trade stream', logger: mockLogger, apiKey, secret });
 
       const request = (stream as any).buildOrderRequest(
         { category: 'linear', symbol: 'BTCUSDT', side: 'Buy', orderType: 'Market', qty: '0.001' },

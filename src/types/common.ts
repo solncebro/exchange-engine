@@ -43,6 +43,7 @@ export enum TimeInForceEnum {
 }
 
 export type KlineInterval =
+  | '1s'
   | '1m'
   | '3m'
   | '5m'
@@ -105,6 +106,7 @@ export interface Kline {
   numberOfTrades: number;
   takerBuyBaseAssetVolume: number;
   takerBuyQuoteAssetVolume: number;
+  isClosed?: boolean;
 }
 
 export interface TradeSymbolFilter {
@@ -192,4 +194,25 @@ export enum PositionModeEnum {
 export enum WorkingTypeEnum {
   MarkPrice = 'markPrice',
   ContractPrice = 'contractPrice',
+}
+
+export enum MarketTypeEnum {
+  Futures = 'futures',
+  Spot = 'spot',
+}
+
+export const MARKET_TYPE_LIST: MarketTypeEnum[] = Object.values(MarketTypeEnum);
+
+export enum WebSocketConnectionTypeEnum {
+  Public = 'public',
+  Trade = 'trade',
+  UserData = 'userData',
+}
+
+export interface WebSocketConnectionInfo {
+  label: string;
+  url: string;
+  isConnected: boolean;
+  type: WebSocketConnectionTypeEnum;
+  subscriptionList: string[];
 }

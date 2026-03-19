@@ -15,7 +15,13 @@ class BybitLinear extends BybitBaseClient {
     const isDemoMode = args.config.isDemoMode === true;
     const publicWebSocketUrl = isDemoMode ? BYBIT_DEMO_PUBLIC_LINEAR_WEBSOCKET_URL : BYBIT_PUBLIC_LINEAR_WEBSOCKET_URL;
 
-    super({ exchangeArgs: args, category: 'linear', publicWebSocketUrl });
+    super({
+      exchangeArgs: args,
+      category: 'linear',
+      publicWebSocketUrl,
+      publicStreamLabel: '[Bybit Linear] Public',
+      tradeStreamLabel: '[Bybit] Orders',
+    });
   }
 
   async createOrderWebSocket(args: CreateOrderWebSocketArgs): Promise<Order> {

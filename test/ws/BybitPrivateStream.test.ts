@@ -41,6 +41,7 @@ describe('BybitPrivateStream', () => {
   function createStream(onMessage = jest.fn()) {
     return {
       stream: new BybitPrivateStream({
+        label: 'BybitPrivateStream',
         apiKey: 'testKey',
         secret: 'testSecret',
         logger: mockLogger,

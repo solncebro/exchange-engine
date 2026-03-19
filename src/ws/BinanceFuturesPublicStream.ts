@@ -1,11 +1,12 @@
-import { ReliableWebSocket } from '@solncebro/websocket-engine';
+import { ReliableWebSocket, WebSocketStatus } from '@solncebro/websocket-engine';
 
-import type { ExchangeLogger, KlineInterval, TickerBySymbol } from '../types/common';
+import type { ExchangeLogger, KlineInterval, TickerBySymbol, WebSocketConnectionInfo } from '../types/common';
+import { WebSocketConnectionTypeEnum } from '../types/common';
 import type { KlineHandler } from '../types/exchange';
 import { normalizeBinanceKlineWebSocketMessage, normalizeBinanceTickers } from '../normalizers/binanceNormalizer';
 import type { BinanceTicker24hrRaw, BinanceWebSocketKlineRaw } from '../normalizers/binanceNormalizer';
 import { resolveUnifiedBinanceInterval } from './binanceWebSocketUtils';
-import type { BinanceCombinedMessage, FuturesConnection } from './BinanceFuturesPublicStream.types';
+import type { BinanceCombinedMessage, BinanceFuturesPublicStreamArgs, FuturesConnection } from './BinanceFuturesPublicStream.types';
 import { parseWebSocketMessage } from './parseWebSocketMessage';
 
 const MAX_STREAMS_PER_CONNECTION = 200;
@@ -27,6 +28,7 @@ function buildKlineStreamList(klineHandlerByKey: Map<string, Set<KlineHandler>>)
 class BinanceFuturesPublicStream {
   private readonly webSocketCombinedUrl: string;
   private readonly logger: ExchangeLogger;
+  private readonly label: string;
   private readonly onNotify?: (message: string) => void | Promise<void>;
   private readonly tickerHandlerSet: Set<(tickers: TickerBySymbol) => void> = new Set();
   private readonly klineHandlerByKey: Map<string, Set<KlineHandler>> = new Map();
@@ -34,10 +36,11 @@ class BinanceFuturesPublicStream {
   private isConnectScheduled = false;
   private subscriptionIdCounter = 1;
 
-  constructor(webSocketCombinedUrl: string, logger: ExchangeLogger, onNotify?: (message: string) => void | Promise<void>) {
-    this.webSocketCombinedUrl = webSocketCombinedUrl;
-    this.logger = logger;
-    this.onNotify = onNotify;
+  constructor(args: BinanceFuturesPublicStreamArgs) {
+    this.webSocketCombinedUrl = args.webSocketCombinedUrl;
+    this.logger = args.logger;
+    this.onNotify = args.onNotify;
+    this.label = args.label;
   }
 
   subscribeAllTickers(handler: (tickers: TickerBySymbol) => void): void {
@@ -84,6 +87,18 @@ class BinanceFuturesPublicStream {
     }
   }
 
+  getConnectionInfoList(): WebSocketConnectionInfo[] {
+    return this.connectionList.map((connection, index) => ({
+      label: this.connectionList.length > 1
+        ? `${this.label} #${index + 1}`
+        : this.label,
+      url: connection.url,
+      isConnected: connection.webSocket.getStatus() === WebSocketStatus.CONNECTED,
+      type: WebSocketConnectionTypeEnum.Public,
+      subscriptionList: this.buildSubscriptionList(connection),
+    }));
+  }
+
   close(): void {
     for (const connection of this.connectionList) {
       connection.webSocket.close();
@@ -125,10 +140,12 @@ class BinanceFuturesPublicStream {
   }
 
   private createConnection(streamList: string[], index: number): void {
-    const label = `BinanceFuturesPublicStream-${index}`;
+    const connectionLabel = this.connectionList.length > 0 || streamList.length >= MAX_STREAMS_PER_CONNECTION
+      ? `${this.label} #${index + 1}`
+      : this.label;
     const url = `${this.webSocketCombinedUrl}?streams=${streamList.join('/')}`;
     const webSocket = new ReliableWebSocket<BinanceCombinedMessage>({
-      label,
+      label: connectionLabel,
       url,
       logger: this.logger,
       parseMessage: (rawData) => parseWebSocketMessage<BinanceCombinedMessage>(rawData),
@@ -139,7 +156,7 @@ class BinanceFuturesPublicStream {
       },
     });
 
-    this.connectionList.push({ webSocket, label, streamList });
+    this.connectionList.push({ webSocket, label: connectionLabel, streamList, url });
   }
 
   private addStreamToConnection(stream: string): void {
@@ -185,6 +202,28 @@ class BinanceFuturesPublicStream {
         break;
       }
     }
+  }
+
+  private buildSubscriptionList(connection: FuturesConnection): string[] {
+    const result: string[] = [];
+
+    for (const stream of connection.streamList) {
+      if (stream === '!miniTicker@arr') {
+        result.push('Tickers');
+
+        continue;
+      }
+
+      const match = stream.match(/^(.+)_perpetual@continuousKline_(.+)$/);
+
+      if (match) {
+        const symbol = match[1].toUpperCase();
+        const interval = resolveUnifiedBinanceInterval(match[2]);
+        result.push(`Klines ${symbol} ${interval}`);
+      }
+    }
+
+    return result;
   }
 
   private handleMessage(message: BinanceCombinedMessage): void {

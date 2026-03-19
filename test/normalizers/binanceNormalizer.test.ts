@@ -187,6 +187,18 @@ describe('normalizeBinanceKlineWebSocketMessage', () => {
     expect(result.takerBuyBaseAssetVolume).toBe(600);
     expect(result.takerBuyQuoteAssetVolume).toBe(39000000);
   });
+
+  it('sets isClosed to true when x is true', () => {
+    const result = normalizeBinanceKlineWebSocketMessage({ ...BINANCE_RAW_WEBSOCKET_KLINE, x: true });
+
+    expect(result.isClosed).toBe(true);
+  });
+
+  it('sets isClosed to false when x is false', () => {
+    const result = normalizeBinanceKlineWebSocketMessage({ ...BINANCE_RAW_WEBSOCKET_KLINE, x: false });
+
+    expect(result.isClosed).toBe(false);
+  });
 });
 
 describe('normalizeBinancePosition', () => {

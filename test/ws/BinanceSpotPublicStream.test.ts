@@ -48,6 +48,7 @@ const MOCK_KLINE_RAW: BinanceWebSocketKlineRaw = {
   n: 1000,
   V: '50',
   Q: '2500000',
+  x: true,
 };
 
 describe('BinanceSpotPublicStream', () => {
@@ -64,7 +65,7 @@ describe('BinanceSpotPublicStream', () => {
   describe('subscribeAllTickers', () => {
     it('creates WebSocket connection with heartbeat', () => {
       const { ReliableWebSocket } = require('@solncebro/websocket-engine');
-      const stream = new BinanceSpotPublicStream(url, mockLogger);
+      const stream = new BinanceSpotPublicStream({ webSocketUrl: url, logger: mockLogger, onNotify: undefined, label: 'BinanceSpotPublicStream' });
 
       stream.subscribeAllTickers(jest.fn());
 
@@ -81,10 +82,9 @@ describe('BinanceSpotPublicStream', () => {
     });
 
     it('sends SUBSCRIBE on open with miniTicker', () => {
-      const stream = new BinanceSpotPublicStream(url, mockLogger);
+      const stream = new BinanceSpotPublicStream({ webSocketUrl: url, logger: mockLogger, onNotify: undefined, label: 'BinanceSpotPublicStream' });
       stream.subscribeAllTickers(jest.fn());
 
-      // handleOpen calls resubscribeAll which subscribes
       capturedOnOpen!({});
 
       expect(mockWebSocket.sendToConnectedSocket).toHaveBeenCalledWith(
@@ -98,7 +98,7 @@ describe('BinanceSpotPublicStream', () => {
 
   describe('subscribeKlines', () => {
     it('uses correct kline stream format without _perpetual', () => {
-      const stream = new BinanceSpotPublicStream(url, mockLogger);
+      const stream = new BinanceSpotPublicStream({ webSocketUrl: url, logger: mockLogger, onNotify: undefined, label: 'BinanceSpotPublicStream' });
       stream.subscribeAllTickers(jest.fn());
 
       stream.subscribeKlines('BTCUSDT', '1m', jest.fn());
@@ -113,7 +113,7 @@ describe('BinanceSpotPublicStream', () => {
 
     it('creates connection if not already connected', () => {
       const { ReliableWebSocket } = require('@solncebro/websocket-engine');
-      const stream = new BinanceSpotPublicStream(url, mockLogger);
+      const stream = new BinanceSpotPublicStream({ webSocketUrl: url, logger: mockLogger, onNotify: undefined, label: 'BinanceSpotPublicStream' });
 
       stream.subscribeKlines('BTCUSDT', '1m', jest.fn());
 
@@ -123,7 +123,7 @@ describe('BinanceSpotPublicStream', () => {
 
   describe('unsubscribeKlines', () => {
     it('sends UNSUBSCRIBE when last handler removed', () => {
-      const stream = new BinanceSpotPublicStream(url, mockLogger);
+      const stream = new BinanceSpotPublicStream({ webSocketUrl: url, logger: mockLogger, onNotify: undefined, label: 'BinanceSpotPublicStream' });
       const handler = jest.fn();
       stream.subscribeAllTickers(jest.fn());
 
@@ -139,7 +139,7 @@ describe('BinanceSpotPublicStream', () => {
     });
 
     it('does nothing when handler set is empty', () => {
-      const stream = new BinanceSpotPublicStream(url, mockLogger);
+      const stream = new BinanceSpotPublicStream({ webSocketUrl: url, logger: mockLogger, onNotify: undefined, label: 'BinanceSpotPublicStream' });
       mockWebSocket.sendToConnectedSocket.mockClear();
 
       stream.unsubscribeKlines('UNKNOWN', '1m', jest.fn());
@@ -150,7 +150,7 @@ describe('BinanceSpotPublicStream', () => {
 
   describe('handleMessage', () => {
     it('handles e: 24hrMiniTicker array messages', () => {
-      const stream = new BinanceSpotPublicStream(url, mockLogger);
+      const stream = new BinanceSpotPublicStream({ webSocketUrl: url, logger: mockLogger, onNotify: undefined, label: 'BinanceSpotPublicStream' });
       const handler = jest.fn();
       stream.subscribeAllTickers(handler);
 
@@ -162,7 +162,7 @@ describe('BinanceSpotPublicStream', () => {
     });
 
     it('handles stream: !miniTicker@arr messages', () => {
-      const stream = new BinanceSpotPublicStream(url, mockLogger);
+      const stream = new BinanceSpotPublicStream({ webSocketUrl: url, logger: mockLogger, onNotify: undefined, label: 'BinanceSpotPublicStream' });
       const handler = jest.fn();
       stream.subscribeAllTickers(handler);
 
@@ -172,7 +172,7 @@ describe('BinanceSpotPublicStream', () => {
     });
 
     it('handles kline messages from stream', () => {
-      const stream = new BinanceSpotPublicStream(url, mockLogger);
+      const stream = new BinanceSpotPublicStream({ webSocketUrl: url, logger: mockLogger, onNotify: undefined, label: 'BinanceSpotPublicStream' });
       const handler = jest.fn();
       stream.subscribeKlines('BTCUSDT', '1m', handler);
 
@@ -185,7 +185,7 @@ describe('BinanceSpotPublicStream', () => {
     });
 
     it('ignores messages without stream or event', () => {
-      const stream = new BinanceSpotPublicStream(url, mockLogger);
+      const stream = new BinanceSpotPublicStream({ webSocketUrl: url, logger: mockLogger, onNotify: undefined, label: 'BinanceSpotPublicStream' });
       const handler = jest.fn();
       stream.subscribeAllTickers(handler);
 
@@ -195,7 +195,7 @@ describe('BinanceSpotPublicStream', () => {
     });
 
     it('logs error when handler throws', () => {
-      const stream = new BinanceSpotPublicStream(url, mockLogger);
+      const stream = new BinanceSpotPublicStream({ webSocketUrl: url, logger: mockLogger, onNotify: undefined, label: 'BinanceSpotPublicStream' });
       const handler = jest.fn().mockImplementation(() => {
         throw new Error('boom');
       });
@@ -209,7 +209,7 @@ describe('BinanceSpotPublicStream', () => {
 
   describe('resubscribeAll', () => {
     it('resubscribes all streams on reconnect', () => {
-      const stream = new BinanceSpotPublicStream(url, mockLogger);
+      const stream = new BinanceSpotPublicStream({ webSocketUrl: url, logger: mockLogger, onNotify: undefined, label: 'BinanceSpotPublicStream' });
       stream.subscribeAllTickers(jest.fn());
       stream.subscribeKlines('BTCUSDT', '1m', jest.fn());
 
@@ -227,7 +227,7 @@ describe('BinanceSpotPublicStream', () => {
 
   describe('close', () => {
     it('closes WebSocket and nullifies', () => {
-      const stream = new BinanceSpotPublicStream(url, mockLogger);
+      const stream = new BinanceSpotPublicStream({ webSocketUrl: url, logger: mockLogger, onNotify: undefined, label: 'BinanceSpotPublicStream' });
       stream.subscribeAllTickers(jest.fn());
 
       stream.close();
@@ -236,7 +236,7 @@ describe('BinanceSpotPublicStream', () => {
     });
 
     it('is safe to call when not connected', () => {
-      const stream = new BinanceSpotPublicStream(url, mockLogger);
+      const stream = new BinanceSpotPublicStream({ webSocketUrl: url, logger: mockLogger, onNotify: undefined, label: 'BinanceSpotPublicStream' });
 
       expect(() => stream.close()).not.toThrow();
     });

@@ -1,12 +1,14 @@
-import { ReliableWebSocket } from '@solncebro/websocket-engine';
+import { ReliableWebSocket, WebSocketStatus } from '@solncebro/websocket-engine';
 
-import type { ExchangeLogger, KlineInterval, TickerBySymbol } from '../types/common';
+import type { ExchangeLogger, KlineInterval, TickerBySymbol, WebSocketConnectionInfo } from '../types/common';
+import { WebSocketConnectionTypeEnum } from '../types/common';
 import type { KlineHandler } from '../types/exchange';
 import { normalizeBybitKlineWebSocketMessage, normalizeBybitTickers } from '../normalizers/bybitNormalizer';
-import type { BybitTickerRaw, BybitWebSocketKlineRaw } from '../normalizers/bybitNormalizer';
+import type { BybitPublicTradeDataRaw, BybitTickerRaw, BybitWebSocketKlineRaw } from '../normalizers/bybitNormalizer';
 import { BYBIT_KLINE_INTERVAL } from '../constants/bybit';
 import { BYBIT_HEARTBEAT_CONFIG, BYBIT_PING_INTERVAL } from './bybitWebSocketUtils';
-import type { BybitWebSocketMessage } from './BybitPublicStream.types';
+import type { BybitPublicStreamArgs, BybitWebSocketMessage } from './BybitPublicStream.types';
+import { TradeToKlineAggregator } from './TradeToKlineAggregator';
 import { parseWebSocketMessage } from './parseWebSocketMessage';
 
 function resolveUnifiedInterval(bybitInterval: string): KlineInterval {
@@ -23,15 +25,19 @@ class BybitPublicStream {
   private webSocket: ReliableWebSocket<BybitWebSocketMessage> | null = null;
   private readonly url: string;
   private readonly logger: ExchangeLogger;
+  private readonly label: string;
   private readonly onNotify?: (message: string) => void | Promise<void>;
   private readonly tickerHandlerSet: Set<(tickers: TickerBySymbol) => void> = new Set();
   private readonly klineHandlerByKey: Map<string, Set<KlineHandler>> = new Map();
   private readonly activeSubscriptionSet: Set<string> = new Set();
+  private tradeAggregator: TradeToKlineAggregator | null = null;
+  private readonly tradeSubscribedSymbolSet: Set<string> = new Set();
 
-  constructor(url: string, logger: ExchangeLogger, onNotify?: (message: string) => void | Promise<void>) {
-    this.url = url;
-    this.logger = logger;
-    this.onNotify = onNotify;
+  constructor(args: BybitPublicStreamArgs) {
+    this.url = args.url;
+    this.logger = args.logger;
+    this.onNotify = args.onNotify;
+    this.label = args.label;
   }
 
   subscribeAllTickers(handler: (tickers: TickerBySymbol) => void): void {
@@ -57,6 +63,34 @@ class BybitPublicStream {
     handlerSet.add(handler);
     this.klineHandlerByKey.set(key, handlerSet);
 
+    if (interval === '1s') {
+      const topic = `publicTrade.${symbol}`;
+      this.activeSubscriptionSet.add(topic);
+      this.tradeSubscribedSymbolSet.add(symbol);
+
+      if (this.tradeAggregator === null) {
+        this.tradeAggregator = new TradeToKlineAggregator(this.logger);
+        this.tradeAggregator.setHandler((tradeSymbol, kline) => {
+          const tradeKey = `${tradeSymbol}_1s`;
+          const tradeHandlerSet = this.klineHandlerByKey.get(tradeKey);
+
+          if (tradeHandlerSet) {
+            for (const h of tradeHandlerSet) {
+              h(tradeSymbol, kline);
+            }
+          }
+        });
+      }
+
+      if (this.webSocket !== null) {
+        this.sendSubscribe([topic]);
+      } else {
+        this.ensureConnected();
+      }
+
+      return;
+    }
+
     const bybitInterval = BYBIT_KLINE_INTERVAL[interval];
     const topic = `kline.${bybitInterval}.${symbol}`;
     this.activeSubscriptionSet.add(topic);
@@ -81,6 +115,27 @@ class BybitPublicStream {
     if (handlerSet.size === 0) {
       this.klineHandlerByKey.delete(key);
 
+      if (interval === '1s') {
+        const topic = `publicTrade.${symbol}`;
+        this.activeSubscriptionSet.delete(topic);
+        this.tradeSubscribedSymbolSet.delete(symbol);
+
+        if (this.tradeAggregator !== null) {
+          this.tradeAggregator.clearSymbol(symbol);
+
+          if (this.tradeSubscribedSymbolSet.size === 0) {
+            this.tradeAggregator.forceEmitPendingKlineList();
+            this.tradeAggregator = null;
+          }
+        }
+
+        if (this.webSocket !== null) {
+          this.sendUnsubscribe([topic]);
+        }
+
+        return;
+      }
+
       const bybitInterval = BYBIT_KLINE_INTERVAL[interval];
       const topic = `kline.${bybitInterval}.${symbol}`;
       this.activeSubscriptionSet.delete(topic);
@@ -91,7 +146,44 @@ class BybitPublicStream {
     }
   }
 
+  getConnectionInfoList(): WebSocketConnectionInfo[] {
+    if (this.webSocket === null) {
+      return [];
+    }
+
+    const subscriptionList: string[] = [];
+
+    if (this.tickerHandlerSet.size > 0) {
+      subscriptionList.push('Tickers');
+    }
+
+    for (const key of this.klineHandlerByKey.keys()) {
+      const separatorIndex = key.lastIndexOf('_');
+      const symbol = key.slice(0, separatorIndex);
+      const interval = key.slice(separatorIndex + 1);
+
+      if (interval === '1s') {
+        subscriptionList.push(`Trades ${symbol}`);
+      } else {
+        subscriptionList.push(`Klines ${symbol} ${interval}`);
+      }
+    }
+
+    return [{
+      label: this.label,
+      url: this.url,
+      isConnected: this.webSocket.getStatus() === WebSocketStatus.CONNECTED,
+      type: WebSocketConnectionTypeEnum.Public,
+      subscriptionList,
+    }];
+  }
+
   close(): void {
+    if (this.tradeAggregator !== null) {
+      this.tradeAggregator.forceEmitPendingKlineList();
+      this.tradeAggregator = null;
+    }
+
     if (this.webSocket !== null) {
       this.webSocket.close();
 
@@ -105,7 +197,7 @@ class BybitPublicStream {
     }
 
     this.webSocket = new ReliableWebSocket<BybitWebSocketMessage>({
-      label: 'BybitPublicStream',
+      label: this.label,
       url: this.url,
       logger: this.logger,
       parseMessage: (rawData) => parseWebSocketMessage<BybitWebSocketMessage>(rawData),
@@ -124,9 +216,9 @@ class BybitPublicStream {
   private handleMessage(message: BybitWebSocketMessage): void {
     if (message.op === 'subscribe' || message.op === 'unsubscribe') {
       if (message.success) {
-        this.logger.debug(`Bybit subscription successful: ${message.op}`);
+        this.logger.debug({ operation: message.op }, 'Bybit subscription successful');
       } else {
-        this.logger.error(`Bybit subscription error: ${JSON.stringify(message)}`);
+        this.logger.error({ subscriptionMessage: message }, 'Bybit subscription error');
       }
 
       return;
@@ -149,11 +241,27 @@ class BybitPublicStream {
         return;
       }
 
+      if (topic.startsWith('publicTrade.')) {
+        this.handleTradeMessage(message.data as BybitPublicTradeDataRaw[]);
+
+        return;
+      }
+
       if (topic.startsWith('kline.')) {
         this.handleKlineMessage(topic, message.data as BybitWebSocketKlineRaw[]);
       }
     } catch (error) {
-      this.logger.error(`BybitPublicStream: error handling message for topic ${topic}: ${error instanceof Error ? error.message : String(error)}`);
+      this.logger.error({ topic, error }, 'BybitPublicStream: error handling message');
+    }
+  }
+
+  private handleTradeMessage(dataList: BybitPublicTradeDataRaw[]): void {
+    if (this.tradeAggregator === null) {
+      return;
+    }
+
+    for (const tradeData of dataList) {
+      this.tradeAggregator.processTrade(tradeData);
     }
   }
 
@@ -182,6 +290,12 @@ class BybitPublicStream {
   }
 
   private resubscribeAll(): void {
+    if (this.tradeAggregator !== null) {
+      for (const symbol of this.tradeSubscribedSymbolSet) {
+        this.tradeAggregator.clearSymbol(symbol);
+      }
+    }
+
     const topicList = Array.from(this.activeSubscriptionSet);
 
     if (topicList.length > 0) {

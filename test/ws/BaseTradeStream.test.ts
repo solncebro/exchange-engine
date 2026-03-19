@@ -19,7 +19,6 @@ jest.mock('@solncebro/websocket-engine', () => {
 });
 
 class TestTradeStream extends BaseTradeStream<any> {
-  protected readonly label = 'TestTradeStream';
   public initConnectionMock = jest.fn();
   public buildOrderRequestMock = jest.fn().mockReturnValue({ test: true });
 
@@ -36,6 +35,7 @@ class TestTradeStream extends BaseTradeStream<any> {
 function createStream(overrides?: Partial<BaseTradeStreamArgs>): TestTradeStream {
   return new TestTradeStream({
     url: 'wss://test.com/ws',
+    label: 'TestTradeStream',
     apiKey: 'testKey',
     secret: 'testSecret',
     logger: createMockLogger(),

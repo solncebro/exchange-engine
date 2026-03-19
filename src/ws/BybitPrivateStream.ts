@@ -1,7 +1,8 @@
 import { ReliableWebSocket } from '@solncebro/websocket-engine';
 import type { WebSocketOpenContext } from '@solncebro/websocket-engine';
 
-import type { ExchangeLogger } from '../types/common';
+import type { ExchangeLogger, WebSocketConnectionInfo } from '../types/common';
+import { WebSocketConnectionTypeEnum } from '../types/common';
 import { BYBIT_PRIVATE_WEBSOCKET_URL } from '../constants/bybit';
 import {
   BYBIT_HEARTBEAT_CONFIG,
@@ -14,6 +15,7 @@ import { parseWebSocketMessage } from './parseWebSocketMessage';
 class BybitPrivateStream {
   private webSocket: ReliableWebSocket<BybitPrivateMessage> | null = null;
   private readonly logger: ExchangeLogger;
+  private readonly label: string;
   private readonly apiKey: string;
   private readonly secret: string;
   private readonly onNotify?: (message: string) => void | Promise<void>;
@@ -21,6 +23,7 @@ class BybitPrivateStream {
 
   constructor(args: BybitPrivateStreamArgs) {
     this.logger = args.logger;
+    this.label = args.label;
     this.apiKey = args.apiKey;
     this.secret = args.secret;
     this.onNotify = args.onNotify;
@@ -33,7 +36,7 @@ class BybitPrivateStream {
     }
 
     this.webSocket = new ReliableWebSocket<BybitPrivateMessage>({
-      label: 'BybitPrivateStream',
+      label: this.label,
       url: BYBIT_PRIVATE_WEBSOCKET_URL,
       logger: this.logger,
       parseMessage: (rawData) => parseWebSocketMessage<BybitPrivateMessage>(rawData),
@@ -54,12 +57,26 @@ class BybitPrivateStream {
     }
   }
 
+  getConnectionInfo(): WebSocketConnectionInfo | null {
+    if (this.webSocket === null) {
+      return null;
+    }
+
+    return {
+      label: this.label,
+      url: BYBIT_PRIVATE_WEBSOCKET_URL,
+      isConnected: true,
+      type: WebSocketConnectionTypeEnum.UserData,
+      subscriptionList: [],
+    };
+  }
+
   isConnected(): boolean {
     return this.webSocket !== null;
   }
 
   private async authenticate(context: WebSocketOpenContext<BybitPrivateMessage>): Promise<void> {
-    await authenticateBybitWebSocket({ context, apiKey: this.apiKey, secret: this.secret, label: 'BybitPrivateStream', logger: this.logger });
+    await authenticateBybitWebSocket({ context, apiKey: this.apiKey, secret: this.secret, label: this.label, logger: this.logger });
   }
 
   private handleMessage(message: BybitPrivateMessage): void {

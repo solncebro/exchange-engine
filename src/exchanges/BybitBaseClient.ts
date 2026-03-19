@@ -6,6 +6,7 @@ import type {
   TickerBySymbol,
   BalanceByAsset,
   Order,
+  WebSocketConnectionInfo,
 } from '../types/common';
 import { OrderTypeEnum, OrderSideEnum } from '../types/common';
 import type { PublicStreamLike } from '../types/stream';
@@ -52,17 +53,19 @@ abstract class BybitBaseClient extends BaseExchangeClient {
       httpsAgent: args.exchangeArgs.config.httpsAgent,
     });
 
-    this.publicStream = new BybitPublicStream(
-      args.publicWebSocketUrl,
-      args.exchangeArgs.logger,
-      args.exchangeArgs.onNotify,
-    );
+    this.publicStream = new BybitPublicStream({
+      url: args.publicWebSocketUrl,
+      logger: args.exchangeArgs.logger,
+      onNotify: args.exchangeArgs.onNotify,
+      label: args.publicStreamLabel,
+    });
 
     if (isDemoMode) {
       this.tradeStream = null;
     } else {
       this.tradeStream = new BybitTradeStream({
         url: BYBIT_TRADE_WEBSOCKET_URL,
+        label: args.tradeStreamLabel,
         apiKey: args.exchangeArgs.config.apiKey,
         secret: args.exchangeArgs.config.secret,
         logger: args.exchangeArgs.logger,
@@ -175,6 +178,20 @@ abstract class BybitBaseClient extends BaseExchangeClient {
     const raw = await this.httpClient.createOrder(orderParams);
 
     return buildBybitOrderFromCreateResponse(args, raw.result.orderId);
+  }
+
+  getWebSocketConnectionInfoList(): WebSocketConnectionInfo[] {
+    const result = [...this.publicStream.getConnectionInfoList()];
+
+    if (this.tradeStream !== null) {
+      const tradeInfo = this.tradeStream.getConnectionInfo();
+
+      if (tradeInfo !== null) {
+        result.push(tradeInfo);
+      }
+    }
+
+    return result;
   }
 
   async close(): Promise<void> {

@@ -10,6 +10,7 @@ import type {
   Position,
   FundingRateHistory,
   FundingInfo,
+  WebSocketConnectionInfo,
 } from './common';
 import {
   MarginModeEnum,
@@ -87,6 +88,7 @@ export interface ExchangeClient {
   fetchOrderHistory(symbol: string, options?: FetchPageWithLimitArgs): Promise<Order[]>;
   isTradeWebSocketConnected(): boolean;
   connectTradeWebSocket(): Promise<void>;
+  getWebSocketConnectionInfoList(): WebSocketConnectionInfo[];
   close(): Promise<void>;
 
   watchTickers(): AsyncGenerator<TickerBySymbol>;

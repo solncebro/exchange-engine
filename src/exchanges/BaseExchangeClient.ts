@@ -17,6 +17,7 @@ import type {
   Order,
   FundingRateHistory,
   FundingInfo,
+  WebSocketConnectionInfo,
 } from '../types/common';
 import { MarginModeEnum, PositionModeEnum } from '../types/common';
 import type { PublicStreamLike } from '../types/stream';
@@ -178,6 +179,7 @@ abstract class BaseExchangeClient implements ExchangeClient {
     return tradeSymbol;
   }
 
+  abstract getWebSocketConnectionInfoList(): WebSocketConnectionInfo[];
   abstract isTradeWebSocketConnected(): boolean;
   abstract connectTradeWebSocket(): Promise<void>;
 

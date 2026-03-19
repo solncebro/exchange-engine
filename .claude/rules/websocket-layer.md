@@ -10,6 +10,7 @@
 subscribeAllTickers(handler: (tickers: TickerBySymbol) => void): void
 subscribeKlines(symbol, interval, handler): void
 unsubscribeKlines(symbol, interval, handler): void
+getConnectionInfoList(): WebSocketConnectionInfo[]
 close(): void
 ```
 
@@ -17,6 +18,21 @@ close(): void
 
 - **Тикеры**: `Set<Handler>` — все хендлеры получают одни и те же данные
 - **Klines**: `Map<"SYMBOL_INTERVAL", Set<Handler>>` — группировка по стриму
+
+## WebSocket Connection Registry
+
+Все стримы реализуют `getConnectionInfoList()` или `getConnectionInfo()`, возвращающие `WebSocketConnectionInfo`:
+- `label` — человекочитаемый лейбл: `[Binance Futures] Public`, `[Bybit Linear] Public`, `[Binance Spot] Orders` и т.д.
+- `url` — URL WebSocket-соединения
+- `isConnected` — текущее состояние (через `WebSocketStatus.CONNECTED`)
+- `type` — `WebSocketConnectionTypeEnum` (Public / Trade / UserData)
+- `subscriptionList` — список подписок: `'Tickers'`, `'Klines BTCUSDT 30m'`, `'Trades ETHUSDT'`, или `[]` для trade/userData стримов
+
+Лейблы передаются в стримы через конструктор (Args-паттерн), формируются в exchange-классах.
+
+BinanceFuturesPublicStream при нескольких connections нумерует: `#1`, `#2`, `#3`.
+
+Exchange-классы агрегируют через `getWebSocketConnectionInfoList()`: public + trade + optional userData.
 
 ## Binance Futures Public Stream
 
@@ -43,10 +59,21 @@ close(): void
 - **URL**: `wss://stream.bybit.com/v5/public/linear` или `.../spot`
 - **Одно соединение**, lazy-initialized через `ensureConnected()`
 - **Kline topic**: `kline.{bybitInterval}.{symbol}` (интервал конвертируется через `BYBIT_KLINE_INTERVAL`)
+- **1s kline**: через `TradeToKlineAggregator` — подписка на `publicTrade.{symbol}`, агрегация трейдов в 1-секундные свечи
 - **Тикер topic**: `tickers.linear` или `tickers.spot` (определяется по URL)
 - **Подписка**: `{ op: 'subscribe', args: [topicList] }`
-- **Reconnect**: `onReconnectSuccess → resubscribeAll()` из `activeSubscriptionSet`
+- **Reconnect**: `onReconnectSuccess → resubscribeAll()` из `activeSubscriptionSet`, `tradeAggregator.clearSymbol()` для всех подписанных символов
 - **Heartbeat**: `{ op: 'ping' }` → `{ op: 'pong' }`, интервал 20s
+
+## TradeToKlineAggregator (src/ws/TradeToKlineAggregator.ts)
+
+Агрегирует Bybit public trade данные в 1-секундные klines:
+- `setHandler(handler)` — устанавливает callback для эмита klines
+- `processTrade(tradeData)` — обрабатывает один трейд: первый трейд для символа пропускается (неполная секунда), далее агрегация OHLCV
+- `forceEmitPendingKlineList()` — принудительно эмитит все накопленные klines (вызывается при `close()`)
+- `clearSymbol(symbol)` — сбрасывает состояние символа (вызывается при reconnect)
+- Эмитит kline с `isClosed: true` при переходе на следующую секунду
+- Не эмитит kline с `volume = 0` (секунда без трейдов)
 
 ## Binance User Data Stream
 
@@ -54,6 +81,7 @@ close(): void
 - listenKey получается внешне (REST API), передаётся в конструкторе
 - Все сообщения передаются в `onMessage` хендлер без фильтрации
 - **listenKey refresh** НЕ управляется этим классом — ответственность вызывающего (каждые 30 мин)
+- `getConnectionInfo()` → `WebSocketConnectionInfo | null` — возвращает null если не подключён
 
 ## BaseTradeStream<T> (src/ws/BaseTradeStream.ts)
 
@@ -62,14 +90,16 @@ close(): void
 Общая инфраструктура:
 - `connect()` / `disconnect()` / `isConnected()` — управление жизненным циклом
 - `createOrder(orderParams)` → `Promise<Order>` — async request-response
+- `getConnectionInfo()` → `WebSocketConnectionInfo | null` — info о текущем соединении
 - `ensureConnected()` — lazy connection с dedup промисов
 - `sendOrderRequest(request, requestId)` — timeout 30s, pending requests в `Map<reqId, PendingRequest>`
 - `takePendingRequest(requestId)` — protected метод, возвращает и удаляет pending request из Map
 
+`label` передаётся через `BaseTradeStreamArgs` (не абстрактное свойство).
+
 Абстрактные методы (реализуются подклассами):
 - `initConnection()` — создание WebSocket и подключение
 - `buildOrderRequest(orderParams, requestId)` — формирование запроса
-- `label` — имя для логирования
 
 ## Binance Trade Stream
 
@@ -112,6 +142,7 @@ function parseWebSocketMessage<T>(rawData: RawData): T
 - Аутентификация на каждый `onOpen` через `authenticateBybitWebSocket()`
 - Фильтрует `message.op === 'auth'` — не передаёт в хендлер
 - **Heartbeat**: `{ op: 'ping' }`, интервал 20s
+- `getConnectionInfo()` → `WebSocketConnectionInfo | null` — возвращает null если не подключён
 
 ## Error Protection
 
@@ -129,11 +160,12 @@ Bybit конвертирует через маппинг `BYBIT_KLINE_INTERVAL`:
 
 Типы вынесены в co-located `.types.ts` файлы:
 - `BaseTradeStream.types.ts` — BaseTradeStreamArgs, PendingRequest
-- `BinanceFuturesPublicStream.types.ts` — BinanceCombinedMessage, FuturesConnection
-- `BinanceSpotPublicStream.types.ts` — BinanceSpotWebSocketEnvelope
+- `BinanceFuturesPublicStream.types.ts` — BinanceFuturesPublicStreamArgs, BinanceCombinedMessage, FuturesConnection
+- `BinanceSpotPublicStream.types.ts` — BinanceSpotPublicStreamArgs, BinanceSpotWebSocketEnvelope
 - `BinanceUserDataStream.types.ts` — BinanceUserDataStreamArgs
 - `BinanceTradeStream.types.ts` — BinanceTradeWebSocketResponse, BinanceWebSocketError
-- `BybitPublicStream.types.ts` — BybitWebSocketMessage
+- `BybitPublicStream.types.ts` — BybitPublicStreamArgs, BybitWebSocketMessage
+- `TradeToKlineAggregator.types.ts` — AggregatedKline
 - `BybitPrivateStream.types.ts` — BybitPrivateMessage, BybitPrivateStreamArgs
 - `BybitTradeStream.types.ts` — BybitTradeMessage
 - `bybitWebSocketUtils.types.ts` — BybitBaseWebSocketMessage, AuthenticateBybitWebSocketArgs

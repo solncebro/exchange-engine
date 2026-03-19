@@ -60,6 +60,7 @@ export const BINANCE_RAW_WEBSOCKET_KLINE: BinanceWebSocketKlineRaw = {
   n: 5000,
   V: '600.00',
   Q: '39000000.00',
+  x: true,
 };
 
 export const BINANCE_RAW_POSITION_RISK: BinancePositionRiskRaw = {

@@ -1,4 +1,5 @@
 import type { ExchangeClient, ExchangeArgs } from '../types/exchange';
+import type { WebSocketConnectionInfo } from '../types/common';
 import { ExchangeNameEnum } from '../types/common';
 import { BinanceFutures } from './BinanceFutures';
 import { BinanceSpot } from './BinanceSpot';
@@ -24,6 +25,13 @@ class Exchange {
 
       throw new Error(`Unknown exchange: ${exhaustiveCheck}`);
     }
+  }
+
+  getWebSocketConnectionInfoList(): WebSocketConnectionInfo[] {
+    return [
+      ...this.futures.getWebSocketConnectionInfoList(),
+      ...this.spot.getWebSocketConnectionInfoList(),
+    ];
   }
 
   async close(): Promise<void> {

@@ -34,7 +34,8 @@ Exchange (фабрика)
 │   ├── BinanceFuturesPublicStream — klines + тикеры (combined stream)
 │   ├── BinanceSpotPublicStream — klines + тикеры (динамические подписки)
 │   ├── BinanceUserDataStream — listenKey user data
-│   ├── BybitPublicStream — klines + тикеры (topic-based)
+│   ├── BybitPublicStream — klines + тикеры (topic-based), 1s klines через TradeToKlineAggregator
+│   ├── TradeToKlineAggregator — агрегация трейдов в 1-секундные klines
 │   ├── BybitPrivateStream — приватные события
 │   ├── BaseTradeStream<T> — абстрактная база для trade WS
 │   │   ├── BinanceTradeStream — ордера через WS (Binance spot + futures)
@@ -46,7 +47,7 @@ Exchange (фабрика)
 │   └── bybitAuth.ts — HMAC-SHA256 header signing
 │
 ├── Типы (src/types/)
-│   ├── common.ts — все enum, interface, type (Ticker, Kline, Position, Order...)
+│   ├── common.ts — все enum, interface, type (Ticker, Kline, Position, Order, WebSocketConnectionInfo...)
 │   ├── exchange.ts — ExchangeClient интерфейс + args types
 │   └── stream.ts — PublicStreamLike интерфейс
 │
@@ -84,6 +85,7 @@ Exchange (фабрика)
 const exchange = new Exchange(ExchangeNameEnum.Binance, { config, logger });
 exchange.futures  // → BinanceFutures (ExchangeClient)
 exchange.spot     // → BinanceSpot (ExchangeClient)
+exchange.getWebSocketConnectionInfoList()  // → все WS-соединения (futures + spot)
 exchange.close()  // → закрывает оба
 ```
 

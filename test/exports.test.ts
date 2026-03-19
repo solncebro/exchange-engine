@@ -12,5 +12,10 @@ describe('export contract', () => {
     expect(api.TimeInForceEnum).toBeDefined();
     expect(api.PositionModeEnum).toBeDefined();
     expect(api.WorkingTypeEnum).toBeDefined();
+    expect(api.MarketTypeEnum).toBeDefined();
+    expect(api.WebSocketConnectionTypeEnum).toBeDefined();
+    expect(api.MARKET_TYPE_LIST).toEqual(['futures', 'spot']);
+    expect(api.normalizeBybitKlineWebSocketMessage).toBeInstanceOf(Function);
+    expect(api.normalizeBinanceKlineWebSocketMessage).toBeInstanceOf(Function);
   });
 });

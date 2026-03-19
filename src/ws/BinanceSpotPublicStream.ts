@@ -1,27 +1,30 @@
-import { ReliableWebSocket } from '@solncebro/websocket-engine';
+import { ReliableWebSocket, WebSocketStatus } from '@solncebro/websocket-engine';
 import type { WebSocketOpenContext } from '@solncebro/websocket-engine';
 
-import type { ExchangeLogger, KlineInterval, TickerBySymbol } from '../types/common';
+import type { ExchangeLogger, KlineInterval, TickerBySymbol, WebSocketConnectionInfo } from '../types/common';
+import { WebSocketConnectionTypeEnum } from '../types/common';
 import type { KlineHandler } from '../types/exchange';
 import { normalizeBinanceKlineWebSocketMessage, normalizeBinanceTickers } from '../normalizers/binanceNormalizer';
 import type { BinanceTicker24hrRaw, BinanceWebSocketKlineRaw } from '../normalizers/binanceNormalizer';
 import { resolveUnifiedBinanceInterval } from './binanceWebSocketUtils';
-import type { BinanceSpotWebSocketEnvelope } from './BinanceSpotPublicStream.types';
+import type { BinanceSpotPublicStreamArgs, BinanceSpotWebSocketEnvelope } from './BinanceSpotPublicStream.types';
 import { parseWebSocketMessage } from './parseWebSocketMessage';
 
 class BinanceSpotPublicStream {
   private webSocket: ReliableWebSocket<BinanceSpotWebSocketEnvelope> | null = null;
   private readonly webSocketUrl: string;
   private readonly logger: ExchangeLogger;
+  private readonly label: string;
   private readonly onNotify?: (message: string) => void | Promise<void>;
   private readonly tickerHandlerSet: Set<(tickers: TickerBySymbol) => void> = new Set();
   private readonly klineHandlerByKey: Map<string, Set<KlineHandler>> = new Map();
   private subscriptionIdCounter = 1;
 
-  constructor(webSocketUrl: string, logger: ExchangeLogger, onNotify?: (message: string) => void | Promise<void>) {
-    this.webSocketUrl = webSocketUrl;
-    this.logger = logger;
-    this.onNotify = onNotify;
+  constructor(args: BinanceSpotPublicStreamArgs) {
+    this.webSocketUrl = args.webSocketUrl;
+    this.logger = args.logger;
+    this.onNotify = args.onNotify;
+    this.label = args.label;
   }
 
   subscribeAllTickers(handler: (tickers: TickerBySymbol) => void): void {
@@ -70,6 +73,33 @@ class BinanceSpotPublicStream {
     }
   }
 
+  getConnectionInfoList(): WebSocketConnectionInfo[] {
+    if (this.webSocket === null) {
+      return [];
+    }
+
+    const subscriptionList: string[] = [];
+
+    if (this.tickerHandlerSet.size > 0) {
+      subscriptionList.push('Tickers');
+    }
+
+    for (const key of this.klineHandlerByKey.keys()) {
+      const separatorIndex = key.lastIndexOf('_');
+      const symbol = key.slice(0, separatorIndex);
+      const interval = key.slice(separatorIndex + 1);
+      subscriptionList.push(`Klines ${symbol} ${interval}`);
+    }
+
+    return [{
+      label: this.label,
+      url: this.webSocketUrl,
+      isConnected: this.webSocket.getStatus() === WebSocketStatus.CONNECTED,
+      type: WebSocketConnectionTypeEnum.Public,
+      subscriptionList,
+    }];
+  }
+
   close(): void {
     if (this.webSocket !== null) {
       this.webSocket.close();
@@ -84,7 +114,7 @@ class BinanceSpotPublicStream {
     }
 
     this.webSocket = new ReliableWebSocket<BinanceSpotWebSocketEnvelope>({
-      label: 'BinanceSpotPublicStream',
+      label: this.label,
       url: this.webSocketUrl,
       logger: this.logger,
       parseMessage: (rawData) => parseWebSocketMessage<BinanceSpotWebSocketEnvelope>(rawData),

@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-03-18
+
+### Breaking Changes
+- `BinanceWebSocketKlineRaw.x` — field is now required (`boolean` instead of `boolean | undefined`)
+- `PublicStreamLike`: added required method `getConnectionInfoList()` — consumers with custom implementations must implement it
+- `ExchangeClient`: added required method `getWebSocketConnectionInfoList()` — consumers with custom implementations must implement it
+- Public stream constructors (`BinanceFuturesPublicStream`, `BinanceSpotPublicStream`, `BybitPublicStream`) now accept an Args object instead of positional arguments
+
+### Added
+- WebSocket Connection Registry — `getWebSocketConnectionInfoList()` on `ExchangeClient` and `Exchange` for querying active WebSocket connections, their status, and subscriptions
+- `WebSocketConnectionTypeEnum` (Public, Trade, UserData) and `WebSocketConnectionInfo` types
+- Human-readable labels for all WebSocket connections: `[Binance Futures] Public`, `[Bybit Linear] Public`, `[Binance Spot] Orders`, etc.
+- `getConnectionInfoList()` on all public streams, `getConnectionInfo()` on trade/userData/private streams
+- 1-second klines for Bybit via `TradeToKlineAggregator` — trade aggregation in `BybitPublicStream`
+- `Kline.isClosed?: boolean` — kline close status from WebSocket
+- `KlineInterval` — added `'1s'` literal
+- `MarketTypeEnum` enum (Futures, Spot) and `MARKET_TYPE_LIST` constant
+- Exported raw types: `BybitWebSocketKlineRaw`, `BybitPublicTradeDataRaw`, `BybitWebSocketMessageRaw`, `BybitKlineMessageRaw`, `BybitTradeMessageRaw`, `BinanceWebSocketKlineRaw`, `BinanceContinuousKlineMessageRaw`
+- Exported normalizer functions: `normalizeBybitKlineWebSocketMessage`, `normalizeBinanceKlineWebSocketMessage`
+
+### Fixed
+- `normalizeBinanceKlineWebSocketMessage`: removed incorrect `?? true` fallback for `isClosed`
+
 ## [0.4.2] - 2026-03-15
 
 ### Breaking Changes
@@ -181,6 +204,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Private endpoints (balance, position, orders) require valid credentials
 - WebSocket subscriptions are stateless and can be re-established on reconnect
 
+[0.5.0]: https://github.com/solncebro/exchange-engine/releases/tag/v0.5.0
+[0.4.2]: https://github.com/solncebro/exchange-engine/releases/tag/v0.4.2
 [0.4.1]: https://github.com/solncebro/exchange-engine/releases/tag/v0.4.1
 [0.4.0]: https://github.com/solncebro/exchange-engine/releases/tag/v0.4.0
 [0.3.3]: https://github.com/solncebro/exchange-engine/releases/tag/v0.3.3

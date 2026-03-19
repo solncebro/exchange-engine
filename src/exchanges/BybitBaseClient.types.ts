@@ -4,4 +4,6 @@ export interface BybitBaseClientArgs {
   exchangeArgs: ExchangeArgs;
   category: string;
   publicWebSocketUrl: string;
+  publicStreamLabel: string;
+  tradeStreamLabel: string;
 }

@@ -14,7 +14,13 @@ class BybitSpot extends BybitBaseClient {
     const isDemoMode = args.config.isDemoMode === true;
     const publicWebSocketUrl = isDemoMode ? BYBIT_DEMO_PUBLIC_SPOT_WEBSOCKET_URL : BYBIT_PUBLIC_SPOT_WEBSOCKET_URL;
 
-    super({ exchangeArgs: args, category: 'spot', publicWebSocketUrl });
+    super({
+      exchangeArgs: args,
+      category: 'spot',
+      publicWebSocketUrl,
+      publicStreamLabel: '[Bybit Spot] Public',
+      tradeStreamLabel: '[Bybit] Orders',
+    });
   }
 
   async createOrderWebSocket(args: CreateOrderWebSocketArgs): Promise<Order> {

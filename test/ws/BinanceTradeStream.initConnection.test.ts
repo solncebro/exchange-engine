@@ -38,7 +38,7 @@ describe('BinanceTradeStream', () => {
   describe('initConnection', () => {
     it('creates ReliableWebSocket and resolves on open', async () => {
       const { ReliableWebSocket } = require('@solncebro/websocket-engine');
-      const stream = new BinanceTradeStream({ url, logger: mockLogger, apiKey, secret });
+      const stream = new BinanceTradeStream({ url, label: '[Binance] Trade stream', logger: mockLogger, apiKey, secret });
 
       await stream.connect();
 
@@ -54,7 +54,7 @@ describe('BinanceTradeStream', () => {
   describe('buildOrderRequest', () => {
     it('returns signed order request with id and method', async () => {
       jest.spyOn(Date, 'now').mockReturnValue(1700000000000);
-      const stream = new BinanceTradeStream({ url, logger: mockLogger, apiKey, secret });
+      const stream = new BinanceTradeStream({ url, label: '[Binance] Trade stream', logger: mockLogger, apiKey, secret });
 
       const request = (stream as any).buildOrderRequest(
         { symbol: 'BTCUSDT', side: 'BUY', type: 'MARKET', quantity: '0.001' },

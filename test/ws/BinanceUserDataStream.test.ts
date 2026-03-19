@@ -29,6 +29,7 @@ describe('BinanceUserDataStream', () => {
   function createStream(onMessage = jest.fn()) {
     return {
       stream: new BinanceUserDataStream({
+        label: 'BinanceUserDataStream',
         listenKey: 'testListenKey123',
         baseWebSocketUrl: 'wss://stream.binance.com:9443/ws',
         logger: mockLogger,

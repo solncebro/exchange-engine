@@ -57,6 +57,9 @@ Precision:
   subscribeKlines(args): void
   unsubscribeKlines(args): void
 
+WebSocket Registry:
+  getWebSocketConnectionInfoList(): WebSocketConnectionInfo[]
+
 Жизненный цикл:
   close(): Promise<void>
 ```
@@ -80,6 +83,7 @@ Precision:
 - `protected fetchAndNormalizeTickers(): Promise<TickerBySymbol>`
 - `protected fetchAndNormalizeKlines(symbol, interval, options?): Promise<Kline[]>`
 - `protected fetchAndNormalizeBalance(): Promise<BalanceByAsset>`
+- `getWebSocketConnectionInfoList(): WebSocketConnectionInfo[]`
 - `isTradeWebSocketConnected(): boolean`
 - `connectTradeWebSocket(): Promise<void>`
 - `createOrderWebSocket()`
@@ -112,6 +116,8 @@ Precision:
 
 Реализует `isTradeWebSocketConnected()` и `connectTradeWebSocket()` через `BinanceTradeStream`.
 
+Реализует `getWebSocketConnectionInfoList()` — агрегирует `publicStream.getConnectionInfoList()` + `tradeStream.getConnectionInfo()` + optional `userDataStream.getConnectionInfo()`.
+
 ## Конкретные классы — отличия
 
 ### BinanceFutures
@@ -137,6 +143,8 @@ Precision:
 4. Иначе fallback: `httpClient.createOrder()` → `buildBybitOrderFromCreateResponse()`
 
 Реализует `isTradeWebSocketConnected()` и `connectTradeWebSocket()` через `BybitTradeStream`.
+
+Реализует `getWebSocketConnectionInfoList()` — агрегирует `publicStream.getConnectionInfoList()` + optional `tradeStream.getConnectionInfo()`.
 
 В demo mode `tradeStream = null` — все ордера через REST.
 

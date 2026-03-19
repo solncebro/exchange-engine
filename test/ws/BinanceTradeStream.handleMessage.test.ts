@@ -26,7 +26,7 @@ describe('BinanceTradeStream.handleMessage', () => {
 
   beforeEach(() => {
     jest.useFakeTimers();
-    stream = new BinanceTradeStream({ url, logger: mockLogger, apiKey, secret });
+    stream = new BinanceTradeStream({ url, label: '[Binance] Trade stream', logger: mockLogger, apiKey, secret });
   });
 
   afterEach(() => {

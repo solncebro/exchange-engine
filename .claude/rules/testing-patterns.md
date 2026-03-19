@@ -245,5 +245,6 @@ class TestTradeStream extends BaseTradeStream<any> {
 | BinanceTradeStream.initConnection.test.ts | connection creation, buildOrderRequest signing |
 | BybitTradeStream.handleMessage.test.ts | dual format responses, auth filtering |
 | BybitTradeStream.initConnection.test.ts | connection with auth, buildOrderRequest format |
+| TradeToKlineAggregator.test.ts | processTrade aggregation, forceEmit, clearSymbol, first-trade skip |
 | parseWebSocketMessage.test.ts | JSON parsing, error handling |
 | bybitWebSocketUtils.test.ts | pong detection, HMAC authentication |

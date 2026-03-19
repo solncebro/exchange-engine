@@ -8,6 +8,7 @@ export type {
   TradeSymbolTypeEnum,
   TimeInForceEnum,
   WorkingTypeEnum,
+  WebSocketConnectionTypeEnum,
   KlineInterval,
   ExchangeConfig,
   ExchangeLogger,
@@ -23,6 +24,7 @@ export type {
   BalanceByAsset,
   FundingRateHistory,
   FundingInfo,
+  WebSocketConnectionInfo,
 } from './common';
 
 export type {

@@ -1,4 +1,4 @@
-import type { BybitTickerRaw, BybitWebSocketKlineRaw } from '../../src/normalizers/bybitNormalizer';
+import type { BybitPublicTradeDataRaw, BybitTickerRaw, BybitWebSocketKlineRaw } from '../../src/normalizers/bybitNormalizer';
 import { BybitPublicStream } from '../../src/ws/BybitPublicStream';
 import { createMockLogger } from '../fixtures/mockLogger';
 
@@ -56,7 +56,7 @@ describe('BybitPublicStream', () => {
 
   describe('subscribeAllTickers', () => {
     it('resolves topic as tickers.linear for linear URL', () => {
-      const stream = new BybitPublicStream('wss://stream.bybit.com/v5/public/linear', mockLogger);
+      const stream = new BybitPublicStream({ url: 'wss://stream.bybit.com/v5/public/linear', logger: mockLogger, onNotify: undefined, label: 'test' });
       stream.subscribeAllTickers(jest.fn());
 
       expect(mockWebSocket.sendToConnectedSocket).toHaveBeenCalledWith(
@@ -68,7 +68,7 @@ describe('BybitPublicStream', () => {
     });
 
     it('resolves topic as tickers.spot for spot URL', () => {
-      const stream = new BybitPublicStream('wss://stream.bybit.com/v5/public/spot', mockLogger);
+      const stream = new BybitPublicStream({ url: 'wss://stream.bybit.com/v5/public/spot', logger: mockLogger, onNotify: undefined, label: 'test' });
       stream.subscribeAllTickers(jest.fn());
 
       expect(mockWebSocket.sendToConnectedSocket).toHaveBeenCalledWith(
@@ -80,7 +80,7 @@ describe('BybitPublicStream', () => {
     });
 
     it('calls handler with normalized tickers', () => {
-      const stream = new BybitPublicStream('wss://stream.bybit.com/v5/public/linear', mockLogger);
+      const stream = new BybitPublicStream({ url: 'wss://stream.bybit.com/v5/public/linear', logger: mockLogger, onNotify: undefined, label: 'test' });
       const handler = jest.fn();
       stream.subscribeAllTickers(handler);
 
@@ -98,7 +98,7 @@ describe('BybitPublicStream', () => {
 
   describe('subscribeKlines', () => {
     it('converts interval and subscribes with correct topic', () => {
-      const stream = new BybitPublicStream('wss://stream.bybit.com/v5/public/linear', mockLogger);
+      const stream = new BybitPublicStream({ url: 'wss://stream.bybit.com/v5/public/linear', logger: mockLogger, onNotify: undefined, label: 'test' });
       stream.subscribeAllTickers(jest.fn());
 
       stream.subscribeKlines('BTCUSDT', '1h', jest.fn());
@@ -112,7 +112,7 @@ describe('BybitPublicStream', () => {
     });
 
     it('calls handler when kline message arrives', () => {
-      const stream = new BybitPublicStream('wss://stream.bybit.com/v5/public/linear', mockLogger);
+      const stream = new BybitPublicStream({ url: 'wss://stream.bybit.com/v5/public/linear', logger: mockLogger, onNotify: undefined, label: 'test' });
       const handler = jest.fn();
       stream.subscribeKlines('BTCUSDT', '1m', handler);
 
@@ -126,7 +126,7 @@ describe('BybitPublicStream', () => {
 
     it('creates connection if not already connected', () => {
       const { ReliableWebSocket } = require('@solncebro/websocket-engine');
-      const stream = new BybitPublicStream('wss://stream.bybit.com/v5/public/linear', mockLogger);
+      const stream = new BybitPublicStream({ url: 'wss://stream.bybit.com/v5/public/linear', logger: mockLogger, onNotify: undefined, label: 'test' });
 
       stream.subscribeKlines('BTCUSDT', '1m', jest.fn());
 
@@ -136,7 +136,7 @@ describe('BybitPublicStream', () => {
 
   describe('unsubscribeKlines', () => {
     it('sends unsubscribe and removes from activeSubscriptionSet', () => {
-      const stream = new BybitPublicStream('wss://stream.bybit.com/v5/public/linear', mockLogger);
+      const stream = new BybitPublicStream({ url: 'wss://stream.bybit.com/v5/public/linear', logger: mockLogger, onNotify: undefined, label: 'test' });
       const handler = jest.fn();
       stream.subscribeAllTickers(jest.fn());
 
@@ -154,7 +154,7 @@ describe('BybitPublicStream', () => {
     });
 
     it('does nothing for unknown handler', () => {
-      const stream = new BybitPublicStream('wss://stream.bybit.com/v5/public/linear', mockLogger);
+      const stream = new BybitPublicStream({ url: 'wss://stream.bybit.com/v5/public/linear', logger: mockLogger, onNotify: undefined, label: 'test' });
       mockWebSocket.sendToConnectedSocket.mockClear();
 
       stream.unsubscribeKlines('UNKNOWN', '1m', jest.fn());
@@ -165,25 +165,28 @@ describe('BybitPublicStream', () => {
 
   describe('handleMessage', () => {
     it('logs subscription success', () => {
-      const stream = new BybitPublicStream('wss://stream.bybit.com/v5/public/linear', mockLogger);
+      const stream = new BybitPublicStream({ url: 'wss://stream.bybit.com/v5/public/linear', logger: mockLogger, onNotify: undefined, label: 'test' });
       stream.subscribeAllTickers(jest.fn());
 
       capturedOnMessage!({ op: 'subscribe', success: true });
 
-      expect(mockLogger.debug).toHaveBeenCalledWith(expect.stringContaining('subscription successful'));
+      expect(mockLogger.debug).toHaveBeenCalledWith({ operation: 'subscribe' }, 'Bybit subscription successful');
     });
 
     it('logs subscription error', () => {
-      const stream = new BybitPublicStream('wss://stream.bybit.com/v5/public/linear', mockLogger);
+      const stream = new BybitPublicStream({ url: 'wss://stream.bybit.com/v5/public/linear', logger: mockLogger, onNotify: undefined, label: 'test' });
       stream.subscribeAllTickers(jest.fn());
 
       capturedOnMessage!({ op: 'subscribe', success: false, ret_msg: 'invalid' });
 
-      expect(mockLogger.error).toHaveBeenCalledWith(expect.stringContaining('subscription error'));
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.objectContaining({ subscriptionMessage: expect.any(Object) }),
+        'Bybit subscription error',
+      );
     });
 
     it('ignores messages without topic or data', () => {
-      const stream = new BybitPublicStream('wss://stream.bybit.com/v5/public/linear', mockLogger);
+      const stream = new BybitPublicStream({ url: 'wss://stream.bybit.com/v5/public/linear', logger: mockLogger, onNotify: undefined, label: 'test' });
       const handler = jest.fn();
       stream.subscribeAllTickers(handler);
 
@@ -193,7 +196,7 @@ describe('BybitPublicStream', () => {
     });
 
     it('logs error when handler throws', () => {
-      const stream = new BybitPublicStream('wss://stream.bybit.com/v5/public/linear', mockLogger);
+      const stream = new BybitPublicStream({ url: 'wss://stream.bybit.com/v5/public/linear', logger: mockLogger, onNotify: undefined, label: 'test' });
       const handler = jest.fn().mockImplementation(() => {
         throw new Error('ticker handler error');
       });
@@ -201,13 +204,16 @@ describe('BybitPublicStream', () => {
 
       capturedOnMessage!({ topic: 'tickers.linear', data: [MOCK_TICKER_RAW] });
 
-      expect(mockLogger.error).toHaveBeenCalledWith(expect.stringContaining('ticker handler error'));
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.objectContaining({ topic: 'tickers.linear', error: expect.any(Error) }),
+        'BybitPublicStream: error handling message',
+      );
     });
   });
 
   describe('resubscribeAll', () => {
     it('resubscribes all active subscriptions on reconnect', () => {
-      const stream = new BybitPublicStream('wss://stream.bybit.com/v5/public/linear', mockLogger);
+      const stream = new BybitPublicStream({ url: 'wss://stream.bybit.com/v5/public/linear', logger: mockLogger, onNotify: undefined, label: 'test' });
       stream.subscribeAllTickers(jest.fn());
       stream.subscribeKlines('BTCUSDT', '1m', jest.fn());
 
@@ -223,9 +229,93 @@ describe('BybitPublicStream', () => {
     });
   });
 
+  describe('1s klines via trade aggregation', () => {
+    it('subscribes to publicTrade topic for 1s interval', () => {
+      const stream = new BybitPublicStream({ url: 'wss://stream.bybit.com/v5/public/linear', logger: mockLogger, onNotify: undefined, label: 'test' });
+      stream.subscribeAllTickers(jest.fn());
+
+      stream.subscribeKlines('BTCUSDT', '1s', jest.fn());
+
+      expect(mockWebSocket.sendToConnectedSocket).toHaveBeenCalledWith(
+        expect.objectContaining({
+          op: 'subscribe',
+          args: ['publicTrade.BTCUSDT'],
+        }),
+      );
+    });
+
+    it('routes publicTrade messages through aggregator to handler', () => {
+      const stream = new BybitPublicStream({ url: 'wss://stream.bybit.com/v5/public/linear', logger: mockLogger, onNotify: undefined, label: 'test' });
+      const handler = jest.fn();
+      stream.subscribeKlines('BTCUSDT', '1s', handler);
+
+      const trade1: BybitPublicTradeDataRaw = { s: 'BTCUSDT', p: '50000', v: '0.1', T: 1700000000500 };
+      const trade2: BybitPublicTradeDataRaw = { s: 'BTCUSDT', p: '50100', v: '0.2', T: 1700000001200 };
+      const trade3: BybitPublicTradeDataRaw = { s: 'BTCUSDT', p: '50200', v: '0.1', T: 1700000002100 };
+
+      capturedOnMessage!({ topic: 'publicTrade.BTCUSDT', data: [trade1] });
+      capturedOnMessage!({ topic: 'publicTrade.BTCUSDT', data: [trade2] });
+      capturedOnMessage!({ topic: 'publicTrade.BTCUSDT', data: [trade3] });
+
+      expect(handler).toHaveBeenCalledWith('BTCUSDT', expect.objectContaining({ isClosed: true }));
+    });
+
+    it('unsubscribes from publicTrade topic for 1s interval', () => {
+      const stream = new BybitPublicStream({ url: 'wss://stream.bybit.com/v5/public/linear', logger: mockLogger, onNotify: undefined, label: 'test' });
+      const handler = jest.fn();
+      stream.subscribeAllTickers(jest.fn());
+
+      stream.subscribeKlines('BTCUSDT', '1s', handler);
+      mockWebSocket.sendToConnectedSocket.mockClear();
+
+      stream.unsubscribeKlines('BTCUSDT', '1s', handler);
+
+      expect(mockWebSocket.sendToConnectedSocket).toHaveBeenCalledWith(
+        expect.objectContaining({
+          op: 'unsubscribe',
+          args: ['publicTrade.BTCUSDT'],
+        }),
+      );
+    });
+
+    it('emits pending klines on close', () => {
+      const stream = new BybitPublicStream({ url: 'wss://stream.bybit.com/v5/public/linear', logger: mockLogger, onNotify: undefined, label: 'test' });
+      const handler = jest.fn();
+      stream.subscribeKlines('BTCUSDT', '1s', handler);
+
+      const trade1: BybitPublicTradeDataRaw = { s: 'BTCUSDT', p: '50000', v: '0.1', T: 1700000000500 };
+      const trade2: BybitPublicTradeDataRaw = { s: 'BTCUSDT', p: '50100', v: '0.2', T: 1700000001200 };
+
+      capturedOnMessage!({ topic: 'publicTrade.BTCUSDT', data: [trade1] });
+      capturedOnMessage!({ topic: 'publicTrade.BTCUSDT', data: [trade2] });
+
+      stream.close();
+
+      expect(handler).toHaveBeenCalledWith('BTCUSDT', expect.objectContaining({ openPrice: 50100 }));
+    });
+
+    it('clears aggregator state on resubscribeAll', () => {
+      const stream = new BybitPublicStream({ url: 'wss://stream.bybit.com/v5/public/linear', logger: mockLogger, onNotify: undefined, label: 'test' });
+      const handler = jest.fn();
+      stream.subscribeKlines('BTCUSDT', '1s', handler);
+
+      const trade1: BybitPublicTradeDataRaw = { s: 'BTCUSDT', p: '50000', v: '0.1', T: 1700000000500 };
+
+      capturedOnMessage!({ topic: 'publicTrade.BTCUSDT', data: [trade1] });
+
+      capturedOnReconnectSuccess!();
+
+      const trade2: BybitPublicTradeDataRaw = { s: 'BTCUSDT', p: '50100', v: '0.2', T: 1700000003500 };
+
+      capturedOnMessage!({ topic: 'publicTrade.BTCUSDT', data: [trade2] });
+
+      expect(handler).not.toHaveBeenCalled();
+    });
+  });
+
   describe('close', () => {
     it('closes WebSocket and nullifies', () => {
-      const stream = new BybitPublicStream('wss://stream.bybit.com/v5/public/linear', mockLogger);
+      const stream = new BybitPublicStream({ url: 'wss://stream.bybit.com/v5/public/linear', logger: mockLogger, onNotify: undefined, label: 'test' });
       stream.subscribeAllTickers(jest.fn());
 
       stream.close();

@@ -52,6 +52,8 @@ export interface BybitTickerRaw {
 
 export interface BybitWebSocketKlineRaw {
   start: number;
+  end?: number;
+  interval?: string;
   open: string;
   high: string;
   low: string;
@@ -61,6 +63,23 @@ export interface BybitWebSocketKlineRaw {
   confirm: boolean;
   timestamp: number;
 }
+
+export interface BybitPublicTradeDataRaw {
+  T: number;
+  s: string;
+  p: string;
+  v: string;
+}
+
+export interface BybitWebSocketMessageRaw<T> {
+  topic: string;
+  type: string;
+  ts: number;
+  data: T[];
+}
+
+export type BybitKlineMessageRaw = BybitWebSocketMessageRaw<BybitWebSocketKlineRaw>;
+export type BybitTradeMessageRaw = BybitWebSocketMessageRaw<BybitPublicTradeDataRaw>;
 
 export interface BybitPositionRaw {
   symbol: string;
@@ -202,6 +221,7 @@ export function normalizeBybitKlineWebSocketMessage(raw: BybitWebSocketKlineRaw)
     numberOfTrades: 0,
     takerBuyBaseAssetVolume: 0,
     takerBuyQuoteAssetVolume: 0,
+    isClosed: raw.confirm,
   };
 }
 

@@ -13,6 +13,7 @@ export type {
 
 export {
   ExchangeNameEnum,
+  MARKET_TYPE_LIST,
   OrderSideEnum,
   OrderTypeEnum,
   MarginModeEnum,
@@ -21,6 +22,8 @@ export {
   TradeSymbolTypeEnum,
   TimeInForceEnum,
   WorkingTypeEnum,
+  MarketTypeEnum,
+  WebSocketConnectionTypeEnum,
 } from './types/common';
 
 export type {
@@ -39,4 +42,26 @@ export type {
   BalanceByAsset,
   FundingRateHistory,
   FundingInfo,
+  WebSocketConnectionInfo,
 } from './types/common';
+
+export type {
+  BybitWebSocketKlineRaw,
+  BybitPublicTradeDataRaw,
+  BybitWebSocketMessageRaw,
+  BybitKlineMessageRaw,
+  BybitTradeMessageRaw,
+} from './normalizers/bybitNormalizer';
+
+export {
+  normalizeBybitKlineWebSocketMessage,
+} from './normalizers/bybitNormalizer';
+
+export type {
+  BinanceWebSocketKlineRaw,
+  BinanceContinuousKlineMessageRaw,
+} from './normalizers/binanceNormalizer';
+
+export {
+  normalizeBinanceKlineWebSocketMessage,
+} from './normalizers/binanceNormalizer';

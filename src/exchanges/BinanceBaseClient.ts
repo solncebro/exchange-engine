@@ -6,6 +6,7 @@ import type {
   TickerBySymbol,
   BalanceByAsset,
   Order,
+  WebSocketConnectionInfo,
 } from '../types/common';
 import { OrderTypeEnum, TimeInForceEnum } from '../types/common';
 import type { PublicStreamLike } from '../types/stream';
@@ -38,6 +39,7 @@ abstract class BinanceBaseClient<T extends BinanceBaseHttpClient> extends BaseEx
 
     this.tradeStream = new BinanceTradeStream({
       url: args.tradeWebSocketUrl,
+      label: args.tradeStreamLabel,
       apiKey: args.exchangeArgs.config.apiKey,
       secret: args.exchangeArgs.config.secret,
       logger: args.exchangeArgs.logger,
@@ -147,6 +149,26 @@ abstract class BinanceBaseClient<T extends BinanceBaseHttpClient> extends BaseEx
     const raw = await this.httpClient.createOrder(orderParams);
 
     return normalizeBinanceOrder(raw);
+  }
+
+  getWebSocketConnectionInfoList(): WebSocketConnectionInfo[] {
+    const result = [...this.publicStream.getConnectionInfoList()];
+
+    const tradeInfo = this.tradeStream.getConnectionInfo();
+
+    if (tradeInfo !== null) {
+      result.push(tradeInfo);
+    }
+
+    if (this.userDataStream !== null) {
+      const userDataInfo = this.userDataStream.getConnectionInfo();
+
+      if (userDataInfo !== null) {
+        result.push(userDataInfo);
+      }
+    }
+
+    return result;
   }
 
   async close(): Promise<void> {

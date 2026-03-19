@@ -216,6 +216,18 @@ describe('normalizeBybitKlineWebSocketMessage', () => {
     expect(result.takerBuyBaseAssetVolume).toBe(0);
     expect(result.takerBuyQuoteAssetVolume).toBe(0);
   });
+
+  it('sets isClosed to true when confirm is true', () => {
+    const result = normalizeBybitKlineWebSocketMessage({ ...BYBIT_RAW_WEBSOCKET_KLINE, confirm: true });
+
+    expect(result.isClosed).toBe(true);
+  });
+
+  it('sets isClosed to false when confirm is false', () => {
+    const result = normalizeBybitKlineWebSocketMessage({ ...BYBIT_RAW_WEBSOCKET_KLINE, confirm: false });
+
+    expect(result.isClosed).toBe(false);
+  });
 });
 
 describe('normalizeBybitPosition', () => {

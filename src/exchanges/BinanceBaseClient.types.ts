@@ -7,4 +7,5 @@ export interface BinanceBaseClientArgs<T extends BinanceBaseHttpClient> {
   httpClient: T;
   publicStream: PublicStreamLike;
   tradeWebSocketUrl: string;
+  tradeStreamLabel: string;
 }

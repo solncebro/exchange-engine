@@ -1,6 +1,7 @@
 import { ReliableWebSocket, WebSocketStatus } from '@solncebro/websocket-engine';
 
-import type { ExchangeLogger, Order } from '../types/common';
+import type { ExchangeLogger, Order, WebSocketConnectionInfo } from '../types/common';
+import { WebSocketConnectionTypeEnum } from '../types/common';
 import type { BaseTradeStreamArgs, PendingRequest } from './BaseTradeStream.types';
 
 const ORDER_TIMEOUT_MS = 30000;
@@ -8,18 +9,18 @@ const ORDER_TIMEOUT_MS = 30000;
 abstract class BaseTradeStream<TMessage> {
   protected webSocket: ReliableWebSocket<TMessage> | null = null;
   protected readonly url: string;
+  protected readonly label: string;
   protected readonly logger: ExchangeLogger;
   protected readonly apiKey: string;
   protected readonly secret: string;
   protected readonly onNotify?: (message: string) => void | Promise<void>;
   protected readonly pendingRequestByRequestId: Map<string, PendingRequest> = new Map();
 
-  protected abstract readonly label: string;
-
   private connectPromise: Promise<void> | null = null;
 
   constructor(args: BaseTradeStreamArgs) {
     this.url = args.url;
+    this.label = args.label;
     this.logger = args.logger;
     this.apiKey = args.apiKey;
     this.secret = args.secret;
@@ -60,6 +61,20 @@ abstract class BaseTradeStream<TMessage> {
     }
 
     return this.webSocket.getStatus() === WebSocketStatus.CONNECTED;
+  }
+
+  getConnectionInfo(): WebSocketConnectionInfo | null {
+    if (this.webSocket === null) {
+      return null;
+    }
+
+    return {
+      label: this.label,
+      url: this.url,
+      isConnected: this.isConnected(),
+      type: WebSocketConnectionTypeEnum.Trade,
+      subscriptionList: [],
+    };
   }
 
   protected abstract initConnection(): Promise<void>;

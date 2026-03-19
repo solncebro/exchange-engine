@@ -62,6 +62,19 @@ export interface BinanceWebSocketKlineRaw {
   n: number;
   V: string;
   Q: string;
+  i?: string;
+  f?: number;
+  L?: number;
+  x: boolean;
+  B?: string;
+}
+
+export interface BinanceContinuousKlineMessageRaw {
+  e: string;
+  E: number;
+  ps: string;
+  ct: string;
+  k: BinanceWebSocketKlineRaw;
 }
 
 export interface BinancePositionRiskRaw {
@@ -210,6 +223,7 @@ export function normalizeBinanceKlineWebSocketMessage(raw: BinanceWebSocketKline
     numberOfTrades: raw.n,
     takerBuyBaseAssetVolume: parseFloat(raw.V),
     takerBuyQuoteAssetVolume: parseFloat(raw.Q),
+    isClosed: raw.x,
   };
 }
 

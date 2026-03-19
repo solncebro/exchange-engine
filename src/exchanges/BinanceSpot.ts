@@ -34,13 +34,19 @@ class BinanceSpot extends BinanceBaseClient<BinanceSpotHttpClient> {
       httpsAgent: args.config.httpsAgent,
     });
 
-    const publicStream = new BinanceSpotPublicStream(BINANCE_SPOT_WEBSOCKET_STREAM_URL, args.logger, args.onNotify);
+    const publicStream = new BinanceSpotPublicStream({
+      webSocketUrl: BINANCE_SPOT_WEBSOCKET_STREAM_URL,
+      logger: args.logger,
+      onNotify: args.onNotify,
+      label: '[Binance Spot] Public',
+    });
 
     super({
       exchangeArgs: args,
       httpClient,
       publicStream,
       tradeWebSocketUrl,
+      tradeStreamLabel: '[Binance Spot] Orders',
     });
   }
 }
