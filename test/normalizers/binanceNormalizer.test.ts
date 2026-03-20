@@ -22,6 +22,8 @@ import {
   BINANCE_RAW_FUTURES_ACCOUNT,
   BINANCE_RAW_FUNDING_RATE_HISTORY_LIST,
   BINANCE_RAW_FUNDING_INFO_LIST,
+  BINANCE_RAW_FUTURE_SYMBOL,
+  BINANCE_RAW_SYMBOL_NO_FILTERS,
 } from '../fixtures/binanceRaw';
 
 describe('normalizeBinanceTradeSymbols', () => {
@@ -93,6 +95,27 @@ describe('normalizeBinanceTradeSymbols', () => {
     const result = normalizeBinanceTradeSymbols(info);
 
     expect(result.get('BTCUSDT')!.isActive).toBe(false);
+  });
+
+  it('marks non-perpetual futures contract as Future type', () => {
+    const info = { symbols: [BINANCE_RAW_FUTURE_SYMBOL] };
+    const result = normalizeBinanceTradeSymbols(info);
+    const symbol = result.get('BTCUSDT_250627')!;
+
+    expect(symbol.type).toBe(TradeSymbolTypeEnum.Future);
+    expect(symbol.isLinear).toBe(false);
+  });
+
+  it('falls back filter fields to 0 when no matching filters exist', () => {
+    const info = { symbols: [BINANCE_RAW_SYMBOL_NO_FILTERS] };
+    const result = normalizeBinanceTradeSymbols(info);
+    const filter = result.get('XYZUSDT')!.filter;
+
+    expect(filter.tickSize).toBe('0');
+    expect(filter.stepSize).toBe('0');
+    expect(filter.minQty).toBe('0');
+    expect(filter.maxQty).toBe('0');
+    expect(filter.minNotional).toBe('0');
   });
 });
 
@@ -384,6 +407,69 @@ describe('normalizeBinanceOrder', () => {
     const result = normalizeBinanceOrder(BINANCE_RAW_ORDER_RESPONSE);
 
     expect(result.updatedTimestamp).toBe(1700000000000);
+  });
+
+  it('defaults clientOrderId to empty string when missing', () => {
+    const raw = { ...BINANCE_RAW_ORDER_RESPONSE };
+    delete (raw as any).clientOrderId;
+    const result = normalizeBinanceOrder(raw as any);
+
+    expect(result.clientOrderId).toBe('');
+  });
+
+  it('defaults avgPrice to 0 when missing', () => {
+    const raw = { ...BINANCE_RAW_ORDER_RESPONSE };
+    delete (raw as any).avgPrice;
+    const result = normalizeBinanceOrder(raw as any);
+
+    expect(result.avgPrice).toBe(0);
+  });
+
+  it('defaults stopPrice to 0 when missing', () => {
+    const raw = { ...BINANCE_RAW_ORDER_RESPONSE };
+    delete (raw as any).stopPrice;
+    const result = normalizeBinanceOrder(raw as any);
+
+    expect(result.stopPrice).toBe(0);
+  });
+
+  it('defaults executedQty to 0 when missing', () => {
+    const raw = { ...BINANCE_RAW_ORDER_RESPONSE };
+    delete (raw as any).executedQty;
+    const result = normalizeBinanceOrder(raw as any);
+
+    expect(result.filledAmount).toBe(0);
+  });
+
+  it('defaults cumQuote to 0 when missing', () => {
+    const raw = { ...BINANCE_RAW_ORDER_RESPONSE };
+    delete (raw as any).cumQuote;
+    const result = normalizeBinanceOrder(raw as any);
+
+    expect(result.filledQuoteAmount).toBe(0);
+  });
+
+  it('defaults reduceOnly to false when missing', () => {
+    const raw = { ...BINANCE_RAW_ORDER_RESPONSE };
+    delete (raw as any).reduceOnly;
+    const result = normalizeBinanceOrder(raw as any);
+
+    expect(result.reduceOnly).toBe(false);
+  });
+
+  it('falls back to updateTime when time is missing', () => {
+    const raw = { ...BINANCE_RAW_ORDER_RESPONSE };
+    delete (raw as any).time;
+    const result = normalizeBinanceOrder(raw as any);
+
+    expect(result.timestamp).toBe(1700000000000);
+  });
+
+  it('lowercases unknown order type as fallback', () => {
+    const raw = { ...BINANCE_RAW_ORDER_RESPONSE, type: 'STOP_LOSS' };
+    const result = normalizeBinanceOrder(raw);
+
+    expect(result.type).toBe('stop_loss');
   });
 });
 

@@ -11,6 +11,8 @@ import {
 import { TradeSymbolTypeEnum, PositionSideEnum, MarginModeEnum, OrderSideEnum, OrderTypeEnum } from '../../src/types/common';
 import {
   BYBIT_RAW_INSTRUMENT_LIST,
+  BYBIT_RAW_INSTRUMENT_FUTURES,
+  BYBIT_RAW_INSTRUMENT_NO_FILTERS,
   BYBIT_RAW_TICKER_LIST,
   BYBIT_RAW_KLINE_LIST,
   BYBIT_RAW_WEBSOCKET_KLINE,
@@ -109,6 +111,35 @@ describe('normalizeBybitTradeSymbols', () => {
     const result = normalizeBybitTradeSymbols(BYBIT_RAW_INSTRUMENT_LIST);
 
     expect(result.get('ETHBTC')!.filter.minNotional).toBe('0.0001');
+  });
+
+  it('marks non-linear contract as Future type', () => {
+    const result = normalizeBybitTradeSymbols([BYBIT_RAW_INSTRUMENT_FUTURES]);
+    const btcusd = result.get('BTCUSD')!;
+
+    expect(btcusd.type).toBe(TradeSymbolTypeEnum.Future);
+    expect(btcusd.isLinear).toBe(false);
+  });
+
+  it('falls back tickSize to 0 when priceFilter is undefined', () => {
+    const result = normalizeBybitTradeSymbols([BYBIT_RAW_INSTRUMENT_NO_FILTERS]);
+    const xyz = result.get('XYZUSDT')!;
+
+    expect(xyz.filter.tickSize).toBe('0');
+  });
+
+  it('falls back stepSize to 0 when lotSizeFilter is undefined', () => {
+    const result = normalizeBybitTradeSymbols([BYBIT_RAW_INSTRUMENT_NO_FILTERS]);
+    const xyz = result.get('XYZUSDT')!;
+
+    expect(xyz.filter.stepSize).toBe('0');
+  });
+
+  it('falls back minNotional to 0 when both values are missing', () => {
+    const result = normalizeBybitTradeSymbols([BYBIT_RAW_INSTRUMENT_NO_FILTERS]);
+    const xyz = result.get('XYZUSDT')!;
+
+    expect(xyz.filter.minNotional).toBe('0');
   });
 });
 
@@ -391,6 +422,69 @@ describe('normalizeBybitOrder', () => {
 
     expect(result.updatedTimestamp).toBe(1700000010000);
   });
+
+  it('defaults orderLinkId to empty string when missing', () => {
+    const raw = { ...BYBIT_RAW_ORDER_RESPONSE };
+    delete (raw as any).orderLinkId;
+    const result = normalizeBybitOrder(raw);
+
+    expect(result.clientOrderId).toBe('');
+  });
+
+  it('defaults avgPrice to 0 when missing', () => {
+    const raw = { ...BYBIT_RAW_ORDER_RESPONSE };
+    delete (raw as any).avgPrice;
+    const result = normalizeBybitOrder(raw);
+
+    expect(result.avgPrice).toBe(0);
+  });
+
+  it('defaults triggerPrice to 0 when missing', () => {
+    const raw = { ...BYBIT_RAW_ORDER_RESPONSE };
+    delete (raw as any).triggerPrice;
+    const result = normalizeBybitOrder(raw);
+
+    expect(result.stopPrice).toBe(0);
+  });
+
+  it('defaults cumExecQty to 0 when missing', () => {
+    const raw = { ...BYBIT_RAW_ORDER_RESPONSE };
+    delete (raw as any).cumExecQty;
+    const result = normalizeBybitOrder(raw);
+
+    expect(result.filledAmount).toBe(0);
+  });
+
+  it('defaults cumExecValue to 0 when missing', () => {
+    const raw = { ...BYBIT_RAW_ORDER_RESPONSE };
+    delete (raw as any).cumExecValue;
+    const result = normalizeBybitOrder(raw);
+
+    expect(result.filledQuoteAmount).toBe(0);
+  });
+
+  it('defaults reduceOnly to false when missing', () => {
+    const raw = { ...BYBIT_RAW_ORDER_RESPONSE };
+    delete (raw as any).reduceOnly;
+    const result = normalizeBybitOrder(raw);
+
+    expect(result.reduceOnly).toBe(false);
+  });
+
+  it('falls back to createdTime when updatedTime is missing', () => {
+    const raw = { ...BYBIT_RAW_ORDER_RESPONSE };
+    delete (raw as any).updatedTime;
+    const result = normalizeBybitOrder(raw);
+
+    expect(result.updatedTimestamp).toBe(Number(BYBIT_RAW_ORDER_RESPONSE.createdTime));
+  });
+
+  it('lowercases unknown order type as fallback', () => {
+    const raw = { ...BYBIT_RAW_ORDER_RESPONSE, orderType: 'StopLimit' };
+    const result = normalizeBybitOrder(raw);
+
+    expect(result.type).toBe('stoplimit');
+  });
 });
 
 describe('buildBybitOrderFromCreateResponse', () => {
@@ -495,5 +589,22 @@ describe('normalizeBybitBalance', () => {
     expect(usdt.free).toBe(6818.16);
     expect(usdt.locked).toBe(0);
     expect(usdt.total).toBe(6818.16);
+  });
+
+  it('defaults walletBalance to 0 when undefined', () => {
+    const raw = { list: [{ accountType: 'UNIFIED', coin: [{ coin: 'UNKNOWN', walletBalance: undefined, totalOrderIM: '0', totalPositionIM: '0', locked: '0' }] }] };
+    const result = normalizeBybitBalance(raw as any);
+
+    expect(result.has('UNKNOWN')).toBe(false);
+  });
+
+  it('handles frozenAmount NaN by computing locked from walletBalance minus free', () => {
+    const raw = { list: [{ accountType: 'UNIFIED', coin: [{ coin: 'AVAX', walletBalance: '100', totalOrderIM: '10', totalPositionIM: '5', frozenAmount: 'invalid', locked: undefined }] }] };
+    const result = normalizeBybitBalance(raw as any);
+    const avax = result.get('AVAX')!;
+
+    expect(avax.free).toBe(85);
+    expect(avax.locked).toBe(15);
+    expect(avax.total).toBe(100);
   });
 });

@@ -73,12 +73,22 @@ Backoff: 1s → 2s → 4s (exponential)
 - Bybit: `Buy → Buy`, `Sell → Sell`
 
 ### Order Type
-- Binance: `MARKET → Market`, `LIMIT → Limit`
+- Binance: `MARKET → Market`, `LIMIT → Limit`, `STOP_MARKET → StopMarket`, `TAKE_PROFIT_MARKET → TakeProfitMarket`, `STOP → Stop`, `TAKE_PROFIT → TakeProfit`, `TRAILING_STOP_MARKET → TrailingStop`
 - Bybit: `Market → Market`, `Limit → Limit`
+
+### Order Type Reverse (Binance only)
+- `market → 'MARKET'`, `limit → 'LIMIT'`, `stopMarket → 'STOP_MARKET'`, `takeProfitMarket → 'TAKE_PROFIT_MARKET'`, `stop → 'STOP'`, `takeProfit → 'TAKE_PROFIT'`, `trailingStop → 'TRAILING_STOP_MARKET'`
 
 ### Order Status
 - Binance: `NEW` / `PARTIALLY_FILLED` → `'open'`, `FILLED` → `'closed'`, `CANCELED` / `EXPIRED` / `EXPIRED_IN_MATCH` → `'canceled'`, `REJECTED` → `'rejected'`
 - Bybit: `New` / `PartiallyFilled` / `Untriggered` → `'open'`, `Filled` → `'closed'`, `Cancelled` / `PartiallyFilledCanceled` / `Deactivated` → `'canceled'`, `Rejected` → `'rejected'`
+
+### Time In Force
+- Binance: `GTC → Gtc`, `IOC → Ioc`, `FOK → Fok`, `GTX → PostOnly`
+- Bybit: `GTC → Gtc`, `IOC → Ioc`, `FOK → Fok`, `PostOnly → PostOnly`
+
+### Working Type (Binance only)
+- `markPrice → 'MARK_PRICE'`, `contractPrice → 'CONTRACT_PRICE'`
 
 ## Precision (src/precision/precision.ts)
 

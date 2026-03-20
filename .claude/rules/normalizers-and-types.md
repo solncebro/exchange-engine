@@ -20,12 +20,13 @@ BinanceTicker24hrRaw { symbol, lastPrice: string, priceChangePercent: string, ti
 
 ### Raw-интерфейсы (export):
 - `BinanceExchangeInfoRaw` — `{ symbols: BinanceSymbolRaw[] }`
-- `BinanceTicker24hrRaw` — `{ symbol, lastPrice, priceChangePercent, time }`
-- `BinanceWebSocketKlineRaw` — `{ t, o, h, l, c, v, T, q, n, V, Q, x }` (короткие ключи, `x: boolean` — isClosed)
+- `BinanceTicker24hrRaw` — `{ symbol, lastPrice, openPrice, highPrice, lowPrice, priceChangePercent, volume, quoteVolume, time }`
+- `BinanceWebSocketKlineRaw` — `{ t, o, h, l, c, v, T, q, n, V, Q, i?, f?, L?, x, B? }` (короткие ключи, `x: boolean` — isClosed)
 - `BinanceContinuousKlineMessageRaw` — `{ e, E, ps, ct, k: BinanceWebSocketKlineRaw }`
-- `BinancePositionRiskRaw` — `{ symbol, positionSide, positionAmt, entryPrice, ... }`
-- `BinanceOrderResponseRaw` — `{ orderId, symbol, side, type, origQty, price, status, updateTime }`
-- `BinanceAccountRaw` — `{ balances: BinanceBalanceRaw[] }`
+- `BinancePositionRiskRaw` — `{ symbol, positionSide, positionAmt, entryPrice, markPrice, unRealizedProfit, leverage, marginType, liquidationPrice, notional, isolatedMargin, [key: string]: unknown }`
+- `BinanceOrderResponseRaw` — `{ orderId, clientOrderId, symbol, side, type, timeInForce, origQty, executedQty, price, avgPrice, stopPrice, cumQuote, status, reduceOnly, time, updateTime }`
+- `BinanceAccountRaw` — `{ balances: BinanceBalanceRaw[] }` (BinanceBalanceRaw — internal: `{ asset, free, locked }`)
+- `BinanceFuturesAccountRaw` — `{ assets: BinanceFuturesAssetRaw[] }` (BinanceFuturesAssetRaw — internal: `{ asset, walletBalance, availableBalance }`)
 - `BinanceFundingRateHistoryRaw` — `{ symbol, fundingRate, fundingTime, markPrice }`
 - `BinanceFundingInfoRaw` — `{ symbol, adjustedFundingRateCap, adjustedFundingRateFloor, fundingIntervalHours }`
 
@@ -46,29 +47,61 @@ BinanceTicker24hrRaw { symbol, lastPrice: string, priceChangePercent: string, ti
   - `orderId` number → string
 - `normalizeBinanceBalance(raw)` → `BalanceByAsset` (Map)
   - Пропускает нулевые балансы (`free + locked === 0`)
+- `normalizeBinanceFuturesBalance(raw)` → `BalanceByAsset` (Map)
+  - Отдельная функция для фьючерсного баланса — использует `walletBalance`/`availableBalance` вместо `free`/`locked`
+  - Пропускает записи с `walletBalance === 0`
+  - `free = availableBalance`, `locked = walletBalance - availableBalance`, `total = walletBalance`
 - `normalizeBinanceFundingRateHistory(rawList)` → `FundingRateHistory[]`
   - Пустой markPrice → `null`
 - `normalizeBinanceFundingInfo(rawList)` → `FundingInfo[]`
   - parseFloat для строковых чисел, fundingIntervalHours уже number
 
-## bybitNormalizer.ts — аналогичная структура
+## bybitNormalizer.ts — все raw-типы и функции
 
 Тот же паттерн, но с Bybit-специфичными полями и маппингами.
 
-### Функции нормализации:
-- `normalizeBybitKlineWebSocketMessage(raw)` → `Kline` — маппинг полей, `raw.confirm → isClosed`
-
-### Маппинги:
-- `BYBIT_POSITION_SIDE`: Buy→Long, Sell→Short
-- `BYBIT_ORDER_SIDE`: Buy→Buy, Sell→Sell
-- `BYBIT_ORDER_STATUS`: New/PartiallyFilled/Untriggered→'open', Filled→'closed', Cancelled→'canceled'
-
 ### Bybit Raw-типы (export):
-- `BybitWebSocketKlineRaw` — `{ start, open, high, low, close, volume, turnover, confirm: boolean, timestamp }`
+
+REST:
+- `BybitInstrumentInfoRaw` — `{ symbol, status, baseCoin, quoteCoin, settleCoin?, contractType?, contractSize?, lotSizeFilter?, priceFilter? }`
+- `BybitTickerRaw` — `{ symbol, lastPrice, prevPrice24h, highPrice24h, lowPrice24h, price24hPcnt, volume24h, turnover24h, time? }`
+- `BybitPositionRaw` — `{ symbol, side, size, avgPrice, markPrice, unrealisedPnl, leverage, tradeMode, liqPrice, positionIdx, [key: string]: unknown }`
+- `BybitOrderResponseRaw` — `{ orderId, orderLinkId, symbol, side, orderType, timeInForce, qty, price, avgPrice, triggerPrice, cumExecQty, cumExecValue, orderStatus, reduceOnly, createdTime, updatedTime }`
+- `BybitWalletBalanceRaw` — `{ list: BybitAccountRaw[] }` (BybitAccountRaw — internal: `{ accountType, coin: BybitCoinRaw[] }`)
+
+WebSocket:
+- `BybitWebSocketKlineRaw` — `{ start, end?, interval?, open, high, low, close, volume, turnover, confirm: boolean, timestamp }`
 - `BybitPublicTradeDataRaw` — `{ T: number, s: string, p: string, v: string }`
 - `BybitWebSocketMessageRaw<T>` — `{ topic, type, ts, data: T[] }`
 - `BybitKlineMessageRaw` = `BybitWebSocketMessageRaw<BybitWebSocketKlineRaw>`
 - `BybitTradeMessageRaw` = `BybitWebSocketMessageRaw<BybitPublicTradeDataRaw>`
+
+### Функции нормализации:
+- `normalizeBybitTradeSymbols(rawList)` → `TradeSymbolBySymbol` (Map)
+  - LinearPerpetual/LinearFutures → Swap, пустой contractType → Spot, остальное → Future
+  - `stepSize` берётся из `qtyStep` (linear) или `basePrecision` (spot)
+  - `minNotional` берётся из `minNotionalValue` или `minOrderAmt`
+- `normalizeBybitTickers(rawList)` → `TickerBySymbol` (Map)
+  - `priceChangePercent` умножается на 100 (Bybit отдаёт долю, не проценты)
+  - `timestamp` fallback на `Date.now()` если отсутствует
+- `normalizeBybitKlines(rawList)` → `Kline[]` — массив строковых массивов → массив объектов, `closeTimestamp = 0`, `numberOfTrades = 0`
+- `normalizeBybitKlineWebSocketMessage(raw)` → `Kline` — маппинг полей, `raw.confirm → isClosed`
+- `normalizeBybitPosition(raw)` → `Position`
+  - Маппинг через `BYBIT_POSITION_SIDE` (Buy→Long, Sell→Short), fallback → Both
+  - `tradeMode === 0 ? Cross : Isolated`
+  - NaN liquidationPrice → 0
+  - Сохраняет raw в `info`
+- `normalizeBybitOrder(raw)` → `Order`
+  - Маппинг через `BYBIT_ORDER_SIDE`, `BYBIT_ORDER_TYPE`, `BYBIT_ORDER_STATUS`, `BYBIT_TIME_IN_FORCE`
+  - `triggerPrice → stopPrice`, `cumExecValue → filledQuoteAmount`
+  - timestamp через `parseFloat(raw.createdTime)`
+- `buildBybitOrderFromCreateResponse(args, orderId)` → `Order`
+  - Строит Order из `CreateOrderWebSocketArgs` + orderId, все filled-поля = 0, status = 'open'
+- `normalizeBybitBalance(raw)` → `BalanceByAsset` (Map)
+  - Итерирует по `raw.list[].coin[]`, агрегирует балансы если один coin встречается в нескольких accounts
+  - `free = walletBalance - totalPositionIM - totalOrderIM`
+  - `locked` = frozenAmount или locked, fallback `walletBalance - free`
+  - Пропускает нулевые балансы (`free + locked === 0`)
 
 ## Унифицированные типы (src/types/common.ts)
 
@@ -85,6 +118,9 @@ BinanceTicker24hrRaw { symbol, lastPrice: string, priceChangePercent: string, ti
 - `MarketTypeEnum` — Futures, Spot
 - `MARKET_TYPE_LIST: MarketTypeEnum[]` — `Object.values(MarketTypeEnum)`
 - `WebSocketConnectionTypeEnum` — Public, Trade, UserData
+
+### Конфигурация:
+- `ExchangeConfig` — `{ apiKey, secret, recvWindow?, isDemoMode?, httpsAgent? }`
 
 ### Интерфейсы:
 - `Ticker` — `{ symbol, lastPrice, openPrice, highPrice, lowPrice, priceChangePercent, volume, quoteVolume, timestamp }`
@@ -116,10 +152,14 @@ BinanceTicker24hrRaw { symbol, lastPrice: string, priceChangePercent: string, ti
 ```
 BINANCE_POSITION_SIDE: { LONG → Long, SHORT → Short, BOTH → Both }
 BINANCE_ORDER_SIDE: { BUY → Buy, SELL → Sell }
-BINANCE_ORDER_TYPE: { MARKET → Market, LIMIT → Limit }
+BINANCE_ORDER_TYPE: { MARKET → Market, LIMIT → Limit, STOP_MARKET → StopMarket, TAKE_PROFIT_MARKET → TakeProfitMarket, STOP → Stop, TAKE_PROFIT → TakeProfit, TRAILING_STOP_MARKET → TrailingStop }
+BINANCE_ORDER_TYPE_REVERSE: { market → 'MARKET', limit → 'LIMIT', stopMarket → 'STOP_MARKET', ... } (обратный маппинг)
 BINANCE_ORDER_STATUS: { NEW → 'open', PARTIALLY_FILLED → 'open', FILLED → 'closed', CANCELED → 'canceled', REJECTED → 'rejected', EXPIRED → 'canceled', EXPIRED_IN_MATCH → 'canceled' }
+BINANCE_TIME_IN_FORCE: { GTC → Gtc, IOC → Ioc, FOK → Fok, GTX → PostOnly }
+BINANCE_WORKING_TYPE: { markPrice → 'MARK_PRICE', contractPrice → 'CONTRACT_PRICE' }
 BYBIT_POSITION_SIDE: { Buy → Long, Sell → Short }
 BYBIT_ORDER_SIDE: { Buy → Buy, Sell → Sell }
 BYBIT_ORDER_TYPE: { Market → Market, Limit → Limit }
-BYBIT_ORDER_STATUS: { New → 'open', Filled → 'closed', Cancelled → 'canceled', ... }
+BYBIT_ORDER_STATUS: { New → 'open', PartiallyFilled → 'open', Untriggered → 'open', Filled → 'closed', Cancelled → 'canceled', PartiallyFilledCanceled → 'canceled', Rejected → 'rejected', Deactivated → 'canceled' }
+BYBIT_TIME_IN_FORCE: { GTC → Gtc, IOC → Ioc, FOK → Fok, PostOnly → PostOnly }
 ```

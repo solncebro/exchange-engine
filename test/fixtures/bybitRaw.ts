@@ -83,6 +83,30 @@ export const BYBIT_RAW_ORDER_RESPONSE: BybitOrderResponseRaw = {
   updatedTime: '1700000010000',
 };
 
+export const BYBIT_RAW_INSTRUMENT_FUTURES: BybitInstrumentInfoRaw = {
+  symbol: 'BTCUSD',
+  status: 'Trading',
+  baseCoin: 'BTC',
+  quoteCoin: 'USD',
+  settleCoin: 'BTC',
+  contractType: 'InverseFutures',
+  contractSize: '1',
+  lotSizeFilter: { qtyStep: '1', minOrderQty: '1', maxOrderQty: '1000000', minNotionalValue: '1' },
+  priceFilter: { tickSize: '0.50' },
+};
+
+export const BYBIT_RAW_INSTRUMENT_NO_FILTERS: BybitInstrumentInfoRaw = {
+  symbol: 'XYZUSDT',
+  status: 'Trading',
+  baseCoin: 'XYZ',
+  quoteCoin: 'USDT',
+  settleCoin: 'USDT',
+  contractType: 'LinearPerpetual',
+  contractSize: '0.1',
+  lotSizeFilter: undefined,
+  priceFilter: undefined,
+};
+
 export const BYBIT_RAW_WALLET_BALANCE: BybitWalletBalanceRaw = {
   list: [
     { accountType: 'UNIFIED', coin: [

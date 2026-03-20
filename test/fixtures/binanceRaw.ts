@@ -123,6 +123,30 @@ export const BINANCE_RAW_FUNDING_INFO_LIST: BinanceFundingInfoRaw[] = [
   { symbol: 'ETHUSDT', adjustedFundingRateCap: '0.01500000', adjustedFundingRateFloor: '-0.01500000', fundingIntervalHours: 4 },
 ];
 
+export const BINANCE_RAW_FUTURE_SYMBOL = {
+  symbol: 'BTCUSDT_250627',
+  status: 'TRADING',
+  baseAsset: 'BTC',
+  quoteAsset: 'USDT',
+  contractType: 'CURRENT_QUARTER',
+  marginAsset: 'USDT',
+  filters: [
+    { filterType: 'PRICE_FILTER', tickSize: '0.10' },
+    { filterType: 'LOT_SIZE', stepSize: '0.001', minQty: '0.001', maxQty: '500' },
+    { filterType: 'MIN_NOTIONAL', notional: '5' },
+  ],
+};
+
+export const BINANCE_RAW_SYMBOL_NO_FILTERS = {
+  symbol: 'XYZUSDT',
+  status: 'TRADING',
+  baseAsset: 'XYZ',
+  quoteAsset: 'USDT',
+  contractType: 'PERPETUAL',
+  marginAsset: 'USDT',
+  filters: [],
+};
+
 export const BINANCE_RAW_POSITION_MODE_HEDGE = { dualSidePosition: true };
 
 export const BINANCE_RAW_POSITION_MODE_ONE_WAY = { dualSidePosition: false };
