@@ -234,6 +234,17 @@ describe('BinanceFuturesHttpClient', () => {
     });
   });
 
+  describe('fetchFuturesAccount', () => {
+    it('calls signedGet /fapi/v2/account', async () => {
+      await client.fetchFuturesAccount();
+
+      const [url, options] = mockInstance.get.mock.calls[0];
+
+      expect(url).toBe('/fapi/v2/account');
+      expect(options.params.signature).toBeDefined();
+    });
+  });
+
   describe('fetchPositionMode', () => {
     it('calls signedGet /fapi/v1/positionSide/dual', async () => {
       await client.fetchPositionMode();

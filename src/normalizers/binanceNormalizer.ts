@@ -121,6 +121,16 @@ export interface BinanceAccountRaw {
   balances: BinanceBalanceRaw[];
 }
 
+interface BinanceFuturesAssetRaw {
+  asset: string;
+  walletBalance: string;
+  availableBalance: string;
+}
+
+export interface BinanceFuturesAccountRaw {
+  assets: BinanceFuturesAssetRaw[];
+}
+
 function extractFilter(filterList: BinanceFilterRaw[], filterType: string): BinanceFilterRaw | undefined {
   return filterList.find((filter) => filter.filterType === filterType);
 }
@@ -286,6 +296,28 @@ export function normalizeBinanceBalance(raw: BinanceAccountRaw): BalanceByAsset 
     };
 
     result.set(entry.asset, balance);
+  }
+
+  return result;
+}
+
+export function normalizeBinanceFuturesBalance(raw: BinanceFuturesAccountRaw): BalanceByAsset {
+  const result = new Map<string, Balance>();
+
+  for (const entry of raw.assets) {
+    const walletBalance = parseFloat(entry.walletBalance);
+    const availableBalance = parseFloat(entry.availableBalance);
+
+    if (walletBalance === 0) {
+      continue;
+    }
+
+    result.set(entry.asset, {
+      asset: entry.asset,
+      free: availableBalance,
+      locked: walletBalance - availableBalance,
+      total: walletBalance,
+    });
   }
 
   return result;

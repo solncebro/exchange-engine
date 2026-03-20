@@ -1,10 +1,10 @@
-import type { BinancePositionRiskRaw, BinanceFundingRateHistoryRaw, BinanceFundingInfoRaw, BinanceOrderResponseRaw } from '../normalizers/binanceNormalizer';
+import type { BinancePositionRiskRaw, BinanceFundingRateHistoryRaw, BinanceFundingInfoRaw, BinanceOrderResponseRaw, BinanceFuturesAccountRaw } from '../normalizers/binanceNormalizer';
 import type { FetchPageWithLimitArgs } from '../types/exchange';
 import { buildBinanceSignedParams } from '../auth/binanceAuth';
+import { BINANCE_REQUEST_TIMEOUT } from '../constants/binance';
 import { applyTimeRangeOptions } from '../utils/httpParams';
 import type { BinanceEndpoints, BinanceHttpClientArgs } from './BinanceBaseHttpClient';
 import { BinanceBaseHttpClient } from './BinanceBaseHttpClient';
-import { BINANCE_REQUEST_TIMEOUT } from '../constants/binance';
 
 class BinanceFuturesHttpClient extends BinanceBaseHttpClient {
   protected readonly endpoints: BinanceEndpoints = {
@@ -21,6 +21,10 @@ class BinanceFuturesHttpClient extends BinanceBaseHttpClient {
 
   constructor(args: BinanceHttpClientArgs) {
     super(args, BINANCE_REQUEST_TIMEOUT);
+  }
+
+  async fetchFuturesAccount(): Promise<BinanceFuturesAccountRaw> {
+    return this.signedGet<BinanceFuturesAccountRaw>(this.endpoints.account);
   }
 
   async fetchFundingInfo(symbol?: string): Promise<BinanceFundingInfoRaw[]> {

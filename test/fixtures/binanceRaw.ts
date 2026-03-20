@@ -5,6 +5,7 @@ import type {
   BinancePositionRiskRaw,
   BinanceOrderResponseRaw,
   BinanceAccountRaw,
+  BinanceFuturesAccountRaw,
   BinanceFundingRateHistoryRaw,
   BinanceFundingInfoRaw,
 } from '../../src/normalizers/binanceNormalizer';
@@ -101,6 +102,14 @@ export const BINANCE_RAW_ACCOUNT: BinanceAccountRaw = {
     { asset: 'USDT', free: '1000.50', locked: '200.00' },
     { asset: 'BTC', free: '0.5', locked: '0.1' },
     { asset: 'DOGE', free: '0', locked: '0' },
+  ],
+};
+
+export const BINANCE_RAW_FUTURES_ACCOUNT: BinanceFuturesAccountRaw = {
+  assets: [
+    { asset: 'USDT', walletBalance: '1200.50', availableBalance: '1000.50' },
+    { asset: 'BNB', walletBalance: '5.00', availableBalance: '3.50' },
+    { asset: 'DOGE', walletBalance: '0', availableBalance: '0' },
   ],
 };
 

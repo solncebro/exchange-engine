@@ -458,12 +458,42 @@ describe('normalizeBybitBalance', () => {
     expect(btc.total).toBe(0.6);
   });
 
-  it('uses free field as fallback for availableToWithdraw', () => {
-    const raw = { list: [{ coin: 'SOL', free: '10', walletBalance: '15', locked: '5' }] };
+  it('computes free as walletBalance minus totalPositionIM minus totalOrderIM', () => {
+    const raw = { list: [{ accountType: 'UNIFIED', coin: [{ coin: 'SOL', walletBalance: '15', totalOrderIM: '3', totalPositionIM: '2', locked: '5' }] }] };
     const result = normalizeBybitBalance(raw);
     const sol = result.get('SOL')!;
 
     expect(sol.free).toBe(10);
     expect(sol.locked).toBe(5);
+  });
+
+  it('subtracts totalPositionIM from available balance', () => {
+    const raw = { list: [{ accountType: 'UNIFIED', coin: [{ coin: 'ETH', walletBalance: '100', totalOrderIM: '0', totalPositionIM: '30', locked: '30' }] }] };
+    const result = normalizeBybitBalance(raw);
+    const eth = result.get('ETH')!;
+
+    expect(eth.free).toBe(70);
+    expect(eth.locked).toBe(30);
+    expect(eth.total).toBe(100);
+  });
+
+  it('handles empty totalOrderIM and totalPositionIM for portfolio margin', () => {
+    const raw = { list: [{ accountType: 'UNIFIED', coin: [{ coin: 'USDC', walletBalance: '500', totalOrderIM: '', totalPositionIM: '', locked: '0' }] }] };
+    const result = normalizeBybitBalance(raw);
+    const usdc = result.get('USDC')!;
+
+    expect(usdc.free).toBe(500);
+    expect(usdc.locked).toBe(0);
+    expect(usdc.total).toBe(500);
+  });
+
+  it('handles empty availableToWithdraw from unified account', () => {
+    const raw = { list: [{ accountType: 'UNIFIED', coin: [{ coin: 'USDT', availableToWithdraw: '', walletBalance: '6818.16', totalOrderIM: '0', locked: '0' }] }] };
+    const result = normalizeBybitBalance(raw);
+    const usdt = result.get('USDT')!;
+
+    expect(usdt.free).toBe(6818.16);
+    expect(usdt.locked).toBe(0);
+    expect(usdt.total).toBe(6818.16);
   });
 });

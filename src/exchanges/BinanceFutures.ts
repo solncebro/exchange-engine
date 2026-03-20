@@ -1,5 +1,5 @@
 import type { ExchangeArgs, FetchPageWithLimitArgs } from '../types/exchange';
-import type { Position, Order, FundingRateHistory, FundingInfo } from '../types/common';
+import type { Position, Order, FundingRateHistory, FundingInfo, BalanceByAsset } from '../types/common';
 import { MarginModeEnum, PositionModeEnum } from '../types/common';
 import { BinanceFuturesHttpClient } from '../http/BinanceFuturesHttpClient';
 import {
@@ -7,6 +7,7 @@ import {
   normalizeBinanceOrder,
   normalizeBinanceFundingRateHistory,
   normalizeBinanceFundingInfo,
+  normalizeBinanceFuturesBalance,
 } from '../normalizers/binanceNormalizer';
 import { BinanceFuturesPublicStream } from '../ws/BinanceFuturesPublicStream';
 import {
@@ -61,6 +62,12 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
       tradeWebSocketUrl,
       tradeStreamLabel: '[Binance Futures] Orders',
     });
+  }
+
+  protected async fetchAndNormalizeBalance(): Promise<BalanceByAsset> {
+    const raw = await this.httpClient.fetchFuturesAccount();
+
+    return normalizeBinanceFuturesBalance(raw);
   }
 
   async fetchFundingRateHistory(

@@ -85,9 +85,13 @@ export const BYBIT_RAW_ORDER_RESPONSE: BybitOrderResponseRaw = {
 
 export const BYBIT_RAW_WALLET_BALANCE: BybitWalletBalanceRaw = {
   list: [
-    { coin: 'USDT', availableToWithdraw: '1000.50', walletBalance: '1200.50', locked: '200.00' },
-    { coin: 'BTC', availableToWithdraw: '0.5', walletBalance: '0.6', locked: '0.1' },
-    { coin: 'DOGE', availableToWithdraw: '0', walletBalance: '0', locked: '0' },
-    { coin: 'USDT', availableToWithdraw: '500.00', walletBalance: '600.00', locked: '100.00' },
+    { accountType: 'UNIFIED', coin: [
+      { coin: 'USDT', availableToWithdraw: '', walletBalance: '1200.50', totalOrderIM: '200', totalPositionIM: '0', locked: '200.00' },
+      { coin: 'BTC', availableToWithdraw: '', walletBalance: '0.6', totalOrderIM: '0.1', totalPositionIM: '0', locked: '0.1' },
+      { coin: 'DOGE', walletBalance: '0', totalOrderIM: '0', totalPositionIM: '0', locked: '0' },
+    ]},
+    { accountType: 'UNIFIED', coin: [
+      { coin: 'USDT', availableToWithdraw: '', walletBalance: '600.00', totalOrderIM: '100', totalPositionIM: '0', locked: '100.00' },
+    ]},
   ],
 };

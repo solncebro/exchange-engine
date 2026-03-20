@@ -8,7 +8,7 @@ import {
   BINANCE_RAW_EXCHANGE_INFO,
   BINANCE_RAW_TICKER_LIST,
   BINANCE_RAW_KLINE_LIST,
-  BINANCE_RAW_ACCOUNT,
+  BINANCE_RAW_FUTURES_ACCOUNT,
   BINANCE_RAW_ORDER_RESPONSE,
   BINANCE_RAW_FUNDING_INFO_LIST,
   BINANCE_RAW_POSITION_MODE_HEDGE,
@@ -221,9 +221,9 @@ describe('BinanceFutures', () => {
   });
 
   describe('fetchBalance', () => {
-    it('returns normalized balance', async () => {
+    it('returns normalized balance from futures account format', async () => {
       const { client, mockInstance } = createClient();
-      mockInstance.get.mockResolvedValue({ data: BINANCE_RAW_ACCOUNT });
+      mockInstance.get.mockResolvedValue({ data: BINANCE_RAW_FUTURES_ACCOUNT });
 
       const result = await client.fetchBalance();
 

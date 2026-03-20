@@ -6,6 +6,7 @@ import {
   normalizeBinancePosition,
   normalizeBinanceOrder,
   normalizeBinanceBalance,
+  normalizeBinanceFuturesBalance,
   normalizeBinanceFundingRateHistory,
   normalizeBinanceFundingInfo,
 } from '../../src/normalizers/binanceNormalizer';
@@ -18,6 +19,7 @@ import {
   BINANCE_RAW_POSITION_RISK,
   BINANCE_RAW_ORDER_RESPONSE,
   BINANCE_RAW_ACCOUNT,
+  BINANCE_RAW_FUTURES_ACCOUNT,
   BINANCE_RAW_FUNDING_RATE_HISTORY_LIST,
   BINANCE_RAW_FUNDING_INFO_LIST,
 } from '../fixtures/binanceRaw';
@@ -413,6 +415,46 @@ describe('normalizeBinanceBalance', () => {
     expect(usdt.free).toBe(1000.5);
     expect(usdt.locked).toBe(200);
     expect(usdt.total).toBe(1200.5);
+  });
+});
+
+describe('normalizeBinanceFuturesBalance', () => {
+  it('returns a Map', () => {
+    const result = normalizeBinanceFuturesBalance(BINANCE_RAW_FUTURES_ACCOUNT);
+
+    expect(result).toBeInstanceOf(Map);
+  });
+
+  it('skips zero wallet balances', () => {
+    const result = normalizeBinanceFuturesBalance(BINANCE_RAW_FUTURES_ACCOUNT);
+
+    expect(result.has('DOGE')).toBe(false);
+  });
+
+  it('includes non-zero balances', () => {
+    const result = normalizeBinanceFuturesBalance(BINANCE_RAW_FUTURES_ACCOUNT);
+
+    expect(result.size).toBe(2);
+    expect(result.has('USDT')).toBe(true);
+    expect(result.has('BNB')).toBe(true);
+  });
+
+  it('maps availableBalance to free and walletBalance to total', () => {
+    const result = normalizeBinanceFuturesBalance(BINANCE_RAW_FUTURES_ACCOUNT);
+    const usdt = result.get('USDT')!;
+
+    expect(usdt.free).toBe(1000.5);
+    expect(usdt.locked).toBe(200);
+    expect(usdt.total).toBe(1200.5);
+  });
+
+  it('calculates locked as walletBalance minus availableBalance', () => {
+    const result = normalizeBinanceFuturesBalance(BINANCE_RAW_FUTURES_ACCOUNT);
+    const bnb = result.get('BNB')!;
+
+    expect(bnb.free).toBe(3.5);
+    expect(bnb.locked).toBe(1.5);
+    expect(bnb.total).toBe(5);
   });
 });
 

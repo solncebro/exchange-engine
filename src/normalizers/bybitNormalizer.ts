@@ -118,13 +118,20 @@ interface BybitCoinRaw {
   coin: string;
   availableToWithdraw?: string;
   walletBalance?: string;
+  totalOrderIM?: string;
+  totalPositionIM?: string;
   free?: string;
   locked?: string;
   frozenAmount?: string;
 }
 
+interface BybitAccountRaw {
+  accountType: string;
+  coin: BybitCoinRaw[];
+}
+
 export interface BybitWalletBalanceRaw {
-  list: BybitCoinRaw[];
+  list: BybitAccountRaw[];
 }
 
 const LINEAR_CONTRACT_TYPES = new Set(['LinearPerpetual', 'LinearFutures']);
@@ -291,39 +298,43 @@ export function buildBybitOrderFromCreateResponse(args: CreateOrderWebSocketArgs
 export function normalizeBybitBalance(raw: BybitWalletBalanceRaw): BalanceByAsset {
   const result = new Map<string, Balance>();
 
-  for (const coin of raw.list) {
-    const free = parseFloat(coin.availableToWithdraw ?? coin.free ?? '0');
-    const walletBalance = parseFloat(coin.walletBalance ?? '0');
-    const frozen = parseFloat(coin.frozenAmount ?? coin.locked ?? '0');
-    const locked = isNaN(frozen) ? walletBalance - free : frozen;
+  for (const account of raw.list) {
+    for (const coin of account.coin) {
+      const walletBalance = parseFloat(coin.walletBalance ?? '0');
+      const totalOrderIM = coin.totalOrderIM ? parseFloat(coin.totalOrderIM) : 0;
+      const totalPositionIM = coin.totalPositionIM ? parseFloat(coin.totalPositionIM) : 0;
+      const free = walletBalance - totalPositionIM - totalOrderIM;
+      const frozen = parseFloat(coin.frozenAmount ?? coin.locked ?? '0');
+      const locked = isNaN(frozen) ? walletBalance - free : frozen;
 
-    if (free + locked === 0) {
-      continue;
-    }
+      if (free + locked === 0) {
+        continue;
+      }
 
-    const existing = result.get(coin.coin);
+      const existing = result.get(coin.coin);
 
-    if (existing !== undefined) {
+      if (existing !== undefined) {
+        const balance: Balance = {
+          asset: coin.coin,
+          free: existing.free + free,
+          locked: existing.locked + locked,
+          total: existing.total + free + locked,
+        };
+
+        result.set(coin.coin, balance);
+
+        continue;
+      }
+
       const balance: Balance = {
         asset: coin.coin,
-        free: existing.free + free,
-        locked: existing.locked + locked,
-        total: existing.total + free + locked,
+        free,
+        locked,
+        total: free + locked,
       };
 
       result.set(coin.coin, balance);
-
-      continue;
     }
-
-    const balance: Balance = {
-      asset: coin.coin,
-      free,
-      locked,
-      total: free + locked,
-    };
-
-    result.set(coin.coin, balance);
   }
 
   return result;
