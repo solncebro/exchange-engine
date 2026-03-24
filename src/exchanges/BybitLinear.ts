@@ -1,7 +1,11 @@
 import type { CreateOrderWebSocketArgs, ExchangeArgs, FetchPageWithLimitArgs } from '../types/exchange';
-import type { Position, Order, FundingRateHistory, FundingInfo } from '../types/common';
+import type { Position, Order, FundingRateHistory, FundingInfo, OpenInterest } from '../types/common';
 import { MarginModeEnum, PositionModeEnum } from '../types/common';
-import { normalizeBybitPosition, normalizeBybitOrder } from '../normalizers/bybitNormalizer';
+import {
+  normalizeBybitPosition,
+  normalizeBybitFundingRateHistoryList,
+  normalizeBybitOpenInterest,
+} from '../normalizers/bybitNormalizer';
 import {
   BYBIT_PUBLIC_LINEAR_WEBSOCKET_URL,
   BYBIT_DEMO_PUBLIC_LINEAR_WEBSOCKET_URL,
@@ -30,15 +34,11 @@ class BybitLinear extends BybitBaseClient {
     return this.submitOrder(orderParams, args);
   }
 
-  async fetchOrderHistory(symbol: string, options?: FetchPageWithLimitArgs): Promise<Order[]> {
-    this.logger.debug(`Fetching order history for ${symbol}`);
-    const raw = await this.httpClient.getOrderHistory('linear', { symbol, limit: options?.limit });
+  async fetchFundingRateHistory(symbol: string, options?: FetchPageWithLimitArgs): Promise<FundingRateHistory[]> {
+    this.logger.debug(`[Bybit] Fetching funding rate history for ${symbol}`);
+    const raw = await this.httpClient.fetchFundingHistory('linear', symbol, options);
 
-    return raw.result.list.map(normalizeBybitOrder);
-  }
-
-  async fetchFundingRateHistory(): Promise<FundingRateHistory[]> {
-    throw new Error('Not implemented for Bybit');
+    return normalizeBybitFundingRateHistoryList(raw.result.list);
   }
 
   async fetchFundingInfo(): Promise<FundingInfo[]> {
@@ -78,6 +78,14 @@ class BybitLinear extends BybitBaseClient {
       buyLeverage: defaultLeverage,
       sellLeverage: defaultLeverage,
     });
+  }
+
+  async fetchOpenInterest(symbol: string): Promise<OpenInterest> {
+    this.logger.debug(`[Bybit] Fetching open interest for ${symbol}`);
+    const raw = await this.httpClient.fetchOpenInterest('linear', symbol);
+    const result = normalizeBybitOpenInterest(raw.result.list[0]);
+
+    return { ...result, symbol };
   }
 }
 

@@ -5,10 +5,16 @@ import {
   normalizeBinanceKlineWebSocketMessage,
   normalizeBinancePosition,
   normalizeBinanceOrder,
-  normalizeBinanceBalance,
-  normalizeBinanceFuturesBalance,
+  normalizeBinanceBalances,
+  normalizeBinanceFuturesBalances,
   normalizeBinanceFundingRateHistory,
   normalizeBinanceFundingInfo,
+  normalizeBinanceOrderBook,
+  normalizeBinancePublicTrades,
+  normalizeBinanceMarkPriceList,
+  normalizeBinanceOpenInterest,
+  normalizeBinanceCommissionRate,
+  normalizeBinanceIncomeList,
 } from '../../src/normalizers/binanceNormalizer';
 import { TradeSymbolTypeEnum, PositionSideEnum, MarginModeEnum } from '../../src/types/common';
 import {
@@ -24,6 +30,12 @@ import {
   BINANCE_RAW_FUNDING_INFO_LIST,
   BINANCE_RAW_FUTURE_SYMBOL,
   BINANCE_RAW_SYMBOL_NO_FILTERS,
+  BINANCE_RAW_ORDER_BOOK,
+  BINANCE_RAW_PUBLIC_TRADE_LIST,
+  BINANCE_RAW_MARK_PRICE_LIST,
+  BINANCE_RAW_OPEN_INTEREST,
+  BINANCE_RAW_COMMISSION_RATE,
+  BINANCE_RAW_INCOME_LIST,
 } from '../fixtures/binanceRaw';
 
 describe('normalizeBinanceTradeSymbols', () => {
@@ -473,61 +485,68 @@ describe('normalizeBinanceOrder', () => {
   });
 });
 
-describe('normalizeBinanceBalance', () => {
-  it('returns a Map', () => {
-    const result = normalizeBinanceBalance(BINANCE_RAW_ACCOUNT);
+describe('normalizeBinanceBalances', () => {
+  it('returns AccountBalances with balanceByAsset Map', () => {
+    const result = normalizeBinanceBalances(BINANCE_RAW_ACCOUNT);
 
-    expect(result).toBeInstanceOf(Map);
+    expect(result.balanceByAsset).toBeInstanceOf(Map);
   });
 
   it('skips zero balances', () => {
-    const result = normalizeBinanceBalance(BINANCE_RAW_ACCOUNT);
+    const result = normalizeBinanceBalances(BINANCE_RAW_ACCOUNT);
 
-    expect(result.has('DOGE')).toBe(false);
+    expect(result.balanceByAsset.has('DOGE')).toBe(false);
   });
 
   it('includes non-zero balances', () => {
-    const result = normalizeBinanceBalance(BINANCE_RAW_ACCOUNT);
+    const result = normalizeBinanceBalances(BINANCE_RAW_ACCOUNT);
 
-    expect(result.size).toBe(2);
-    expect(result.has('USDT')).toBe(true);
-    expect(result.has('BTC')).toBe(true);
+    expect(result.balanceByAsset.size).toBe(2);
+    expect(result.balanceByAsset.has('USDT')).toBe(true);
+    expect(result.balanceByAsset.has('BTC')).toBe(true);
   });
 
   it('parses free and locked correctly', () => {
-    const result = normalizeBinanceBalance(BINANCE_RAW_ACCOUNT);
-    const usdt = result.get('USDT')!;
+    const result = normalizeBinanceBalances(BINANCE_RAW_ACCOUNT);
+    const usdt = result.balanceByAsset.get('USDT')!;
 
     expect(usdt.free).toBe(1000.5);
     expect(usdt.locked).toBe(200);
     expect(usdt.total).toBe(1200.5);
   });
+
+  it('computes totalWalletBalance and totalAvailableBalance from balances', () => {
+    const result = normalizeBinanceBalances(BINANCE_RAW_ACCOUNT);
+
+    expect(result.totalWalletBalance).toBe(1200.5 + 0.6);
+    expect(result.totalAvailableBalance).toBe(1000.5 + 0.5);
+  });
 });
 
-describe('normalizeBinanceFuturesBalance', () => {
-  it('returns a Map', () => {
-    const result = normalizeBinanceFuturesBalance(BINANCE_RAW_FUTURES_ACCOUNT);
+describe('normalizeBinanceFuturesBalances', () => {
+  it('returns AccountBalances with balanceByAsset Map', () => {
+    const result = normalizeBinanceFuturesBalances(BINANCE_RAW_FUTURES_ACCOUNT);
 
-    expect(result).toBeInstanceOf(Map);
+    expect(result.balanceByAsset).toBeInstanceOf(Map);
   });
 
   it('skips zero wallet balances', () => {
-    const result = normalizeBinanceFuturesBalance(BINANCE_RAW_FUTURES_ACCOUNT);
+    const result = normalizeBinanceFuturesBalances(BINANCE_RAW_FUTURES_ACCOUNT);
 
-    expect(result.has('DOGE')).toBe(false);
+    expect(result.balanceByAsset.has('DOGE')).toBe(false);
   });
 
   it('includes non-zero balances', () => {
-    const result = normalizeBinanceFuturesBalance(BINANCE_RAW_FUTURES_ACCOUNT);
+    const result = normalizeBinanceFuturesBalances(BINANCE_RAW_FUTURES_ACCOUNT);
 
-    expect(result.size).toBe(2);
-    expect(result.has('USDT')).toBe(true);
-    expect(result.has('BNB')).toBe(true);
+    expect(result.balanceByAsset.size).toBe(2);
+    expect(result.balanceByAsset.has('USDT')).toBe(true);
+    expect(result.balanceByAsset.has('BNB')).toBe(true);
   });
 
   it('maps availableBalance to free and walletBalance to total', () => {
-    const result = normalizeBinanceFuturesBalance(BINANCE_RAW_FUTURES_ACCOUNT);
-    const usdt = result.get('USDT')!;
+    const result = normalizeBinanceFuturesBalances(BINANCE_RAW_FUTURES_ACCOUNT);
+    const usdt = result.balanceByAsset.get('USDT')!;
 
     expect(usdt.free).toBe(1000.5);
     expect(usdt.locked).toBe(200);
@@ -535,12 +554,19 @@ describe('normalizeBinanceFuturesBalance', () => {
   });
 
   it('calculates locked as walletBalance minus availableBalance', () => {
-    const result = normalizeBinanceFuturesBalance(BINANCE_RAW_FUTURES_ACCOUNT);
-    const bnb = result.get('BNB')!;
+    const result = normalizeBinanceFuturesBalances(BINANCE_RAW_FUTURES_ACCOUNT);
+    const bnb = result.balanceByAsset.get('BNB')!;
 
     expect(bnb.free).toBe(3.5);
     expect(bnb.locked).toBe(1.5);
     expect(bnb.total).toBe(5);
+  });
+
+  it('parses totalWalletBalance and totalAvailableBalance from raw', () => {
+    const result = normalizeBinanceFuturesBalances(BINANCE_RAW_FUTURES_ACCOUNT);
+
+    expect(result.totalWalletBalance).toBe(1205.5);
+    expect(result.totalAvailableBalance).toBe(1000.5);
   });
 });
 
@@ -626,5 +652,166 @@ describe('normalizeBinanceFundingInfo', () => {
     expect(second.fundingIntervalHours).toBe(4);
     expect(second.adjustedFundingRateCap).toBe(0.015);
     expect(second.adjustedFundingRateFloor).toBe(-0.015);
+  });
+});
+
+describe('normalizeBinanceOrderBook', () => {
+  it('normalizes order book from raw data', () => {
+    const result = normalizeBinanceOrderBook(BINANCE_RAW_ORDER_BOOK, 'BTCUSDT');
+
+    expect(result.symbol).toBe('BTCUSDT');
+    expect(result.askList).toHaveLength(2);
+    expect(result.bidList).toHaveLength(2);
+    expect(result.timestamp).toBe(1700000000000);
+  });
+
+  it('parses price and quantity as numbers', () => {
+    const result = normalizeBinanceOrderBook(BINANCE_RAW_ORDER_BOOK, 'BTCUSDT');
+
+    expect(result.askList[0].price).toBe(65001);
+    expect(result.askList[0].quantity).toBe(0.8);
+    expect(result.bidList[0].price).toBe(65000);
+    expect(result.bidList[0].quantity).toBe(1.5);
+  });
+
+  it('returns empty arrays for empty order book', () => {
+    const raw = { ...BINANCE_RAW_ORDER_BOOK, asks: [], bids: [] };
+    const result = normalizeBinanceOrderBook(raw, 'BTCUSDT');
+
+    expect(result.askList).toHaveLength(0);
+    expect(result.bidList).toHaveLength(0);
+  });
+});
+
+describe('normalizeBinancePublicTrades', () => {
+  it('returns array of PublicTrade objects', () => {
+    const result = normalizeBinancePublicTrades(BINANCE_RAW_PUBLIC_TRADE_LIST, 'BTCUSDT');
+
+    expect(result).toHaveLength(2);
+    expect(result[0].symbol).toBe('BTCUSDT');
+  });
+
+  it('parses price and quantity as numbers', () => {
+    const result = normalizeBinancePublicTrades(BINANCE_RAW_PUBLIC_TRADE_LIST, 'BTCUSDT');
+
+    expect(result[0].price).toBe(65000.5);
+    expect(result[0].quantity).toBe(0.1);
+    expect(result[0].quoteQuantity).toBe(6500.05);
+  });
+
+  it('converts id to string', () => {
+    const result = normalizeBinancePublicTrades(BINANCE_RAW_PUBLIC_TRADE_LIST, 'BTCUSDT');
+
+    expect(result[0].id).toBe('12345');
+  });
+
+  it('preserves isBuyerMaker flag', () => {
+    const result = normalizeBinancePublicTrades(BINANCE_RAW_PUBLIC_TRADE_LIST, 'BTCUSDT');
+
+    expect(result[0].isBuyerMaker).toBe(false);
+    expect(result[1].isBuyerMaker).toBe(true);
+  });
+
+  it('returns empty array for empty input', () => {
+    const result = normalizeBinancePublicTrades([], 'BTCUSDT');
+
+    expect(result).toHaveLength(0);
+  });
+});
+
+describe('normalizeBinanceMarkPriceList', () => {
+  it('returns array of MarkPrice objects', () => {
+    const result = normalizeBinanceMarkPriceList(BINANCE_RAW_MARK_PRICE_LIST);
+
+    expect(result).toHaveLength(2);
+    expect(result[0].symbol).toBe('BTCUSDT');
+  });
+
+  it('parses numeric fields as numbers', () => {
+    const result = normalizeBinanceMarkPriceList(BINANCE_RAW_MARK_PRICE_LIST);
+
+    expect(result[0].markPrice).toBe(65000.5);
+    expect(result[0].indexPrice).toBe(65001);
+    expect(result[0].lastFundingRate).toBe(0.0001);
+  });
+
+  it('preserves nextFundingTime and timestamp', () => {
+    const result = normalizeBinanceMarkPriceList(BINANCE_RAW_MARK_PRICE_LIST);
+
+    expect(result[0].nextFundingTime).toBe(1700003600000);
+    expect(result[0].timestamp).toBe(1700000000000);
+  });
+
+  it('returns empty array for empty input', () => {
+    const result = normalizeBinanceMarkPriceList([]);
+
+    expect(result).toHaveLength(0);
+  });
+});
+
+describe('normalizeBinanceOpenInterest', () => {
+  it('normalizes open interest from raw data', () => {
+    const result = normalizeBinanceOpenInterest(BINANCE_RAW_OPEN_INTEREST);
+
+    expect(result.symbol).toBe('BTCUSDT');
+    expect(result.timestamp).toBe(1700000000000);
+  });
+
+  it('parses openInterest as number', () => {
+    const result = normalizeBinanceOpenInterest(BINANCE_RAW_OPEN_INTEREST);
+
+    expect(result.openInterest).toBe(12345.678);
+  });
+});
+
+describe('normalizeBinanceCommissionRate', () => {
+  it('returns array with one FeeRate entry', () => {
+    const result = normalizeBinanceCommissionRate(BINANCE_RAW_COMMISSION_RATE);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].symbol).toBe('BTCUSDT');
+  });
+
+  it('parses commission rates as numbers', () => {
+    const result = normalizeBinanceCommissionRate(BINANCE_RAW_COMMISSION_RATE);
+
+    expect(result[0].makerRate).toBe(0.0002);
+    expect(result[0].takerRate).toBe(0.0004);
+  });
+});
+
+describe('normalizeBinanceIncomeList', () => {
+  it('returns array of Income objects', () => {
+    const result = normalizeBinanceIncomeList(BINANCE_RAW_INCOME_LIST);
+
+    expect(result).toHaveLength(2);
+    expect(result[0].symbol).toBe('BTCUSDT');
+  });
+
+  it('parses income as number', () => {
+    const result = normalizeBinanceIncomeList(BINANCE_RAW_INCOME_LIST);
+
+    expect(result[0].income).toBe(15.5);
+    expect(result[1].income).toBe(-0.05);
+  });
+
+  it('preserves incomeType and asset', () => {
+    const result = normalizeBinanceIncomeList(BINANCE_RAW_INCOME_LIST);
+
+    expect(result[0].incomeType).toBe('REALIZED_PNL');
+    expect(result[0].asset).toBe('USDT');
+    expect(result[1].incomeType).toBe('FUNDING_FEE');
+  });
+
+  it('includes tranId and tradeId in info', () => {
+    const result = normalizeBinanceIncomeList(BINANCE_RAW_INCOME_LIST);
+
+    expect(result[0].info).toEqual({ tranId: 123456, tradeId: '789', info: '' });
+  });
+
+  it('returns empty array for empty input', () => {
+    const result = normalizeBinanceIncomeList([]);
+
+    expect(result).toHaveLength(0);
   });
 });

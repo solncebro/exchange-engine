@@ -4,7 +4,7 @@ import { ReliableWebSocket } from '@solncebro/websocket-engine';
 import { ExchangeError } from '../errors/ExchangeError';
 import { OrderSideEnum, OrderTypeEnum, TimeInForceEnum } from '../types/common';
 import { BaseTradeStream } from './BaseTradeStream';
-import type { BybitTradeMessage } from './BybitTradeStream.types';
+import type { BybitTradeMessage, BybitTradeOrderData } from './BybitTradeStream.types';
 import {
   BYBIT_HEARTBEAT_CONFIG,
   BYBIT_PING_INTERVAL,
@@ -81,7 +81,7 @@ class BybitTradeStream extends BaseTradeStream<BybitTradeMessage> {
       }
 
       if ((message.success || message.retCode === 0) && message.data) {
-        const data = message.data as { orderId: string; orderLinkId?: string };
+        const data = message.data as BybitTradeOrderData;
         pending.resolve({
           id: data.orderId,
           clientOrderId: data.orderLinkId ?? '',

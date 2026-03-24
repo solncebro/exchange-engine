@@ -10,9 +10,14 @@ export interface BuildBinanceSignedParamsArgs {
   recvWindow?: number;
 }
 
+interface TimestampedParamsResult {
+  signedParams: Record<string, string | number>;
+  secret: string;
+}
+
 function buildTimestampedParams(
   args: BuildBinanceSignedParamsArgs,
-): { signedParams: Record<string, string | number>; secret: string } {
+): TimestampedParamsResult {
   const { params, secret, recvWindow = 5000 } = args;
   const timestamp = Date.now();
   const signedParams: Record<string, string | number> = {

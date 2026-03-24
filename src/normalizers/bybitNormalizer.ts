@@ -7,10 +7,18 @@ import type {
   Position,
   Order,
   Balance,
-  BalanceByAsset,
+  AccountBalances,
+  OrderBook,
+  PublicTrade,
+  OpenInterest,
+  FeeRate,
+  FundingRateHistory,
+  ClosedPnl,
+  Income,
 } from '../types/common';
-import { TradeSymbolTypeEnum, PositionSideEnum, MarginModeEnum, TimeInForceEnum } from '../types/common';
+import { TradeSymbolTypeEnum, PositionSideEnum, MarginModeEnum, TimeInForceEnum, OrderSideEnum } from '../types/common';
 import { BYBIT_POSITION_SIDE, BYBIT_ORDER_STATUS, BYBIT_ORDER_SIDE, BYBIT_ORDER_TYPE, BYBIT_TIME_IN_FORCE } from '../constants/mappings';
+import { parseOrderBookLevel } from './normalizerUtils';
 import type { CreateOrderWebSocketArgs } from '../types/exchange';
 
 interface BybitLotSizeFilterRaw {
@@ -127,11 +135,71 @@ interface BybitCoinRaw {
 
 interface BybitAccountRaw {
   accountType: string;
+  totalWalletBalance?: string;
+  totalAvailableBalance?: string;
+  totalMarginBalance?: string;
+  totalInitialMargin?: string;
   coin: BybitCoinRaw[];
 }
 
 export interface BybitWalletBalanceRaw {
   list: BybitAccountRaw[];
+}
+
+export interface BybitOrderBookRaw {
+  a: string[][];
+  b: string[][];
+  ts: number;
+  u: number;
+}
+
+export interface BybitPublicTradeRaw {
+  execId: string;
+  symbol: string;
+  price: string;
+  size: string;
+  side: string;
+  time: string;
+  isBlockTrade: boolean;
+}
+
+export interface BybitOpenInterestRaw {
+  openInterest: string;
+  timestamp: string;
+}
+
+export interface BybitFeeRateRaw {
+  symbol: string;
+  makerFeeRate: string;
+  takerFeeRate: string;
+}
+
+export interface BybitFundingRateHistoryRaw {
+  symbol: string;
+  fundingRate: string;
+  fundingRateTimestamp: string;
+}
+
+export interface BybitClosedPnlRaw {
+  symbol: string;
+  orderId: string;
+  side: string;
+  qty: string;
+  avgEntryPrice: string;
+  avgExitPrice: string;
+  closedPnl: string;
+  createdTime: string;
+}
+
+export interface BybitTransactionLogRaw {
+  symbol: string;
+  type: string;
+  qty: string;
+  cashFlow: string;
+  currency: string;
+  transactionTime: string;
+  tradeId: string;
+  orderId: string;
 }
 
 const LINEAR_CONTRACT_TYPES = new Set(['LinearPerpetual', 'LinearFutures']);
@@ -295,8 +363,8 @@ export function buildBybitOrderFromCreateResponse(args: CreateOrderWebSocketArgs
   };
 }
 
-export function normalizeBybitBalance(raw: BybitWalletBalanceRaw): BalanceByAsset {
-  const result = new Map<string, Balance>();
+export function normalizeBybitBalances(raw: BybitWalletBalanceRaw): AccountBalances {
+  const balanceByAsset = new Map<string, Balance>();
 
   for (const account of raw.list) {
     for (const coin of account.coin) {
@@ -311,7 +379,7 @@ export function normalizeBybitBalance(raw: BybitWalletBalanceRaw): BalanceByAsse
         continue;
       }
 
-      const existing = result.get(coin.coin);
+      const existing = balanceByAsset.get(coin.coin);
 
       if (existing !== undefined) {
         const balance: Balance = {
@@ -321,7 +389,7 @@ export function normalizeBybitBalance(raw: BybitWalletBalanceRaw): BalanceByAsse
           total: existing.total + free + locked,
         };
 
-        result.set(coin.coin, balance);
+        balanceByAsset.set(coin.coin, balance);
 
         continue;
       }
@@ -333,9 +401,114 @@ export function normalizeBybitBalance(raw: BybitWalletBalanceRaw): BalanceByAsse
         total: free + locked,
       };
 
-      result.set(coin.coin, balance);
+      balanceByAsset.set(coin.coin, balance);
     }
   }
 
-  return result;
+  const primaryAccount = raw.list[0];
+  const rawTotalWallet = primaryAccount?.totalWalletBalance ?? '';
+  const rawTotalAvailable = primaryAccount?.totalAvailableBalance ?? '';
+  const rawTotalMargin = primaryAccount?.totalMarginBalance ?? '';
+  const rawTotalInitialMargin = primaryAccount?.totalInitialMargin ?? '';
+
+  let totalWalletBalance = parseFloat(rawTotalWallet);
+
+  if (isNaN(totalWalletBalance)) {
+    totalWalletBalance = 0;
+
+    for (const balance of balanceByAsset.values()) {
+      totalWalletBalance += balance.total;
+    }
+  }
+
+  let totalAvailableBalance = parseFloat(rawTotalAvailable);
+
+  if (isNaN(totalAvailableBalance)) {
+    const marginBalance = parseFloat(rawTotalMargin);
+    const initialMargin = parseFloat(rawTotalInitialMargin);
+
+    if (!isNaN(marginBalance) && !isNaN(initialMargin)) {
+      totalAvailableBalance = marginBalance - initialMargin;
+    } else if (!isNaN(initialMargin)) {
+      totalAvailableBalance = totalWalletBalance - initialMargin;
+    } else {
+      totalAvailableBalance = 0;
+
+      for (const balance of balanceByAsset.values()) {
+        totalAvailableBalance += balance.free;
+      }
+    }
+  }
+
+  return { totalWalletBalance, totalAvailableBalance, balanceByAsset };
+}
+
+export function normalizeBybitOrderBook(raw: BybitOrderBookRaw, symbol: string): OrderBook {
+  return {
+    symbol,
+    askList: raw.a.map(parseOrderBookLevel),
+    bidList: raw.b.map(parseOrderBookLevel),
+    timestamp: raw.ts,
+  };
+}
+
+export function normalizeBybitPublicTradeList(rawList: BybitPublicTradeRaw[]): PublicTrade[] {
+  return rawList.map((raw) => ({
+    id: raw.execId,
+    symbol: raw.symbol,
+    price: parseFloat(raw.price),
+    quantity: parseFloat(raw.size),
+    quoteQuantity: parseFloat(raw.price) * parseFloat(raw.size),
+    timestamp: parseFloat(raw.time),
+    isBuyerMaker: raw.side === 'Sell',
+  }));
+}
+
+export function normalizeBybitOpenInterest(raw: BybitOpenInterestRaw): OpenInterest {
+  return {
+    symbol: '',
+    openInterest: parseFloat(raw.openInterest),
+    timestamp: parseFloat(raw.timestamp),
+  };
+}
+
+export function normalizeBybitFeeRateList(rawList: BybitFeeRateRaw[]): FeeRate[] {
+  return rawList.map((raw) => ({
+    symbol: raw.symbol,
+    makerRate: parseFloat(raw.makerFeeRate),
+    takerRate: parseFloat(raw.takerFeeRate),
+  }));
+}
+
+export function normalizeBybitFundingRateHistoryList(rawList: BybitFundingRateHistoryRaw[]): FundingRateHistory[] {
+  return rawList.map((raw) => ({
+    symbol: raw.symbol,
+    fundingRate: parseFloat(raw.fundingRate),
+    fundingTime: parseFloat(raw.fundingRateTimestamp),
+    markPrice: null,
+  }));
+}
+
+export function normalizeBybitClosedPnlList(rawList: BybitClosedPnlRaw[]): ClosedPnl[] {
+  return rawList.map((raw) => ({
+    symbol: raw.symbol,
+    orderId: raw.orderId,
+    side: BYBIT_ORDER_SIDE[raw.side] ?? OrderSideEnum.Buy,
+    quantity: parseFloat(raw.qty),
+    entryPrice: parseFloat(raw.avgEntryPrice),
+    exitPrice: parseFloat(raw.avgExitPrice),
+    closedPnl: parseFloat(raw.closedPnl),
+    timestamp: parseFloat(raw.createdTime),
+  }));
+}
+
+export function normalizeBybitIncomeList(rawList: BybitTransactionLogRaw[]): Income[] {
+  return rawList.map((raw) => ({
+    symbol: raw.symbol,
+    incomeType: raw.type,
+    income: parseFloat(raw.cashFlow),
+    asset: raw.currency,
+    timestamp: parseFloat(raw.transactionTime),
+    info: { tradeId: raw.tradeId, orderId: raw.orderId },
+  }));
 }

@@ -5,6 +5,13 @@ import type {
   BybitPositionRaw,
   BybitOrderResponseRaw,
   BybitWalletBalanceRaw,
+  BybitOrderBookRaw,
+  BybitPublicTradeRaw,
+  BybitOpenInterestRaw,
+  BybitFeeRateRaw,
+  BybitFundingRateHistoryRaw,
+  BybitClosedPnlRaw,
+  BybitTransactionLogRaw,
 } from '../../src/normalizers/bybitNormalizer';
 
 export const BYBIT_RAW_INSTRUMENT_LIST: BybitInstrumentInfoRaw[] = [
@@ -109,7 +116,7 @@ export const BYBIT_RAW_INSTRUMENT_NO_FILTERS: BybitInstrumentInfoRaw = {
 
 export const BYBIT_RAW_WALLET_BALANCE: BybitWalletBalanceRaw = {
   list: [
-    { accountType: 'UNIFIED', coin: [
+    { accountType: 'UNIFIED', totalWalletBalance: '1801.10', totalAvailableBalance: '1501.10', totalMarginBalance: '1801.10', totalInitialMargin: '300.00', coin: [
       { coin: 'USDT', availableToWithdraw: '', walletBalance: '1200.50', totalOrderIM: '200', totalPositionIM: '0', locked: '200.00' },
       { coin: 'BTC', availableToWithdraw: '', walletBalance: '0.6', totalOrderIM: '0.1', totalPositionIM: '0', locked: '0.1' },
       { coin: 'DOGE', walletBalance: '0', totalOrderIM: '0', totalPositionIM: '0', locked: '0' },
@@ -119,3 +126,39 @@ export const BYBIT_RAW_WALLET_BALANCE: BybitWalletBalanceRaw = {
     ]},
   ],
 };
+
+export const BYBIT_RAW_ORDER_BOOK: BybitOrderBookRaw = {
+  a: [['65001.00', '0.800'], ['65002.00', '1.200']],
+  b: [['65000.00', '1.500'], ['64999.00', '2.300']],
+  ts: 1700000000000,
+  u: 123456,
+};
+
+export const BYBIT_RAW_PUBLIC_TRADE_LIST: BybitPublicTradeRaw[] = [
+  { execId: 'exec-1', symbol: 'BTCUSDT', price: '65000.50', size: '0.100', side: 'Buy', time: '1700000000000', isBlockTrade: false },
+  { execId: 'exec-2', symbol: 'BTCUSDT', price: '65001.00', size: '0.200', side: 'Sell', time: '1700000001000', isBlockTrade: false },
+];
+
+export const BYBIT_RAW_OPEN_INTEREST: BybitOpenInterestRaw = {
+  openInterest: '12345.678',
+  timestamp: '1700000000000',
+};
+
+export const BYBIT_RAW_FEE_RATE_LIST: BybitFeeRateRaw[] = [
+  { symbol: 'BTCUSDT', makerFeeRate: '0.0001', takerFeeRate: '0.0006' },
+  { symbol: 'ETHUSDT', makerFeeRate: '0.0001', takerFeeRate: '0.0006' },
+];
+
+export const BYBIT_RAW_FUNDING_RATE_HISTORY_LIST: BybitFundingRateHistoryRaw[] = [
+  { symbol: 'BTCUSDT', fundingRate: '0.0001', fundingRateTimestamp: '1700000000000' },
+  { symbol: 'BTCUSDT', fundingRate: '0.00015', fundingRateTimestamp: '1700028800000' },
+];
+
+export const BYBIT_RAW_CLOSED_PNL_LIST: BybitClosedPnlRaw[] = [
+  { symbol: 'BTCUSDT', orderId: 'order-1', side: 'Buy', qty: '0.100', avgEntryPrice: '64000.00', avgExitPrice: '65000.00', closedPnl: '100.00', createdTime: '1700000000000' },
+];
+
+export const BYBIT_RAW_TRANSACTION_LOG_LIST: BybitTransactionLogRaw[] = [
+  { symbol: 'BTCUSDT', type: 'TRADE', qty: '0.100', cashFlow: '-6500.00', currency: 'USDT', transactionTime: '1700000000000', tradeId: 'trade-1', orderId: 'order-1' },
+  { symbol: 'ETHUSDT', type: 'FUNDING', qty: '0', cashFlow: '0.50', currency: 'USDT', transactionTime: '1700000001000', tradeId: '', orderId: '' },
+];

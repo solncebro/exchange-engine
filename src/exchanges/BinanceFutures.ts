@@ -1,5 +1,5 @@
-import type { ExchangeArgs, FetchPageWithLimitArgs } from '../types/exchange';
-import type { Position, Order, FundingRateHistory, FundingInfo, BalanceByAsset } from '../types/common';
+import type { ExchangeArgs, FetchPageWithLimitArgs, ModifyOrderArgs, CreateOrderWebSocketArgs } from '../types/exchange';
+import type { Position, Order, FundingRateHistory, FundingInfo, AccountBalances, MarkPrice, OpenInterest, FeeRate, Income } from '../types/common';
 import { MarginModeEnum, PositionModeEnum } from '../types/common';
 import { BinanceFuturesHttpClient } from '../http/BinanceFuturesHttpClient';
 import {
@@ -7,7 +7,11 @@ import {
   normalizeBinanceOrder,
   normalizeBinanceFundingRateHistory,
   normalizeBinanceFundingInfo,
-  normalizeBinanceFuturesBalance,
+  normalizeBinanceFuturesBalances,
+  normalizeBinanceMarkPriceList,
+  normalizeBinanceOpenInterest,
+  normalizeBinanceCommissionRate,
+  normalizeBinanceIncomeList,
 } from '../normalizers/binanceNormalizer';
 import { BinanceFuturesPublicStream } from '../ws/BinanceFuturesPublicStream';
 import {
@@ -64,10 +68,10 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
     });
   }
 
-  protected async fetchAndNormalizeBalance(): Promise<BalanceByAsset> {
+  protected async fetchAndNormalizeBalances(): Promise<AccountBalances> {
     const raw = await this.httpClient.fetchFuturesAccount();
 
-    return normalizeBinanceFuturesBalance(raw);
+    return normalizeBinanceFuturesBalances(raw);
   }
 
   async fetchFundingRateHistory(
@@ -122,6 +126,83 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
     const rawList = await this.httpClient.getAllOrders(symbol, options);
 
     return rawList.map(normalizeBinanceOrder);
+  }
+
+  async modifyOrder(args: ModifyOrderArgs): Promise<Order> {
+    this.logger.debug(`[Binance] Modifying order ${args.orderId} for ${args.symbol}`);
+    const params: Record<string, unknown> = {
+      symbol: args.symbol,
+      orderId: args.orderId,
+    };
+
+    if (args.price !== undefined) {
+      params.price = String(this.priceToPrecision(args.symbol, args.price));
+    }
+
+    if (args.amount !== undefined) {
+      params.quantity = String(this.amountToPrecision(args.symbol, args.amount));
+    }
+
+    if (args.triggerPrice !== undefined) {
+      params.stopPrice = String(this.priceToPrecision(args.symbol, args.triggerPrice));
+    }
+
+    const raw = await this.httpClient.modifyOrder(params);
+
+    return normalizeBinanceOrder(raw);
+  }
+
+  async cancelAllOrders(symbol: string): Promise<void> {
+    this.logger.debug(`[Binance] Cancelling all orders for ${symbol}`);
+    await this.httpClient.cancelAllOrders(symbol);
+  }
+
+  async createBatchOrders(orderList: CreateOrderWebSocketArgs[]): Promise<Order[]> {
+    this.logger.debug(`[Binance] Creating batch of ${orderList.length} orders`);
+    const paramsList = orderList.map((args) => this.buildBinanceOrderParams(args));
+    const rawList = await this.httpClient.createBatchOrders(paramsList);
+
+    return rawList.map(normalizeBinanceOrder);
+  }
+
+  async cancelBatchOrders(symbol: string, orderIdList: string[]): Promise<void> {
+    this.logger.debug(`[Binance] Cancelling batch of ${orderIdList.length} orders for ${symbol}`);
+    await this.httpClient.cancelBatchOrders(symbol, orderIdList);
+  }
+
+  async fetchMarkPrice(symbol?: string): Promise<MarkPrice[]> {
+    this.logger.debug('[Binance] Fetching mark price');
+    const raw = await this.httpClient.fetchMarkPrice(symbol);
+    const rawList = Array.isArray(raw) ? raw : [raw];
+
+    return normalizeBinanceMarkPriceList(rawList);
+  }
+
+  async fetchOpenInterest(symbol: string): Promise<OpenInterest> {
+    this.logger.debug(`[Binance] Fetching open interest for ${symbol}`);
+    const raw = await this.httpClient.fetchOpenInterest(symbol);
+
+    return normalizeBinanceOpenInterest(raw);
+  }
+
+  async fetchFeeRate(symbol?: string): Promise<FeeRate[]> {
+    this.logger.debug('[Binance] Fetching fee rate');
+    const raw = await this.httpClient.fetchCommissionRate(symbol);
+
+    return normalizeBinanceCommissionRate(raw);
+  }
+
+  async fetchIncome(options?: FetchPageWithLimitArgs): Promise<Income[]> {
+    this.logger.debug('[Binance] Fetching income');
+    const rawList = await this.httpClient.fetchIncome(options);
+
+    return normalizeBinanceIncomeList(rawList);
+  }
+
+  async setPositionMode(mode: PositionModeEnum): Promise<void> {
+    this.logger.info(`[Binance] Setting position mode to ${mode}`);
+    const dualSidePosition = mode === PositionModeEnum.Hedge;
+    await this.httpClient.setPositionMode(dualSidePosition);
   }
 }
 

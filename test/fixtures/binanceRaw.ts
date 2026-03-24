@@ -8,6 +8,12 @@ import type {
   BinanceFuturesAccountRaw,
   BinanceFundingRateHistoryRaw,
   BinanceFundingInfoRaw,
+  BinanceOrderBookRaw,
+  BinancePublicTradeRaw,
+  BinanceMarkPriceRaw,
+  BinanceOpenInterestRaw,
+  BinanceCommissionRateRaw,
+  BinanceIncomeRaw,
 } from '../../src/normalizers/binanceNormalizer';
 
 export const BINANCE_RAW_EXCHANGE_INFO: BinanceExchangeInfoRaw = {
@@ -106,6 +112,8 @@ export const BINANCE_RAW_ACCOUNT: BinanceAccountRaw = {
 };
 
 export const BINANCE_RAW_FUTURES_ACCOUNT: BinanceFuturesAccountRaw = {
+  totalWalletBalance: '1205.50',
+  availableBalance: '1000.50',
   assets: [
     { asset: 'USDT', walletBalance: '1200.50', availableBalance: '1000.50' },
     { asset: 'BNB', walletBalance: '5.00', availableBalance: '3.50' },
@@ -150,3 +158,38 @@ export const BINANCE_RAW_SYMBOL_NO_FILTERS = {
 export const BINANCE_RAW_POSITION_MODE_HEDGE = { dualSidePosition: true };
 
 export const BINANCE_RAW_POSITION_MODE_ONE_WAY = { dualSidePosition: false };
+
+export const BINANCE_RAW_ORDER_BOOK: BinanceOrderBookRaw = {
+  lastUpdateId: 123456,
+  E: 1700000000000,
+  T: 1700000000000,
+  bids: [['65000.00', '1.500'], ['64999.00', '2.300']],
+  asks: [['65001.00', '0.800'], ['65002.00', '1.200']],
+};
+
+export const BINANCE_RAW_PUBLIC_TRADE_LIST: BinancePublicTradeRaw[] = [
+  { id: 12345, price: '65000.50', qty: '0.100', quoteQty: '6500.05', time: 1700000000000, isBuyerMaker: false },
+  { id: 12346, price: '65001.00', qty: '0.200', quoteQty: '13000.20', time: 1700000001000, isBuyerMaker: true },
+];
+
+export const BINANCE_RAW_MARK_PRICE_LIST: BinanceMarkPriceRaw[] = [
+  { symbol: 'BTCUSDT', markPrice: '65000.50', indexPrice: '65001.00', lastFundingRate: '0.0001', nextFundingTime: 1700003600000, time: 1700000000000 },
+  { symbol: 'ETHUSDT', markPrice: '3500.25', indexPrice: '3500.50', lastFundingRate: '0.00015', nextFundingTime: 1700003600000, time: 1700000000000 },
+];
+
+export const BINANCE_RAW_OPEN_INTEREST: BinanceOpenInterestRaw = {
+  symbol: 'BTCUSDT',
+  openInterest: '12345.678',
+  time: 1700000000000,
+};
+
+export const BINANCE_RAW_COMMISSION_RATE: BinanceCommissionRateRaw = {
+  symbol: 'BTCUSDT',
+  makerCommissionRate: '0.0002',
+  takerCommissionRate: '0.0004',
+};
+
+export const BINANCE_RAW_INCOME_LIST: BinanceIncomeRaw[] = [
+  { symbol: 'BTCUSDT', incomeType: 'REALIZED_PNL', income: '15.50', asset: 'USDT', time: 1700000000000, info: '', tranId: 123456, tradeId: '789' },
+  { symbol: 'ETHUSDT', incomeType: 'FUNDING_FEE', income: '-0.05', asset: 'USDT', time: 1700000001000, info: '', tranId: 123457, tradeId: '790' },
+];

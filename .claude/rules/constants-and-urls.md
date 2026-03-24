@@ -97,14 +97,15 @@ countDecimalPlaces("0.001") → 3
 countDecimalPlaces("0.10") → 1  (trailing zeros removed)
 countDecimalPlaces("1") → 0
 
-roundToStep(value, step):
+roundToStep(value, step): number
   1. stepValue = parseFloat(step)
-  2. decimals = countDecimalPlaces(step)
-  3. rounded = Math.round(value / stepValue) * stepValue
-  4. return rounded.toFixed(decimals)
+  2. Если stepValue === 0 или NaN → возвращает value
+  3. decimals = countDecimalPlaces(step)
+  4. rounded = Math.round(value / stepValue) * stepValue
+  5. return parseFloat(rounded.toFixed(decimals))
 
-amountToPrecision(tradeSymbol, amount) → roundToStep(amount, filter.stepSize)
-priceToPrecision(tradeSymbol, price) → roundToStep(price, filter.tickSize)
+amountToPrecision(tradeSymbol, amount): number → roundToStep(amount, filter.stepSize)
+priceToPrecision(tradeSymbol, price): number → roundToStep(price, filter.tickSize)
 ```
 
 ## Kline Loader (src/utils/klineLoader.ts)
@@ -112,10 +113,13 @@ priceToPrecision(tradeSymbol, price) → roundToStep(price, filter.tickSize)
 ```
 KLINE_CHUNK_SIZE = 200
 
-loadKlinesInChunks({ fetchKlines, symbolList, logger, chunkSize? }):
+loadKlinesInChunks({ fetchKlines, symbolList, logger, chunkSize?, pauseBetweenChunksMs?, trimLastKline?, onChunkLoaded? }):
   1. Разбивает symbolList на чанки по chunkSize
   2. Каждый чанк — Promise.all() (параллельная загрузка)
   3. Чанки обрабатываются последовательно
-  4. Логирует прогресс: "Loaded klines for X/Y symbols"
-  5. Возвращает Map<string, Kline[]>
+  4. Если trimLastKline — удаляет последнюю (незакрытую) свечу
+  5. Если onChunkLoaded — вызывает callback с Map результатами чанка
+  6. Если pauseBetweenChunksMs > 0 — пауза между чанками
+  7. Логирует прогресс: "Loaded klines for X/Y symbols"
+  8. Возвращает Map<string, Kline[]>
 ```

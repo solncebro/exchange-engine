@@ -3,6 +3,8 @@ import type {
   BinanceTicker24hrRaw,
   BinanceOrderResponseRaw,
   BinanceAccountRaw,
+  BinanceOrderBookRaw,
+  BinancePublicTradeRaw,
 } from '../normalizers/binanceNormalizer';
 import type { FetchPageWithLimitArgs } from '../types/exchange';
 import { buildBinanceSignedParams, buildBinanceAuthHeaders } from '../auth/binanceAuth';
@@ -14,6 +16,7 @@ import type {
   BinanceErrorResponse,
   BinanceHttpClientArgs,
   BinanceListenKeyResponse,
+  SignRequestResult,
 } from './BinanceBaseHttpClient.types';
 
 abstract class BinanceBaseHttpClient extends BaseHttpClient {
@@ -29,32 +32,38 @@ abstract class BinanceBaseHttpClient extends BaseHttpClient {
     path: string,
     params: Record<string, string | number | boolean> = {},
   ): Promise<T> {
-    const { signedParams, headers } = this.signRequest(params);
-    const response = await this.get<T>(path, signedParams, headers);
-
-    this.validateResponse(response);
-
-    return response;
+    return this.signedRequest(params, (signedParams, headers) =>
+      this.get<T>(path, signedParams, headers),
+    );
   }
 
   protected async signedPost<T>(
     path: string,
     params: Record<string, string | number | boolean> = {},
   ): Promise<T> {
-    const { signedParams, headers } = this.signRequest(params);
-    const response = await this.postWithParams<T>(path, signedParams, headers);
-
-    this.validateResponse(response);
-
-    return response;
+    return this.signedRequest(params, (signedParams, headers) =>
+      this.postWithParams<T>(path, signedParams, headers),
+    );
   }
 
   protected async signedDelete<T>(
     path: string,
     params: Record<string, string | number | boolean> = {},
   ): Promise<T> {
+    return this.signedRequest(params, (signedParams, headers) =>
+      this.delete<T>(path, signedParams, headers),
+    );
+  }
+
+  private async signedRequest<T>(
+    params: Record<string, string | number | boolean>,
+    execute: (
+      signedParams: Record<string, string | number | boolean>,
+      headers: Record<string, string>,
+    ) => Promise<T>,
+  ): Promise<T> {
     const { signedParams, headers } = this.signRequest(params);
-    const response = await this.delete<T>(path, signedParams, headers);
+    const response = await execute(signedParams, headers);
 
     this.validateResponse(response);
 
@@ -71,10 +80,7 @@ abstract class BinanceBaseHttpClient extends BaseHttpClient {
     }
   }
 
-  private signRequest(params: Record<string, string | number | boolean>): {
-    signedParams: Record<string, string | number | boolean>;
-    headers: Record<string, string>;
-  } {
+  private signRequest(params: Record<string, string | number | boolean>): SignRequestResult {
     return {
       signedParams: buildBinanceSignedParams({ params, secret: this.secret }) as Record<string, string | number | boolean>,
       headers: buildBinanceAuthHeaders(this.apiKey),
@@ -105,14 +111,14 @@ abstract class BinanceBaseHttpClient extends BaseHttpClient {
     return this.get<BinanceTicker24hrRaw[]>(this.endpoints.ticker24hr);
   }
 
-  async fetchOrderBook(symbol: string, limit?: number): Promise<Record<string, unknown>> {
+  async fetchOrderBook(symbol: string, limit?: number): Promise<BinanceOrderBookRaw> {
     const params: Record<string, string | number | boolean> = { symbol };
 
     if (limit !== undefined) {
       params.limit = limit;
     }
 
-    return this.get<Record<string, unknown>>(this.endpoints.depth, params);
+    return this.get<BinanceOrderBookRaw>(this.endpoints.depth, params);
   }
 
   async fetchKlines(
@@ -126,14 +132,14 @@ abstract class BinanceBaseHttpClient extends BaseHttpClient {
     return this.get<unknown[][]>(this.endpoints.klines, params);
   }
 
-  async fetchTrades(symbol: string, limit?: number): Promise<Record<string, unknown>[]> {
+  async fetchTrades(symbol: string, limit?: number): Promise<BinancePublicTradeRaw[]> {
     const params: Record<string, string | number | boolean> = { symbol };
 
     if (limit !== undefined) {
       params.limit = limit;
     }
 
-    return this.get<Record<string, unknown>[]>(this.endpoints.trades, params);
+    return this.get<BinancePublicTradeRaw[]>(this.endpoints.trades, params);
   }
 
   async createOrder(params: Record<string, unknown>): Promise<BinanceOrderResponseRaw> {
@@ -143,16 +149,16 @@ abstract class BinanceBaseHttpClient extends BaseHttpClient {
     );
   }
 
-  async cancelOrder(symbol: string, orderId: string): Promise<Record<string, unknown>> {
-    return this.signedDelete<Record<string, unknown>>(this.endpoints.order, { symbol, orderId });
+  async cancelOrder(symbol: string, orderId: string): Promise<BinanceOrderResponseRaw> {
+    return this.signedDelete<BinanceOrderResponseRaw>(this.endpoints.order, { symbol, orderId });
   }
 
-  async getOrder(symbol: string, orderId: string): Promise<Record<string, unknown>> {
-    return this.signedGet<Record<string, unknown>>(this.endpoints.order, { symbol, orderId });
+  async getOrder(symbol: string, orderId: string): Promise<BinanceOrderResponseRaw> {
+    return this.signedGet<BinanceOrderResponseRaw>(this.endpoints.order, { symbol, orderId });
   }
 
-  async getOpenOrders(symbol?: string): Promise<Record<string, unknown>[]> {
-    return this.signedGet<Record<string, unknown>[]>(this.endpoints.openOrders, this.buildOptionalSymbolParams(symbol));
+  async getOpenOrders(symbol?: string): Promise<BinanceOrderResponseRaw[]> {
+    return this.signedGet<BinanceOrderResponseRaw[]>(this.endpoints.openOrders, this.buildOptionalSymbolParams(symbol));
   }
 
   async fetchAccount(): Promise<BinanceAccountRaw> {

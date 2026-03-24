@@ -28,3 +28,8 @@ export interface BinanceEndpoints {
   account: string;
   listenKey: string;
 }
+
+export interface SignRequestResult {
+  signedParams: Record<string, string | number | boolean>;
+  headers: Record<string, string>;
+}

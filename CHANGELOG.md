@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-03-22
+
+### Breaking Changes
+- Removed standalone exports: `normalizeBybitKlineWebSocketMessage`, `normalizeBinanceKlineWebSocketMessage` functions and raw WebSocket types (`BybitWebSocketKlineRaw`, `BybitPublicTradeDataRaw`, `BybitWebSocketMessageRaw`, `BybitKlineMessageRaw`, `BybitTradeMessageRaw`, `BinanceWebSocketKlineRaw`, `BinanceContinuousKlineMessageRaw`) — all functionality is now accessible only through `ExchangeClient` instances
+- `ExchangeClient.fetchBalance()` renamed to `fetchBalances()` — consumers must update method calls
+- `fetchBalances()` return type changed from `BalanceByAsset` to `AccountBalances` — use `result.balanceByAsset` for per-asset Map, `result.totalWalletBalance` and `result.totalAvailableBalance` for account-level totals
+
+### Added
+- 16 new methods on `ExchangeClient` interface:
+  - Order management: `cancelOrder()`, `getOrder()`, `fetchOpenOrders()`, `modifyOrder()`, `cancelAllOrders()`, `createBatchOrders()`, `cancelBatchOrders()`
+  - Market data: `fetchOrderBook()`, `fetchTrades()`, `fetchMarkPrice()`, `fetchOpenInterest()`
+  - Account: `fetchFeeRate()`, `fetchIncome()`, `fetchClosedPnl()`
+  - Settings: `setPositionMode()`
+- `AccountBalances` type with `totalWalletBalance`, `totalAvailableBalance`, and `balanceByAsset` fields
+- 8 unified types: `OrderBook`, `OrderBookLevel`, `PublicTrade`, `MarkPrice`, `OpenInterest`, `FeeRate`, `Income`, `ClosedPnl`
+- `ModifyOrderArgs` interface for `modifyOrder()` parameters
+- 13 raw interfaces and 13 normalizer functions (6 Binance, 7 Bybit) for new endpoints
+- `fetchFundingRateHistory()` implementation for Bybit (previously threw "Not implemented")
+- `docs/api-reference.md` — complete API reference for consumers and LLMs
+
+### Changed
+- `BybitBaseClient.category` visibility: `private` → `protected` for subclass access
+- 7 methods moved from `BybitLinear` to `BybitBaseClient` for Bybit Spot support: `modifyOrder`, `cancelAllOrders`, `createBatchOrders`, `cancelBatchOrders`, `fetchIncome`, `fetchClosedPnl`, `fetchOrderHistory`
+- 19 HTTP client methods typed with concrete raw interfaces (replaced `Record<string, unknown>`)
+- `OrderBook` uses `askList`/`bidList` naming (array `List` suffix convention)
+- `fetchBalance()` renamed to `fetchBalances()` (plural, consistent with `fetchTickers`)
+- Normalizers renamed: `normalizeBinanceBalance` → `normalizeBinanceBalances`, `normalizeBinanceFuturesBalance` → `normalizeBinanceFuturesBalances`, `normalizeBybitBalance` → `normalizeBybitBalances`
+- Binance Futures API endpoints updated: `/fapi/v2/account` → `/fapi/v3/account`, `/fapi/v2/positionRisk` → `/fapi/v3/positionRisk`
+
+### Internal
+- Extracted `parseOrderBookLevel()` into `src/normalizers/normalizerUtils.ts` — deduplicated 4 identical lambdas across Binance/Bybit normalizers
+- Extracted `signedRequest()` in `BinanceBaseHttpClient` — deduplicated `signedGet`, `signedPost`, `signedDelete`
+- Extracted inline types into named interfaces: `SignRequestResult`, `BybitCancelOrderResult`, `BybitTradeOrderData`, `TimestampedParamsResult`
+
 ## [0.5.0] - 2026-03-18
 
 ### Breaking Changes
@@ -204,6 +238,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Private endpoints (balance, position, orders) require valid credentials
 - WebSocket subscriptions are stateless and can be re-established on reconnect
 
+[0.6.0]: https://github.com/solncebro/exchange-engine/releases/tag/v0.6.0
 [0.5.0]: https://github.com/solncebro/exchange-engine/releases/tag/v0.5.0
 [0.4.2]: https://github.com/solncebro/exchange-engine/releases/tag/v0.4.2
 [0.4.1]: https://github.com/solncebro/exchange-engine/releases/tag/v0.4.1

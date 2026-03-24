@@ -40,7 +40,7 @@ async function main() {
     console.log(`Last kline: Open $${lastKline.open}, Close $${lastKline.close}`);
 
     if (process.env.BINANCE_API_KEY) {
-      const balance = await exchange.futures.fetchBalance();
+      const balance = await exchange.futures.fetchBalances();
       const usdtBalance = balance.get('USDT');
 
       if (usdtBalance) {

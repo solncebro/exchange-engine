@@ -69,14 +69,16 @@ Rate limiting — **только реактивный** (нет proactive thrott
 4. Добавить `signature` к params
 
 ### Общие эндпоинты (реализованы в base):
-- `fetchExchangeInfo()` → GET `endpoints.exchangeInfo`
-- `fetchTickers()` → GET `endpoints.ticker24hr`
+- `fetchExchangeInfo()` → `BinanceExchangeInfoRaw` — GET `endpoints.exchangeInfo`
+- `fetchTickers()` → `BinanceTicker24hrRaw[]` — GET `endpoints.ticker24hr`
+- `fetchOrderBook(symbol, limit?)` → `BinanceOrderBookRaw` — GET `endpoints.depth`
 - `fetchKlines(symbol, interval, options?)` → GET `endpoints.klines`
-- `fetchAccount()` → signedGet `endpoints.account`
-- `createOrder(params)` → signedPost `endpoints.order`
-- `cancelOrder(symbol, orderId)` → signedDelete `endpoints.order`
-- `getOrder(symbol, orderId)` → signedGet `endpoints.order`
-- `getOpenOrders(symbol?)` → signedGet `endpoints.openOrders`
+- `fetchTrades(symbol, limit?)` → `BinancePublicTradeRaw[]` — GET `endpoints.trades`
+- `fetchAccount()` → `BinanceAccountRaw` — signedGet `endpoints.account`
+- `createOrder(params)` → `BinanceOrderResponseRaw` — signedPost `endpoints.order`
+- `cancelOrder(symbol, orderId)` → `BinanceOrderResponseRaw` — signedDelete `endpoints.order`
+- `getOrder(symbol, orderId)` → `BinanceOrderResponseRaw` — signedGet `endpoints.order`
+- `getOpenOrders(symbol?)` → `BinanceOrderResponseRaw[]` — signedGet `endpoints.openOrders`
 - `createListenKey()` / `keepAliveListenKey()` / `deleteListenKey()` — для user data stream
 
 ### BinanceEndpoints интерфейс:
@@ -86,28 +88,29 @@ order, openOrders, account, listenKey
 ```
 
 Реализация в подклассах — разные префиксы путей:
-- Futures: `/fapi/v1/*` и `/fapi/v2/account`
+- Futures: `/fapi/v1/*` и `/fapi/v3/account`
 - Spot: `/api/v3/*`
 
 ## BinanceFuturesHttpClient
 
 Дополнительные методы (фьючерсные):
-- `fetchFundingInfo(symbol?)` → GET `/fapi/v1/fundingInfo` (public)
+- `fetchFuturesAccount()` → `BinanceFuturesAccountRaw` — signedGet `endpoints.account`
+- `fetchFundingInfo(symbol?)` → `BinanceFundingInfoRaw[]` — GET `/fapi/v1/fundingInfo` (public)
 - `fetchPositionMode()` → signedGet `/fapi/v1/positionSide/dual`
-- `fetchMarkPrice(symbol?)` → GET `/fapi/v1/premiumIndex`
-- `fetchFundingRateHistory(symbol, options?)` → GET `/fapi/v1/fundingRate`
-- `fetchPositionRisk(symbol?)` → signedGet `/fapi/v2/positionRisk`
-- `fetchOpenInterest(symbol)` → GET `/fapi/v1/openInterest`
+- `fetchMarkPrice(symbol?)` → `BinanceMarkPriceRaw | BinanceMarkPriceRaw[]` — GET `/fapi/v1/premiumIndex`
+- `fetchFundingRateHistory(symbol, options?)` → `BinanceFundingRateHistoryRaw[]` — GET `/fapi/v1/fundingRate`
+- `fetchPositionRisk(symbol?)` → `BinancePositionRiskRaw[]` — signedGet `/fapi/v3/positionRisk`
+- `fetchOpenInterest(symbol)` → `BinanceOpenInterestRaw` — GET `/fapi/v1/openInterest`
 - `setLeverage(symbol, leverage)` → signedPost `/fapi/v1/leverage`
 - `setMarginType(symbol, marginType)` → signedPost `/fapi/v1/marginType`
 - `setPositionMode(dualSidePosition)` → signedPost `/fapi/v1/positionSide/dual`
-- `modifyOrder(params)` → PUT с ручным signing через `buildBinanceSignedParams`
+- `modifyOrder(params)` → `BinanceOrderResponseRaw` — PUT с ручным signing через `buildBinanceSignedParams`
 - `cancelAllOrders(symbol)` → signedDelete `/fapi/v1/allOpenOrders`
-- `getAllOrders(symbol, options?)` → signedGet `/fapi/v1/allOrders`
-- `createBatchOrders(orderList)` → signedPost `/fapi/v1/batchOrders`
+- `getAllOrders(symbol, options?)` → `BinanceOrderResponseRaw[]` — signedGet `/fapi/v1/allOrders`
+- `createBatchOrders(orderList)` → `BinanceOrderResponseRaw[]` — signedPost `/fapi/v1/batchOrders`
 - `cancelBatchOrders(symbol, orderIdList)` → signedDelete `/fapi/v1/batchOrders`
-- `fetchCommissionRate(symbol)` → signedGet `/fapi/v1/commissionRate`
-- `fetchIncome(options?)` → signedGet `/fapi/v1/income`
+- `fetchCommissionRate(symbol?)` → `BinanceCommissionRateRaw` — signedGet `/fapi/v1/commissionRate`
+- `fetchIncome(options?)` → `BinanceIncomeRaw[]` — signedGet `/fapi/v1/income`
 - `modifyPositionMargin(symbol, amount, type)` → signedPost `/fapi/v1/positionMargin`
 
 ## BinanceSpotHttpClient
@@ -134,22 +137,35 @@ order, openOrders, account, listenKey
 - `authenticatedPost<T>(path, body)` — JSON.stringify body → подписывает → POST
 
 ### Private хелпер:
-- `buildCategoryParams(category, options?)` → `Record<string, ...>` — строит params с `{ category }` + optional `symbol` и `limit`. Используется в 7 методах: `fetchInstrumentsInfo`, `fetchTickers`, `getOpenOrders`, `getOrderHistory`, `getPositionList`, `getClosedPnl`, `fetchFeeRate`.
+- `buildCategoryParams(category, options?)` → `Record<string, ...>` — строит params с `{ category }` + optional `symbol`, `limit` и `orderId`. Используется в 7 методах: `fetchInstrumentsInfo`, `fetchTickers`, `getOpenOrders`, `getOrderHistory`, `getPositionList`, `getClosedPnl`, `fetchFeeRate`.
 
 ### Все методы используют категорию:
-- `fetchInstrumentsInfo(category, options?)` — market data
-- `fetchTickers(category, options?)` — тикеры
-- `fetchKline(args)` — свечи (с конвертацией интервалов)
-- `createOrder(params)` → POST `/v5/order/create`
-- `getOpenOrders(category, options?)` → GET `/v5/order/realtime`
-- `getOrderHistory(category, options?)` → GET `/v5/order/history`
-- `getPositionList(category, options?)` → GET `/v5/position/list`
-- `getClosedPnl(category, options?)` → GET `/v5/position/closed-pnl`
-- `fetchFeeRate(category, options?)` → GET `/v5/account/fee-rate`
+- `fetchInstrumentsInfo(category, options?)` → `BybitListResponse<BybitInstrumentInfoRaw>` — GET `/v5/market/instruments-info`
+- `fetchTickers(category, options?)` → `BybitListResponse<BybitTickerRaw>` — GET `/v5/market/tickers`
+- `fetchOrderBook(category, symbol, limit?)` → `BybitResponse<BybitOrderBookRaw>` — GET `/v5/market/orderbook`
+- `fetchKline(args)` → `BybitListResponse<string[]>` — GET `/v5/market/kline` (с конвертацией интервалов)
+- `fetchRecentTrades(category, symbol, limit?)` → `BybitListResponse<BybitPublicTradeRaw>` — GET `/v5/market/recent-trade`
+- `fetchFundingHistory(category, symbol, options?)` → `BybitListResponse<BybitFundingRateHistoryRaw>` — GET `/v5/market/funding/history`
+- `fetchOpenInterest(category, symbol, options?)` → `BybitListResponse<BybitOpenInterestRaw>` — GET `/v5/market/open-interest`
+- `createOrder(params)` → `BybitResponse<BybitOrderResponseRaw>` — POST `/v5/order/create`
+- `amendOrder(params)` → POST `/v5/order/amend`
+- `cancelOrder(params)` → `BybitResponse<{ orderId, orderLinkId }>` — POST `/v5/order/cancel`
+- `cancelAllOrders(category, symbol?)` → POST `/v5/order/cancel-all`
+- `getOpenOrders(category, options?)` → `BybitListResponse<BybitOrderResponseRaw>` — GET `/v5/order/realtime`
+- `getOrderHistory(category, options?)` → `BybitListResponse<BybitOrderResponseRaw>` — GET `/v5/order/history`
+- `createBatchOrders(category, requestList)` → POST `/v5/order/create-batch`
+- `cancelBatchOrders(category, requestList)` → POST `/v5/order/cancel-batch`
+- `getPositionList(category, options?)` → `BybitListResponse<BybitPositionRaw>` — GET `/v5/position/list`
+- `getClosedPnl(category, options?)` → `BybitListResponse<BybitClosedPnlRaw>` — GET `/v5/position/closed-pnl`
+- `fetchFeeRate(category, options?)` → `BybitListResponse<BybitFeeRateRaw>` — GET `/v5/account/fee-rate`
+- `fetchTransactionLog(options?)` → `BybitListResponse<BybitTransactionLogRaw>` — GET `/v5/account/transaction-log`
 - `setLeverage(args)` → POST `/v5/position/set-leverage`
 - `switchIsolated(args)` → POST `/v5/position/switch-isolated`
-- `fetchWalletBalance(accountType)` → GET `/v5/account/wallet-balance`
-- `fetchAllInstrumentsInfo(category)` → пагинация через cursor, возвращает полный список инструментов
+- `fetchWalletBalance(accountType)` → `BybitResponse<BybitWalletBalanceRaw>` — GET `/v5/account/wallet-balance`
+- `fetchAccountInfo()` → GET `/v5/account/info`
+- `setMarginMode(mode)` → POST `/v5/account/set-margin-mode`
+- `setTradingStop(params)` → POST `/v5/position/trading-stop`
+- `fetchAllInstrumentsInfo(category)` → `BybitInstrumentInfoRaw[]` — пагинация через cursor, возвращает полный список инструментов
 
 ## Паттерн для optional symbol
 
@@ -180,5 +196,5 @@ async fetchSomething(symbol: string, options?: FetchPageWithLimitArgs): Promise<
 
 Типы вынесены в co-located `.types.ts` файлы:
 - `BaseHttpClient.types.ts` — BaseHttpClientArgs
-- `BinanceBaseHttpClient.types.ts` — BinanceEndpoints, BinanceBaseHttpClientArgs
-- `BybitHttpClient.types.ts` — BybitHttpClientArgs
+- `BinanceBaseHttpClient.types.ts` — BinanceEndpoints, BinanceHttpClientArgs, BinanceErrorResponse, BinanceListenKeyResponse
+- `BybitHttpClient.types.ts` — BybitHttpClientArgs, BybitApiResponse, BybitListResponse, BybitResponse, BybitOrderBookRaw (дублируется из normalizer), FetchBybitKlineArgs, SetBybitLeverageArgs, SwitchBybitIsolatedArgs, SymbolFilterArgs, SymbolLimitFilterArgs, PeriodFilterArgs, CategoryFilterArgs

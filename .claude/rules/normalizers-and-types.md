@@ -29,6 +29,12 @@ BinanceTicker24hrRaw { symbol, lastPrice: string, priceChangePercent: string, ti
 - `BinanceFuturesAccountRaw` — `{ assets: BinanceFuturesAssetRaw[] }` (BinanceFuturesAssetRaw — internal: `{ asset, walletBalance, availableBalance }`)
 - `BinanceFundingRateHistoryRaw` — `{ symbol, fundingRate, fundingTime, markPrice }`
 - `BinanceFundingInfoRaw` — `{ symbol, adjustedFundingRateCap, adjustedFundingRateFloor, fundingIntervalHours }`
+- `BinanceOrderBookRaw` — `{ lastUpdateId, E, T, bids: string[][], asks: string[][] }`
+- `BinancePublicTradeRaw` — `{ id, price, qty, quoteQty, time, isBuyerMaker }`
+- `BinanceMarkPriceRaw` — `{ symbol, markPrice, indexPrice, lastFundingRate, nextFundingTime, time }`
+- `BinanceOpenInterestRaw` — `{ symbol, openInterest, time }`
+- `BinanceCommissionRateRaw` — `{ symbol, makerCommissionRate, takerCommissionRate }`
+- `BinanceIncomeRaw` — `{ symbol, incomeType, income, asset, time, info, tranId, tradeId }`
 
 ### Функции нормализации:
 - `normalizeBinanceTradeSymbols(raw)` → `TradeSymbolBySymbol` (Map)
@@ -45,9 +51,9 @@ BinanceTicker24hrRaw { symbol, lastPrice: string, priceChangePercent: string, ti
 - `normalizeBinanceOrder(raw)` → `Order`
   - Маппинг через `BINANCE_ORDER_SIDE`, `BINANCE_ORDER_TYPE` и `BINANCE_ORDER_STATUS` (константы из `src/constants/mappings.ts`)
   - `orderId` number → string
-- `normalizeBinanceBalance(raw)` → `BalanceByAsset` (Map)
+- `normalizeBinanceBalances(raw)` → `BalanceByAsset` (Map)
   - Пропускает нулевые балансы (`free + locked === 0`)
-- `normalizeBinanceFuturesBalance(raw)` → `BalanceByAsset` (Map)
+- `normalizeBinanceFuturesBalances(raw)` → `BalanceByAsset` (Map)
   - Отдельная функция для фьючерсного баланса — использует `walletBalance`/`availableBalance` вместо `free`/`locked`
   - Пропускает записи с `walletBalance === 0`
   - `free = availableBalance`, `locked = walletBalance - availableBalance`, `total = walletBalance`
@@ -55,6 +61,18 @@ BinanceTicker24hrRaw { symbol, lastPrice: string, priceChangePercent: string, ti
   - Пустой markPrice → `null`
 - `normalizeBinanceFundingInfo(rawList)` → `FundingInfo[]`
   - parseFloat для строковых чисел, fundingIntervalHours уже number
+- `normalizeBinanceOrderBook(raw, symbol)` → `OrderBook`
+  - symbol передаётся отдельно (отсутствует в raw), timestamp fallback `T → E → Date.now()`
+- `normalizeBinancePublicTrades(rawList, symbol)` → `PublicTrade[]`
+  - symbol передаётся отдельно, `id` number → string, `qty → quantity`, `quoteQty → quoteQuantity`
+- `normalizeBinanceMarkPriceList(rawList)` → `MarkPrice[]`
+  - parseFloat для строковых полей, `time → timestamp`
+- `normalizeBinanceOpenInterest(raw)` → `OpenInterest`
+  - parseFloat для openInterest, `time → timestamp`
+- `normalizeBinanceCommissionRate(raw)` → `FeeRate[]`
+  - Возвращает массив из одного элемента, `makerCommissionRate → makerRate`, `takerCommissionRate → takerRate`
+- `normalizeBinanceIncomeList(rawList)` → `Income[]`
+  - `info` собирается из `{ tranId, tradeId, info }`
 
 ## bybitNormalizer.ts — все raw-типы и функции
 
@@ -68,6 +86,13 @@ REST:
 - `BybitPositionRaw` — `{ symbol, side, size, avgPrice, markPrice, unrealisedPnl, leverage, tradeMode, liqPrice, positionIdx, [key: string]: unknown }`
 - `BybitOrderResponseRaw` — `{ orderId, orderLinkId, symbol, side, orderType, timeInForce, qty, price, avgPrice, triggerPrice, cumExecQty, cumExecValue, orderStatus, reduceOnly, createdTime, updatedTime }`
 - `BybitWalletBalanceRaw` — `{ list: BybitAccountRaw[] }` (BybitAccountRaw — internal: `{ accountType, coin: BybitCoinRaw[] }`)
+- `BybitOrderBookRaw` — `{ a: string[][], b: string[][], ts, u }` (a = asks, b = bids)
+- `BybitPublicTradeRaw` — `{ execId, symbol, price, size, side, time, isBlockTrade }`
+- `BybitOpenInterestRaw` — `{ openInterest, timestamp }` (оба string)
+- `BybitFeeRateRaw` — `{ symbol, makerFeeRate, takerFeeRate }`
+- `BybitFundingRateHistoryRaw` — `{ symbol, fundingRate, fundingRateTimestamp }`
+- `BybitClosedPnlRaw` — `{ symbol, orderId, side, qty, avgEntryPrice, avgExitPrice, closedPnl, createdTime }`
+- `BybitTransactionLogRaw` — `{ symbol, type, qty, cashFlow, currency, transactionTime, tradeId, orderId }`
 
 WebSocket:
 - `BybitWebSocketKlineRaw` — `{ start, end?, interval?, open, high, low, close, volume, turnover, confirm: boolean, timestamp }`
@@ -97,11 +122,27 @@ WebSocket:
   - timestamp через `parseFloat(raw.createdTime)`
 - `buildBybitOrderFromCreateResponse(args, orderId)` → `Order`
   - Строит Order из `CreateOrderWebSocketArgs` + orderId, все filled-поля = 0, status = 'open'
-- `normalizeBybitBalance(raw)` → `BalanceByAsset` (Map)
+- `normalizeBybitBalances(raw)` → `BalanceByAsset` (Map)
   - Итерирует по `raw.list[].coin[]`, агрегирует балансы если один coin встречается в нескольких accounts
   - `free = walletBalance - totalPositionIM - totalOrderIM`
   - `locked` = frozenAmount или locked, fallback `walletBalance - free`
   - Пропускает нулевые балансы (`free + locked === 0`)
+- `normalizeBybitOrderBook(raw, symbol)` → `OrderBook`
+  - symbol передаётся отдельно, `a → askList`, `b → bidList`, `ts → timestamp`
+- `normalizeBybitPublicTradeList(rawList)` → `PublicTrade[]`
+  - `execId → id`, `size → quantity`, `quoteQuantity` вычисляется как `price * size`
+  - `isBuyerMaker = raw.side === 'Sell'`
+- `normalizeBybitOpenInterest(raw)` → `OpenInterest`
+  - `symbol` возвращается пустым (устанавливается вызывающим), parseFloat для строковых полей
+- `normalizeBybitFeeRateList(rawList)` → `FeeRate[]`
+  - `makerFeeRate → makerRate`, `takerFeeRate → takerRate`
+- `normalizeBybitFundingRateHistoryList(rawList)` → `FundingRateHistory[]`
+  - `fundingRateTimestamp → fundingTime`, `markPrice` всегда `null` (Bybit не возвращает)
+- `normalizeBybitClosedPnlList(rawList)` → `ClosedPnl[]`
+  - `avgEntryPrice → entryPrice`, `avgExitPrice → exitPrice`, side через `BYBIT_ORDER_SIDE` маппинг
+- `normalizeBybitIncomeList(rawList)` → `Income[]`
+  - Использует `BybitTransactionLogRaw`, `cashFlow → income`, `currency → asset`, `type → incomeType`
+  - `info` собирается из `{ tradeId, orderId }`
 
 ## Унифицированные типы (src/types/common.ts)
 
@@ -133,6 +174,14 @@ WebSocket:
 - `FundingRateHistory` — `{ symbol, fundingRate, fundingTime, markPrice: number | null }`
 - `FundingInfo` — `{ symbol, fundingIntervalHours, adjustedFundingRateCap, adjustedFundingRateFloor }`
 - `WebSocketConnectionInfo` — `{ label, url, isConnected, type: WebSocketConnectionTypeEnum, subscriptionList: string[] }`
+- `OrderBookLevel` — `{ price, quantity }` (оба number)
+- `OrderBook` — `{ symbol, askList: OrderBookLevel[], bidList: OrderBookLevel[], timestamp }`
+- `PublicTrade` — `{ id, symbol, price, quantity, quoteQuantity, timestamp, isBuyerMaker }`
+- `MarkPrice` — `{ symbol, markPrice, indexPrice, lastFundingRate, nextFundingTime, timestamp }`
+- `OpenInterest` — `{ symbol, openInterest, timestamp }`
+- `FeeRate` — `{ symbol, makerRate, takerRate }`
+- `Income` — `{ symbol, incomeType, income, asset, timestamp, info: Record<string, unknown> }`
+- `ClosedPnl` — `{ symbol, orderId, side: OrderSideEnum, quantity, entryPrice, exitPrice, closedPnl, timestamp }`
 
 ### Collection types (Map с "By" naming):
 - `TickerBySymbol = Map<string, Ticker>`

@@ -19,6 +19,7 @@ export interface SymbolFilterArgs {
 export interface SymbolLimitFilterArgs {
   symbol?: string;
   limit?: number;
+  orderId?: string;
 }
 
 export interface PeriodFilterArgs {
@@ -69,6 +70,8 @@ export interface BybitResponse<T> {
 export interface BybitOrderBookRaw {
   a: string[][];
   b: string[][];
+  ts: number;
+  u: number;
 }
 
 export interface BybitApiResponse {
@@ -80,4 +83,9 @@ export interface BybitCreateOrderApiResponse {
   retCode: number;
   retMsg: string;
   result: BybitOrderResponseRaw;
+}
+
+export interface BybitCancelOrderResult {
+  orderId: string;
+  orderLinkId: string;
 }

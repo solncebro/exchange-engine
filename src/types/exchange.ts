@@ -6,11 +6,18 @@ import type {
   TradeSymbolBySymbol,
   Order,
   TickerBySymbol,
-  BalanceByAsset,
+  AccountBalances,
   Position,
   FundingRateHistory,
   FundingInfo,
   WebSocketConnectionInfo,
+  OrderBook,
+  PublicTrade,
+  MarkPrice,
+  OpenInterest,
+  FeeRate,
+  Income,
+  ClosedPnl,
 } from './common';
 import {
   MarginModeEnum,
@@ -65,6 +72,14 @@ export interface FetchAllKlinesOptions {
   onChunkLoaded?: (chunkResult: Map<string, Kline[]>) => void;
 }
 
+export interface ModifyOrderArgs {
+  symbol: string;
+  orderId: string;
+  price?: number;
+  amount?: number;
+  triggerPrice?: number;
+}
+
 export interface ExchangeClient {
   readonly apiKey: string;
   readonly tradeSymbols: TradeSymbolBySymbol;
@@ -73,7 +88,7 @@ export interface ExchangeClient {
   fetchTickers(): Promise<TickerBySymbol>;
   fetchKlines(symbol: string, interval: KlineInterval, options?: FetchPageWithLimitArgs): Promise<Kline[]>;
   fetchAllKlines(symbolList: string[], interval: KlineInterval, options?: FetchAllKlinesOptions): Promise<Map<string, Kline[]>>;
-  fetchBalance(): Promise<BalanceByAsset>;
+  fetchBalances(): Promise<AccountBalances>;
   fetchFundingRateHistory(symbol: string, options?: FetchPageWithLimitArgs): Promise<FundingRateHistory[]>;
   fetchPosition(symbol: string): Promise<Position>;
   setLeverage(leverage: number, symbol: string): Promise<void>;
@@ -90,6 +105,25 @@ export interface ExchangeClient {
   connectTradeWebSocket(): Promise<void>;
   getWebSocketConnectionInfoList(): WebSocketConnectionInfo[];
   close(): Promise<void>;
+
+  cancelOrder(symbol: string, orderId: string): Promise<Order>;
+  getOrder(symbol: string, orderId: string): Promise<Order>;
+  fetchOpenOrders(symbol?: string): Promise<Order[]>;
+  modifyOrder(args: ModifyOrderArgs): Promise<Order>;
+  cancelAllOrders(symbol: string): Promise<void>;
+  createBatchOrders(orderList: CreateOrderWebSocketArgs[]): Promise<Order[]>;
+  cancelBatchOrders(symbol: string, orderIdList: string[]): Promise<void>;
+
+  fetchOrderBook(symbol: string, limit?: number): Promise<OrderBook>;
+  fetchTrades(symbol: string, limit?: number): Promise<PublicTrade[]>;
+  fetchMarkPrice(symbol?: string): Promise<MarkPrice[]>;
+  fetchOpenInterest(symbol: string): Promise<OpenInterest>;
+
+  fetchFeeRate(symbol?: string): Promise<FeeRate[]>;
+  fetchIncome(options?: FetchPageWithLimitArgs): Promise<Income[]>;
+  fetchClosedPnl(symbol?: string, options?: FetchPageWithLimitArgs): Promise<ClosedPnl[]>;
+
+  setPositionMode(mode: PositionModeEnum): Promise<void>;
 
   watchTickers(): AsyncGenerator<TickerBySymbol>;
   subscribeKlines(args: SubscribeKlinesArgs): void;

@@ -3,6 +3,8 @@ import type {
   ExchangeArgs,
   FetchAllKlinesOptions,
   FetchPageWithLimitArgs,
+  ModifyOrderArgs,
+  CreateOrderWebSocketArgs,
   SubscribeKlinesArgs,
 } from '../types/exchange';
 import type {
@@ -12,12 +14,19 @@ import type {
   TradeSymbol,
   TradeSymbolBySymbol,
   TickerBySymbol,
-  BalanceByAsset,
+  AccountBalances,
   Position,
   Order,
   FundingRateHistory,
   FundingInfo,
   WebSocketConnectionInfo,
+  OrderBook,
+  PublicTrade,
+  MarkPrice,
+  OpenInterest,
+  FeeRate,
+  Income,
+  ClosedPnl,
 } from '../types/common';
 import { MarginModeEnum, PositionModeEnum } from '../types/common';
 import type { PublicStreamLike } from '../types/stream';
@@ -49,7 +58,7 @@ abstract class BaseExchangeClient implements ExchangeClient {
     interval: KlineInterval,
     options?: FetchPageWithLimitArgs,
   ): Promise<Kline[]>;
-  protected abstract fetchAndNormalizeBalance(): Promise<BalanceByAsset>;
+  protected abstract fetchAndNormalizeBalances(): Promise<AccountBalances>;
 
   async loadTradeSymbols(): Promise<TradeSymbolBySymbol> {
     const normalized = await this.fetchAndNormalizeTradeSymbols();
@@ -104,10 +113,10 @@ abstract class BaseExchangeClient implements ExchangeClient {
     });
   }
 
-  async fetchBalance(): Promise<BalanceByAsset> {
+  async fetchBalances(): Promise<AccountBalances> {
     this.logger.debug(`[${this.exchangeLabel}] Fetching balance`);
 
-    return this.fetchAndNormalizeBalance();
+    return this.fetchAndNormalizeBalances();
   }
 
   async *watchTickers(): AsyncGenerator<TickerBySymbol> {
@@ -211,6 +220,66 @@ abstract class BaseExchangeClient implements ExchangeClient {
   }
 
   async setMarginMode(_marginMode: MarginModeEnum, _symbol: string): Promise<void> {
+    throw new Error(`Not supported for ${this.marketLabel} market`);
+  }
+
+  async cancelOrder(_symbol: string, _orderId: string): Promise<Order> {
+    throw new Error(`Not supported for ${this.marketLabel} market`);
+  }
+
+  async getOrder(_symbol: string, _orderId: string): Promise<Order> {
+    throw new Error(`Not supported for ${this.marketLabel} market`);
+  }
+
+  async fetchOpenOrders(_symbol?: string): Promise<Order[]> {
+    throw new Error(`Not supported for ${this.marketLabel} market`);
+  }
+
+  async fetchOrderBook(_symbol: string, _limit?: number): Promise<OrderBook> {
+    throw new Error(`Not supported for ${this.marketLabel} market`);
+  }
+
+  async fetchTrades(_symbol: string, _limit?: number): Promise<PublicTrade[]> {
+    throw new Error(`Not supported for ${this.marketLabel} market`);
+  }
+
+  async modifyOrder(_args: ModifyOrderArgs): Promise<Order> {
+    throw new Error(`Not supported for ${this.marketLabel} market`);
+  }
+
+  async cancelAllOrders(_symbol: string): Promise<void> {
+    throw new Error(`Not supported for ${this.marketLabel} market`);
+  }
+
+  async createBatchOrders(_orderList: CreateOrderWebSocketArgs[]): Promise<Order[]> {
+    throw new Error(`Not supported for ${this.marketLabel} market`);
+  }
+
+  async cancelBatchOrders(_symbol: string, _orderIdList: string[]): Promise<void> {
+    throw new Error(`Not supported for ${this.marketLabel} market`);
+  }
+
+  async fetchMarkPrice(_symbol?: string): Promise<MarkPrice[]> {
+    throw new Error(`Not supported for ${this.marketLabel} market`);
+  }
+
+  async fetchOpenInterest(_symbol: string): Promise<OpenInterest> {
+    throw new Error(`Not supported for ${this.marketLabel} market`);
+  }
+
+  async fetchFeeRate(_symbol?: string): Promise<FeeRate[]> {
+    throw new Error(`Not supported for ${this.marketLabel} market`);
+  }
+
+  async fetchIncome(_options?: FetchPageWithLimitArgs): Promise<Income[]> {
+    throw new Error(`Not supported for ${this.marketLabel} market`);
+  }
+
+  async fetchClosedPnl(_symbol?: string, _options?: FetchPageWithLimitArgs): Promise<ClosedPnl[]> {
+    throw new Error(`Not supported for ${this.marketLabel} market`);
+  }
+
+  async setPositionMode(_mode: PositionModeEnum): Promise<void> {
     throw new Error(`Not supported for ${this.marketLabel} market`);
   }
 }

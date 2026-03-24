@@ -13,6 +13,12 @@ import {
   BINANCE_RAW_FUNDING_INFO_LIST,
   BINANCE_RAW_POSITION_MODE_HEDGE,
   BINANCE_RAW_POSITION_MODE_ONE_WAY,
+  BINANCE_RAW_ORDER_BOOK,
+  BINANCE_RAW_PUBLIC_TRADE_LIST,
+  BINANCE_RAW_MARK_PRICE_LIST,
+  BINANCE_RAW_OPEN_INTEREST,
+  BINANCE_RAW_COMMISSION_RATE,
+  BINANCE_RAW_INCOME_LIST,
 } from '../fixtures/binanceRaw';
 import { MarginModeEnum, OrderSideEnum, OrderTypeEnum, PositionModeEnum, PositionSideEnum, TimeInForceEnum, TradeSymbolTypeEnum, WorkingTypeEnum } from '../../src/types/common';
 import { BinanceFuturesPublicStream } from '../../src/ws/BinanceFuturesPublicStream';
@@ -220,23 +226,26 @@ describe('BinanceFutures', () => {
     });
   });
 
-  describe('fetchBalance', () => {
+  describe('fetchBalances', () => {
     it('returns normalized balance from futures account format', async () => {
       const { client, mockInstance } = createClient();
       mockInstance.get.mockResolvedValue({ data: BINANCE_RAW_FUTURES_ACCOUNT });
 
-      const result = await client.fetchBalance();
+      const result = await client.fetchBalances();
 
-      expect(result).toBeInstanceOf(Map);
+      expect(result.balanceByAsset).toBeInstanceOf(Map);
+      expect(result.balanceByAsset.size).toBeGreaterThan(0);
 
-      const usdt = result.get('USDT');
+      const usdt = result.balanceByAsset.get('USDT');
 
       expect(usdt).toBeDefined();
       expect(usdt!.free).toBe(1000.5);
       expect(usdt!.locked).toBe(200);
       expect(usdt!.total).toBe(1200.5);
 
-      expect(result.has('DOGE')).toBe(false);
+      expect(result.balanceByAsset.has('DOGE')).toBe(false);
+      expect(result.totalWalletBalance).toBe(1205.5);
+      expect(result.totalAvailableBalance).toBe(1000.5);
     });
   });
 
@@ -624,6 +633,212 @@ describe('BinanceFutures', () => {
       expect(result[0].id).toBe('123456789');
       expect(result[0].symbol).toBe('BTCUSDT');
       expect(result[0].side).toBe(OrderSideEnum.Buy);
+    });
+  });
+
+  describe('cancelOrder', () => {
+    it('returns normalized order', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.delete.mockResolvedValue({ data: BINANCE_RAW_ORDER_RESPONSE });
+
+      const result = await client.cancelOrder('BTCUSDT', '12345');
+
+      expect(result.id).toBe('123456789');
+      expect(result.symbol).toBe('BTCUSDT');
+      expect(result.side).toBe(OrderSideEnum.Buy);
+    });
+  });
+
+  describe('getOrder', () => {
+    it('returns normalized order', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: BINANCE_RAW_ORDER_RESPONSE });
+
+      const result = await client.getOrder('BTCUSDT', '12345');
+
+      expect(result.id).toBe('123456789');
+      expect(result.symbol).toBe('BTCUSDT');
+      expect(result.side).toBe(OrderSideEnum.Buy);
+      expect(result.type).toBe(OrderTypeEnum.Limit);
+    });
+  });
+
+  describe('fetchOpenOrders', () => {
+    it('returns array of normalized orders', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: [BINANCE_RAW_ORDER_RESPONSE] });
+
+      const result = await client.fetchOpenOrders();
+
+      expect(result).toHaveLength(1);
+      expect(result[0].id).toBe('123456789');
+      expect(result[0].symbol).toBe('BTCUSDT');
+    });
+  });
+
+  describe('fetchOrderBook', () => {
+    it('returns normalized order book with parsed numbers', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: BINANCE_RAW_ORDER_BOOK });
+
+      const result = await client.fetchOrderBook('BTCUSDT');
+
+      expect(result.symbol).toBe('BTCUSDT');
+      expect(result.askList).toHaveLength(2);
+      expect(result.askList[0].price).toBe(65001);
+      expect(result.askList[0].quantity).toBe(0.8);
+      expect(result.bidList).toHaveLength(2);
+      expect(result.bidList[0].price).toBe(65000);
+      expect(result.bidList[0].quantity).toBe(1.5);
+    });
+  });
+
+  describe('fetchTrades', () => {
+    it('returns normalized public trades', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: BINANCE_RAW_PUBLIC_TRADE_LIST });
+
+      const result = await client.fetchTrades('BTCUSDT');
+
+      expect(result).toHaveLength(2);
+      expect(result[0].id).toBe('12345');
+      expect(result[0].symbol).toBe('BTCUSDT');
+      expect(result[0].price).toBe(65000.5);
+      expect(result[0].quantity).toBe(0.1);
+      expect(result[0].isBuyerMaker).toBe(false);
+    });
+  });
+
+  describe('modifyOrder', () => {
+    it('returns normalized order', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.put.mockResolvedValue({ data: BINANCE_RAW_ORDER_RESPONSE });
+
+      const result = await client.modifyOrder({ symbol: 'BTCUSDT', orderId: '12345' });
+
+      expect(result.id).toBe('123456789');
+      expect(result.symbol).toBe('BTCUSDT');
+      expect(result.side).toBe(OrderSideEnum.Buy);
+    });
+  });
+
+  describe('cancelAllOrders', () => {
+    it('completes without error', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.delete.mockResolvedValue({ data: {} });
+
+      await expect(client.cancelAllOrders('BTCUSDT')).resolves.toBeUndefined();
+    });
+  });
+
+  describe('fetchMarkPrice', () => {
+    it('returns normalized mark price list', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: BINANCE_RAW_MARK_PRICE_LIST });
+
+      const result = await client.fetchMarkPrice();
+
+      expect(result).toHaveLength(2);
+      expect(result[0].symbol).toBe('BTCUSDT');
+      expect(result[0].markPrice).toBe(65000.5);
+      expect(result[0].indexPrice).toBe(65001);
+      expect(result[0].lastFundingRate).toBe(0.0001);
+    });
+  });
+
+  describe('fetchOpenInterest', () => {
+    it('returns normalized open interest', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: BINANCE_RAW_OPEN_INTEREST });
+
+      const result = await client.fetchOpenInterest('BTCUSDT');
+
+      expect(result.symbol).toBe('BTCUSDT');
+      expect(result.openInterest).toBe(12345.678);
+      expect(result.timestamp).toBe(1700000000000);
+    });
+  });
+
+  describe('fetchFeeRate', () => {
+    it('returns normalized fee rate', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: BINANCE_RAW_COMMISSION_RATE });
+
+      const result = await client.fetchFeeRate('BTCUSDT');
+
+      expect(result).toHaveLength(1);
+      expect(result[0].symbol).toBe('BTCUSDT');
+      expect(result[0].makerRate).toBe(0.0002);
+      expect(result[0].takerRate).toBe(0.0004);
+    });
+  });
+
+  describe('fetchIncome', () => {
+    it('returns normalized income list', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: BINANCE_RAW_INCOME_LIST });
+
+      const result = await client.fetchIncome();
+
+      expect(result).toHaveLength(2);
+      expect(result[0].symbol).toBe('BTCUSDT');
+      expect(result[0].incomeType).toBe('REALIZED_PNL');
+      expect(result[0].income).toBe(15.5);
+      expect(result[0].asset).toBe('USDT');
+      expect(result[1].incomeType).toBe('FUNDING_FEE');
+      expect(result[1].income).toBe(-0.05);
+    });
+  });
+
+  describe('createBatchOrders', () => {
+    it('returns array of normalized orders', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: BINANCE_RAW_EXCHANGE_INFO });
+      await client.loadTradeSymbols();
+
+      mockInstance.post.mockResolvedValue({ data: [BINANCE_RAW_ORDER_RESPONSE] });
+
+      const result = await client.createBatchOrders([
+        { symbol: 'BTCUSDT', type: OrderTypeEnum.Market, side: OrderSideEnum.Buy, amount: 0.1 },
+      ]);
+
+      expect(result).toHaveLength(1);
+      expect(result[0].id).toBe('123456789');
+      expect(result[0].symbol).toBe('BTCUSDT');
+      expect(result[0].side).toBe(OrderSideEnum.Buy);
+    });
+  });
+
+  describe('cancelBatchOrders', () => {
+    it('completes without error', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.delete.mockResolvedValue({ data: {} });
+
+      await expect(client.cancelBatchOrders('BTCUSDT', ['order-1', 'order-2'])).resolves.toBeUndefined();
+    });
+  });
+
+  describe('setPositionMode', () => {
+    it('sends dualSidePosition true for Hedge', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.post.mockResolvedValue({ data: {} });
+
+      await client.setPositionMode(PositionModeEnum.Hedge);
+
+      const [, , options] = mockInstance.post.mock.calls[0];
+
+      expect(options.params.dualSidePosition).toBe(true);
+    });
+
+    it('sends dualSidePosition false for OneWay', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.post.mockResolvedValue({ data: {} });
+
+      await client.setPositionMode(PositionModeEnum.OneWay);
+
+      const [, , options] = mockInstance.post.mock.calls[0];
+
+      expect(options.params.dualSidePosition).toBe(false);
     });
   });
 

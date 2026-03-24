@@ -61,9 +61,7 @@ abstract class BaseHttpClient {
     params?: Record<string, string | number | boolean>,
     headers?: Record<string, string>
   ): Promise<T> {
-
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-
       try {
         this.logger.debug({ url, params }, `GET ${url}`);
         const response = await this.axiosInstance.get<T>(url, { params, headers });

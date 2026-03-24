@@ -1,21 +1,32 @@
-import type { CreateOrderWebSocketArgs, FetchPageWithLimitArgs } from '../types/exchange';
+import type { CreateOrderWebSocketArgs, FetchPageWithLimitArgs, ModifyOrderArgs } from '../types/exchange';
 import type {
   Kline,
   KlineInterval,
   TradeSymbolBySymbol,
   TickerBySymbol,
-  BalanceByAsset,
+  AccountBalances,
   Order,
+  OrderBook,
+  PublicTrade,
+  FeeRate,
+  Income,
+  ClosedPnl,
   WebSocketConnectionInfo,
 } from '../types/common';
-import { OrderTypeEnum, OrderSideEnum } from '../types/common';
+import { OrderTypeEnum, OrderSideEnum, TimeInForceEnum } from '../types/common';
 import type { PublicStreamLike } from '../types/stream';
 import { BybitHttpClient } from '../http/BybitHttpClient';
 import {
   normalizeBybitTradeSymbols,
   normalizeBybitTickers,
   normalizeBybitKlines,
-  normalizeBybitBalance,
+  normalizeBybitBalances,
+  normalizeBybitOrder,
+  normalizeBybitOrderBook,
+  normalizeBybitPublicTradeList,
+  normalizeBybitFeeRateList,
+  normalizeBybitClosedPnlList,
+  normalizeBybitIncomeList,
   buildBybitOrderFromCreateResponse,
 } from '../normalizers/bybitNormalizer';
 import { BybitPublicStream } from '../ws/BybitPublicStream';
@@ -34,7 +45,7 @@ abstract class BybitBaseClient extends BaseExchangeClient {
   protected readonly klineLimit = 200;
   protected readonly httpClient: BybitHttpClient;
 
-  private readonly category: string;
+  protected readonly category: string;
   private readonly publicStream: BybitPublicStream;
   private readonly tradeStream: BybitTradeStream | null;
 
@@ -110,10 +121,10 @@ abstract class BybitBaseClient extends BaseExchangeClient {
     return normalizeBybitKlines(raw.result.list);
   }
 
-  protected async fetchAndNormalizeBalance(): Promise<BalanceByAsset> {
+  protected async fetchAndNormalizeBalances(): Promise<AccountBalances> {
     const raw = await this.httpClient.fetchWalletBalance('UNIFIED');
 
-    return normalizeBybitBalance(raw.result);
+    return normalizeBybitBalances(raw.result);
   }
 
   protected buildBybitOrderParams(args: CreateOrderWebSocketArgs): Record<string, unknown> {
@@ -152,6 +163,137 @@ abstract class BybitBaseClient extends BaseExchangeClient {
     }
 
     return orderParams;
+  }
+
+  async cancelOrder(symbol: string, orderId: string): Promise<Order> {
+    this.logger.debug(`[Bybit] Cancelling order ${orderId} for ${symbol}`);
+    await this.httpClient.cancelOrder({ category: this.category, symbol, orderId });
+
+    return {
+      id: orderId,
+      clientOrderId: '',
+      symbol,
+      side: OrderSideEnum.Buy,
+      type: OrderTypeEnum.Limit,
+      timeInForce: TimeInForceEnum.Gtc,
+      price: 0,
+      avgPrice: 0,
+      stopPrice: 0,
+      amount: 0,
+      filledAmount: 0,
+      filledQuoteAmount: 0,
+      status: 'canceled',
+      reduceOnly: false,
+      timestamp: Date.now(),
+      updatedTimestamp: Date.now(),
+    };
+  }
+
+  async getOrder(symbol: string, orderId: string): Promise<Order> {
+    this.logger.debug(`[Bybit] Fetching order ${orderId} for ${symbol}`);
+    const raw = await this.httpClient.getOrderHistory(this.category, { symbol, orderId });
+    const order = raw.result.list[0];
+
+    if (!order) {
+      throw new Error(`Order ${orderId} not found for ${symbol}`);
+    }
+
+    return normalizeBybitOrder(order);
+  }
+
+  async fetchOpenOrders(symbol?: string): Promise<Order[]> {
+    this.logger.debug('[Bybit] Fetching open orders');
+    const raw = await this.httpClient.getOpenOrders(this.category, { symbol });
+
+    return raw.result.list.map(normalizeBybitOrder);
+  }
+
+  async fetchOrderBook(symbol: string, limit?: number): Promise<OrderBook> {
+    this.logger.debug(`[Bybit] Fetching order book for ${symbol}`);
+    const raw = await this.httpClient.fetchOrderBook(this.category, symbol, limit);
+
+    return normalizeBybitOrderBook(raw.result, symbol);
+  }
+
+  async fetchTrades(symbol: string, limit?: number): Promise<PublicTrade[]> {
+    this.logger.debug(`[Bybit] Fetching trades for ${symbol}`);
+    const raw = await this.httpClient.fetchRecentTrades(this.category, symbol, limit);
+
+    return normalizeBybitPublicTradeList(raw.result.list);
+  }
+
+  async fetchFeeRate(symbol?: string): Promise<FeeRate[]> {
+    this.logger.debug('[Bybit] Fetching fee rate');
+    const raw = await this.httpClient.fetchFeeRate(this.category, { symbol });
+
+    return normalizeBybitFeeRateList(raw.result.list);
+  }
+
+  async fetchOrderHistory(symbol: string, options?: FetchPageWithLimitArgs): Promise<Order[]> {
+    this.logger.debug(`[Bybit] Fetching order history for ${symbol}`);
+    const raw = await this.httpClient.getOrderHistory(this.category, { symbol, limit: options?.limit });
+
+    return raw.result.list.map(normalizeBybitOrder);
+  }
+
+  async modifyOrder(args: ModifyOrderArgs): Promise<Order> {
+    this.logger.debug(`[Bybit] Modifying order ${args.orderId} for ${args.symbol}`);
+    const params: Record<string, unknown> = {
+      category: this.category,
+      symbol: args.symbol,
+      orderId: args.orderId,
+    };
+
+    if (args.price !== undefined) {
+      params.price = String(this.priceToPrecision(args.symbol, args.price));
+    }
+
+    if (args.amount !== undefined) {
+      params.qty = String(this.amountToPrecision(args.symbol, args.amount));
+    }
+
+    if (args.triggerPrice !== undefined) {
+      params.triggerPrice = String(this.priceToPrecision(args.symbol, args.triggerPrice));
+    }
+
+    await this.httpClient.amendOrder(params);
+
+    return this.getOrder(args.symbol, args.orderId);
+  }
+
+  async cancelAllOrders(symbol: string): Promise<void> {
+    this.logger.debug(`[Bybit] Cancelling all orders for ${symbol}`);
+    await this.httpClient.cancelAllOrders(this.category, symbol);
+  }
+
+  async createBatchOrders(orderList: CreateOrderWebSocketArgs[]): Promise<Order[]> {
+    this.logger.debug(`[Bybit] Creating batch of ${orderList.length} orders`);
+    const requestList = orderList.map((args) => this.buildBybitOrderParams(args));
+    const raw = await this.httpClient.createBatchOrders(this.category, requestList);
+
+    return raw.result.list.map((entry, index) =>
+      buildBybitOrderFromCreateResponse(orderList[index], String(entry['orderId'])),
+    );
+  }
+
+  async cancelBatchOrders(symbol: string, orderIdList: string[]): Promise<void> {
+    this.logger.debug(`[Bybit] Cancelling batch of ${orderIdList.length} orders for ${symbol}`);
+    const requestList = orderIdList.map((orderId) => ({ category: this.category, symbol, orderId }));
+    await this.httpClient.cancelBatchOrders(this.category, requestList);
+  }
+
+  async fetchIncome(options?: FetchPageWithLimitArgs): Promise<Income[]> {
+    this.logger.debug('[Bybit] Fetching income');
+    const raw = await this.httpClient.fetchTransactionLog({ category: this.category, limit: options?.limit });
+
+    return normalizeBybitIncomeList(raw.result.list);
+  }
+
+  async fetchClosedPnl(symbol?: string, options?: FetchPageWithLimitArgs): Promise<ClosedPnl[]> {
+    this.logger.debug('[Bybit] Fetching closed PnL');
+    const raw = await this.httpClient.getClosedPnl(this.category, { symbol, limit: options?.limit });
+
+    return normalizeBybitClosedPnlList(raw.result.list);
   }
 
   isTradeWebSocketConnected(): boolean {

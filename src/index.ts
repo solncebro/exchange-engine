@@ -7,6 +7,7 @@ export type {
   CreateOrderWebSocketArgs,
   FetchAllKlinesOptions,
   FetchPageWithLimitArgs,
+  ModifyOrderArgs,
   SubscribeKlinesArgs,
   KlineHandler,
 } from './types/exchange';
@@ -40,28 +41,16 @@ export type {
   Order,
   Balance,
   BalanceByAsset,
+  AccountBalances,
   FundingRateHistory,
   FundingInfo,
   WebSocketConnectionInfo,
+  OrderBook,
+  OrderBookLevel,
+  PublicTrade,
+  MarkPrice,
+  OpenInterest,
+  FeeRate,
+  Income,
+  ClosedPnl,
 } from './types/common';
-
-export type {
-  BybitWebSocketKlineRaw,
-  BybitPublicTradeDataRaw,
-  BybitWebSocketMessageRaw,
-  BybitKlineMessageRaw,
-  BybitTradeMessageRaw,
-} from './normalizers/bybitNormalizer';
-
-export {
-  normalizeBybitKlineWebSocketMessage,
-} from './normalizers/bybitNormalizer';
-
-export type {
-  BinanceWebSocketKlineRaw,
-  BinanceContinuousKlineMessageRaw,
-} from './normalizers/binanceNormalizer';
-
-export {
-  normalizeBinanceKlineWebSocketMessage,
-} from './normalizers/binanceNormalizer';

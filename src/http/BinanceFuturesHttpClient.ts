@@ -1,4 +1,14 @@
-import type { BinancePositionRiskRaw, BinanceFundingRateHistoryRaw, BinanceFundingInfoRaw, BinanceOrderResponseRaw, BinanceFuturesAccountRaw } from '../normalizers/binanceNormalizer';
+import type {
+  BinancePositionRiskRaw,
+  BinanceFundingRateHistoryRaw,
+  BinanceFundingInfoRaw,
+  BinanceOrderResponseRaw,
+  BinanceFuturesAccountRaw,
+  BinanceMarkPriceRaw,
+  BinanceOpenInterestRaw,
+  BinanceCommissionRateRaw,
+  BinanceIncomeRaw,
+} from '../normalizers/binanceNormalizer';
 import type { FetchPageWithLimitArgs } from '../types/exchange';
 import { buildBinanceSignedParams } from '../auth/binanceAuth';
 import { BINANCE_REQUEST_TIMEOUT } from '../constants/binance';
@@ -15,7 +25,7 @@ class BinanceFuturesHttpClient extends BinanceBaseHttpClient {
     trades: '/fapi/v1/trades',
     order: '/fapi/v1/order',
     openOrders: '/fapi/v1/openOrders',
-    account: '/fapi/v2/account',
+    account: '/fapi/v3/account',
     listenKey: '/fapi/v1/listenKey',
   };
 
@@ -37,8 +47,8 @@ class BinanceFuturesHttpClient extends BinanceBaseHttpClient {
 
   async fetchMarkPrice(
     symbol?: string,
-  ): Promise<Record<string, unknown> | Array<Record<string, unknown>>> {
-    return this.get<Record<string, unknown> | Array<Record<string, unknown>>>(
+  ): Promise<BinanceMarkPriceRaw | BinanceMarkPriceRaw[]> {
+    return this.get<BinanceMarkPriceRaw | BinanceMarkPriceRaw[]>(
       '/fapi/v1/premiumIndex',
       this.buildOptionalSymbolParams(symbol),
     );
@@ -54,17 +64,17 @@ class BinanceFuturesHttpClient extends BinanceBaseHttpClient {
     return this.get<BinanceFundingRateHistoryRaw[]>('/fapi/v1/fundingRate', params);
   }
 
-  async fetchOpenInterest(symbol: string): Promise<Record<string, unknown>> {
-    return this.get<Record<string, unknown>>('/fapi/v1/openInterest', { symbol });
+  async fetchOpenInterest(symbol: string): Promise<BinanceOpenInterestRaw> {
+    return this.get<BinanceOpenInterestRaw>('/fapi/v1/openInterest', { symbol });
   }
 
-  async modifyOrder(params: Record<string, unknown>): Promise<Record<string, unknown>> {
+  async modifyOrder(params: Record<string, unknown>): Promise<BinanceOrderResponseRaw> {
     const signed = buildBinanceSignedParams({
       params: params as Record<string, string | number | boolean>,
       secret: this.secret,
     });
 
-    return this.putWithParams<Record<string, unknown>>(
+    return this.putWithParams<BinanceOrderResponseRaw>(
       '/fapi/v1/order',
       signed as Record<string, string | number | boolean>,
       this.authHeaders(),
@@ -90,8 +100,8 @@ class BinanceFuturesHttpClient extends BinanceBaseHttpClient {
 
   async createBatchOrders(
     orderList: Array<Record<string, unknown>>,
-  ): Promise<Array<Record<string, unknown>>> {
-    return this.signedPost<Array<Record<string, unknown>>>(
+  ): Promise<BinanceOrderResponseRaw[]> {
+    return this.signedPost<BinanceOrderResponseRaw[]>(
       '/fapi/v1/batchOrders',
       { batchOrders: JSON.stringify(orderList) },
     );
@@ -108,20 +118,20 @@ class BinanceFuturesHttpClient extends BinanceBaseHttpClient {
   }
 
   async fetchPositionRisk(symbol?: string): Promise<BinancePositionRiskRaw[]> {
-    return this.signedGet<BinancePositionRiskRaw[]>('/fapi/v2/positionRisk', this.buildOptionalSymbolParams(symbol));
+    return this.signedGet<BinancePositionRiskRaw[]>('/fapi/v3/positionRisk', this.buildOptionalSymbolParams(symbol));
   }
 
-  async fetchCommissionRate(symbol: string): Promise<Record<string, unknown>> {
-    return this.signedGet<Record<string, unknown>>('/fapi/v1/commissionRate', { symbol });
+  async fetchCommissionRate(symbol?: string): Promise<BinanceCommissionRateRaw> {
+    return this.signedGet<BinanceCommissionRateRaw>('/fapi/v1/commissionRate', this.buildOptionalSymbolParams(symbol));
   }
 
   async fetchIncome(
     options?: FetchPageWithLimitArgs,
-  ): Promise<Array<Record<string, unknown>>> {
+  ): Promise<BinanceIncomeRaw[]> {
     const params: Record<string, string | number | boolean> = {};
     applyTimeRangeOptions(params, options);
 
-    return this.signedGet<Array<Record<string, unknown>>>('/fapi/v1/income', params);
+    return this.signedGet<BinanceIncomeRaw[]>('/fapi/v1/income', params);
   }
 
   async setLeverage(symbol: string, leverage: number): Promise<Record<string, unknown>> {

@@ -172,6 +172,12 @@ export interface Balance {
 
 export type BalanceByAsset = Map<string, Balance>;
 
+export interface AccountBalances {
+  totalWalletBalance: number;
+  totalAvailableBalance: number;
+  balanceByAsset: BalanceByAsset;
+}
+
 export interface FundingRateHistory {
   symbol: string;
   fundingRate: number;
@@ -215,4 +221,67 @@ export interface WebSocketConnectionInfo {
   isConnected: boolean;
   type: WebSocketConnectionTypeEnum;
   subscriptionList: string[];
+}
+
+export interface OrderBookLevel {
+  price: number;
+  quantity: number;
+}
+
+export interface OrderBook {
+  symbol: string;
+  askList: OrderBookLevel[];
+  bidList: OrderBookLevel[];
+  timestamp: number;
+}
+
+export interface PublicTrade {
+  id: string;
+  symbol: string;
+  price: number;
+  quantity: number;
+  quoteQuantity: number;
+  timestamp: number;
+  isBuyerMaker: boolean;
+}
+
+export interface MarkPrice {
+  symbol: string;
+  markPrice: number;
+  indexPrice: number;
+  lastFundingRate: number;
+  nextFundingTime: number;
+  timestamp: number;
+}
+
+export interface OpenInterest {
+  symbol: string;
+  openInterest: number;
+  timestamp: number;
+}
+
+export interface FeeRate {
+  symbol: string;
+  makerRate: number;
+  takerRate: number;
+}
+
+export interface Income {
+  symbol: string;
+  incomeType: string;
+  income: number;
+  asset: string;
+  timestamp: number;
+  info: Record<string, unknown>;
+}
+
+export interface ClosedPnl {
+  symbol: string;
+  orderId: string;
+  side: OrderSideEnum;
+  quantity: number;
+  entryPrice: number;
+  exitPrice: number;
+  closedPnl: number;
+  timestamp: number;
 }

@@ -3,6 +3,7 @@ describe('export contract', () => {
     const api = require('../src/index');
 
     expect(api.Exchange).toBeDefined();
+    expect(api.ExchangeError).toBeDefined();
     expect(api.ExchangeNameEnum).toBeDefined();
     expect(api.OrderSideEnum).toBeDefined();
     expect(api.OrderTypeEnum).toBeDefined();
@@ -15,7 +16,5 @@ describe('export contract', () => {
     expect(api.MarketTypeEnum).toBeDefined();
     expect(api.WebSocketConnectionTypeEnum).toBeDefined();
     expect(api.MARKET_TYPE_LIST).toEqual(['futures', 'spot']);
-    expect(api.normalizeBybitKlineWebSocketMessage).toBeInstanceOf(Function);
-    expect(api.normalizeBinanceKlineWebSocketMessage).toBeInstanceOf(Function);
   });
 });

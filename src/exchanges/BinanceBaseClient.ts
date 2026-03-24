@@ -4,8 +4,10 @@ import type {
   KlineInterval,
   TradeSymbolBySymbol,
   TickerBySymbol,
-  BalanceByAsset,
+  AccountBalances,
   Order,
+  OrderBook,
+  PublicTrade,
   WebSocketConnectionInfo,
 } from '../types/common';
 import { OrderTypeEnum, TimeInForceEnum } from '../types/common';
@@ -16,7 +18,9 @@ import {
   normalizeBinanceTickers,
   normalizeBinanceKlines,
   normalizeBinanceOrder,
-  normalizeBinanceBalance,
+  normalizeBinanceBalances,
+  normalizeBinanceOrderBook,
+  normalizeBinancePublicTrades,
 } from '../normalizers/binanceNormalizer';
 import { BINANCE_ORDER_TYPE_REVERSE, BINANCE_WORKING_TYPE } from '../constants/mappings';
 import { BinanceUserDataStream } from '../ws/BinanceUserDataStream';
@@ -77,10 +81,10 @@ abstract class BinanceBaseClient<T extends BinanceBaseHttpClient> extends BaseEx
     return normalizeBinanceKlines(rawKlineList);
   }
 
-  protected async fetchAndNormalizeBalance(): Promise<BalanceByAsset> {
+  protected async fetchAndNormalizeBalances(): Promise<AccountBalances> {
     const raw = await this.httpClient.fetchAccount();
 
-    return normalizeBinanceBalance(raw);
+    return normalizeBinanceBalances(raw);
   }
 
   protected buildBinanceOrderParams(args: CreateOrderWebSocketArgs): Record<string, unknown> {
@@ -126,6 +130,41 @@ abstract class BinanceBaseClient<T extends BinanceBaseHttpClient> extends BaseEx
     }
 
     return orderParams;
+  }
+
+  async cancelOrder(symbol: string, orderId: string): Promise<Order> {
+    this.logger.debug(`[Binance] Cancelling order ${orderId} for ${symbol}`);
+    const raw = await this.httpClient.cancelOrder(symbol, orderId);
+
+    return normalizeBinanceOrder(raw);
+  }
+
+  async getOrder(symbol: string, orderId: string): Promise<Order> {
+    this.logger.debug(`[Binance] Fetching order ${orderId} for ${symbol}`);
+    const raw = await this.httpClient.getOrder(symbol, orderId);
+
+    return normalizeBinanceOrder(raw);
+  }
+
+  async fetchOpenOrders(symbol?: string): Promise<Order[]> {
+    this.logger.debug('[Binance] Fetching open orders');
+    const rawList = await this.httpClient.getOpenOrders(symbol);
+
+    return rawList.map(normalizeBinanceOrder);
+  }
+
+  async fetchOrderBook(symbol: string, limit?: number): Promise<OrderBook> {
+    this.logger.debug(`[Binance] Fetching order book for ${symbol}`);
+    const raw = await this.httpClient.fetchOrderBook(symbol, limit);
+
+    return normalizeBinanceOrderBook(raw, symbol);
+  }
+
+  async fetchTrades(symbol: string, limit?: number): Promise<PublicTrade[]> {
+    this.logger.debug(`[Binance] Fetching trades for ${symbol}`);
+    const rawList = await this.httpClient.fetchTrades(symbol, limit);
+
+    return normalizeBinancePublicTrades(rawList, symbol);
   }
 
   isTradeWebSocketConnected(): boolean {

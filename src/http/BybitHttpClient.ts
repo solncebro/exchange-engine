@@ -2,10 +2,16 @@ import { buildBybitAuthHeaders } from '../auth/bybitAuth';
 import { BYBIT_REQUEST_TIMEOUT } from '../constants/bybit';
 import { ExchangeError } from '../errors/ExchangeError';
 import type {
+  BybitClosedPnlRaw,
+  BybitFeeRateRaw,
+  BybitFundingRateHistoryRaw,
   BybitInstrumentInfoRaw,
+  BybitOpenInterestRaw,
   BybitOrderResponseRaw,
   BybitPositionRaw,
+  BybitPublicTradeRaw,
   BybitTickerRaw,
+  BybitTransactionLogRaw,
   BybitWalletBalanceRaw,
 } from '../normalizers/bybitNormalizer';
 import { applyTimeRangeOptions } from '../utils/httpParams';
@@ -13,6 +19,7 @@ import { BaseHttpClient } from './BaseHttpClient';
 
 import type {
   BybitApiResponse,
+  BybitCancelOrderResult,
   BybitHttpClientArgs,
   BybitListResponse,
   BybitOrderBookRaw,
@@ -98,6 +105,10 @@ class BybitHttpClient extends BaseHttpClient {
       params.limit = options.limit;
     }
 
+    if (options?.orderId !== undefined) {
+      params.orderId = options.orderId;
+    }
+
     return params;
   }
 
@@ -164,7 +175,7 @@ class BybitHttpClient extends BaseHttpClient {
     category: string,
     symbol: string,
     options?: FetchPageWithLimitArgs,
-  ): Promise<BybitListResponse<Record<string, unknown>>> {
+  ): Promise<BybitListResponse<BybitFundingRateHistoryRaw>> {
     const params: Record<string, string | number | boolean> = { category, symbol };
     applyTimeRangeOptions(params, options);
 
@@ -175,7 +186,7 @@ class BybitHttpClient extends BaseHttpClient {
     category: string,
     symbol: string,
     options?: PeriodFilterArgs,
-  ): Promise<BybitListResponse<Record<string, unknown>>> {
+  ): Promise<BybitListResponse<BybitOpenInterestRaw>> {
     const params: Record<string, string | number | boolean> = { category, symbol };
 
     if (options?.period !== undefined) {
@@ -193,7 +204,7 @@ class BybitHttpClient extends BaseHttpClient {
     category: string,
     symbol: string,
     limit?: number,
-  ): Promise<BybitListResponse<Record<string, unknown>>> {
+  ): Promise<BybitListResponse<BybitPublicTradeRaw>> {
     const params: Record<string, string | number | boolean> = { category, symbol };
 
     if (limit !== undefined) {
@@ -211,7 +222,7 @@ class BybitHttpClient extends BaseHttpClient {
     return this.authenticatedPost('/v5/order/amend', params);
   }
 
-  async cancelOrder(params: Record<string, unknown>): Promise<BybitResponse<Record<string, unknown>>> {
+  async cancelOrder(params: Record<string, unknown>): Promise<BybitResponse<BybitCancelOrderResult>> {
     return this.authenticatedPost('/v5/order/cancel', params);
   }
 
@@ -231,7 +242,7 @@ class BybitHttpClient extends BaseHttpClient {
   async getOpenOrders(
     category: string,
     options?: SymbolLimitFilterArgs,
-  ): Promise<BybitListResponse<Record<string, unknown>>> {
+  ): Promise<BybitListResponse<BybitOrderResponseRaw>> {
     return this.authenticatedGet('/v5/order/realtime', this.buildCategoryParams(category, options));
   }
 
@@ -289,7 +300,7 @@ class BybitHttpClient extends BaseHttpClient {
   async getClosedPnl(
     category: string,
     options?: SymbolLimitFilterArgs,
-  ): Promise<BybitListResponse<Record<string, unknown>>> {
+  ): Promise<BybitListResponse<BybitClosedPnlRaw>> {
     return this.authenticatedGet('/v5/position/closed-pnl', this.buildCategoryParams(category, options));
   }
 
@@ -306,7 +317,7 @@ class BybitHttpClient extends BaseHttpClient {
   async fetchFeeRate(
     category: string,
     options?: SymbolFilterArgs,
-  ): Promise<BybitResponse<Record<string, unknown>>> {
+  ): Promise<BybitListResponse<BybitFeeRateRaw>> {
     return this.authenticatedGet('/v5/account/fee-rate', this.buildCategoryParams(category, options));
   }
 
@@ -316,7 +327,7 @@ class BybitHttpClient extends BaseHttpClient {
 
   async fetchTransactionLog(
     options?: CategoryFilterArgs,
-  ): Promise<BybitListResponse<Record<string, unknown>>> {
+  ): Promise<BybitListResponse<BybitTransactionLogRaw>> {
     const params: Record<string, string | number | boolean> = {};
 
     if (options?.category !== undefined) {

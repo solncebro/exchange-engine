@@ -12,11 +12,13 @@ import {
   Order,
   Balance,
   BalanceByAsset,
+  AccountBalances,
   ExchangeConfig,
   ExchangeLogger,
   CreateOrderWebSocketArgs,
   FetchAllKlinesOptions,
   FetchPageWithLimitArgs,
+  ModifyOrderArgs,
   SubscribeKlinesArgs,
   PositionSideEnum,
   PositionModeEnum,
@@ -31,6 +33,14 @@ import {
   TradeSymbol,
   TradeSymbolBySymbol,
   TradeSymbolFilter,
+  OrderBook,
+  OrderBookLevel,
+  PublicTrade,
+  MarkPrice,
+  OpenInterest,
+  FeeRate,
+  Income,
+  ClosedPnl,
 } from '../dist/index';
 
 const exchangeIsClass: typeof Exchange = Exchange;
@@ -68,7 +78,7 @@ function assertExchangeClient(client: ExchangeClient, label: string): void {
     'fetchTickers',
     'fetchKlines',
     'fetchAllKlines',
-    'fetchBalance',
+    'fetchBalances',
     'fetchFundingRateHistory',
     'fetchFundingInfo',
     'fetchPosition',
@@ -81,6 +91,21 @@ function assertExchangeClient(client: ExchangeClient, label: string): void {
     'getMinOrderQty',
     'getMinNotional',
     'createOrderWebSocket',
+    'cancelOrder',
+    'getOrder',
+    'fetchOpenOrders',
+    'modifyOrder',
+    'cancelAllOrders',
+    'createBatchOrders',
+    'cancelBatchOrders',
+    'fetchOrderBook',
+    'fetchTrades',
+    'fetchMarkPrice',
+    'fetchOpenInterest',
+    'fetchFeeRate',
+    'fetchIncome',
+    'fetchClosedPnl',
+    'setPositionMode',
     'close',
     'watchTickers',
     'subscribeKlines',
@@ -175,6 +200,7 @@ type _CheckPosition          = AssertAssignable<Position>;
 type _CheckOrder             = AssertAssignable<Order>;
 type _CheckBalance           = AssertAssignable<Balance>;
 type _CheckBalanceByAsset    = AssertAssignable<BalanceByAsset>;
+type _CheckAccountBalances   = AssertAssignable<AccountBalances>;
 type _CheckCreateOrderArgs   = AssertAssignable<CreateOrderWebSocketArgs>;
 type _CheckFetchAllKlinesOptions = AssertAssignable<FetchAllKlinesOptions>;
 type _CheckFetchPageArgs     = AssertAssignable<FetchPageWithLimitArgs>;
@@ -184,6 +210,15 @@ type _CheckFundingInfo       = AssertAssignable<FundingInfo>;
 type _CheckTradeSymbol       = AssertAssignable<TradeSymbol>;
 type _CheckTradeSymbolBySymbol = AssertAssignable<TradeSymbolBySymbol>;
 type _CheckTradeSymbolFilter = AssertAssignable<TradeSymbolFilter>;
+type _CheckModifyOrderArgs  = AssertAssignable<ModifyOrderArgs>;
+type _CheckOrderBook        = AssertAssignable<OrderBook>;
+type _CheckOrderBookLevel   = AssertAssignable<OrderBookLevel>;
+type _CheckPublicTrade      = AssertAssignable<PublicTrade>;
+type _CheckMarkPrice        = AssertAssignable<MarkPrice>;
+type _CheckOpenInterest     = AssertAssignable<OpenInterest>;
+type _CheckFeeRate          = AssertAssignable<FeeRate>;
+type _CheckIncome           = AssertAssignable<Income>;
+type _CheckClosedPnl        = AssertAssignable<ClosedPnl>;
 
 const _kline: Kline = {
   openTimestamp:              0,

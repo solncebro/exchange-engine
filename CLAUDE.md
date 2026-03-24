@@ -80,3 +80,4 @@ Exchange (фабрика) → ExchangeClient (интерфейс)
 | [constants-and-urls.md](.claude/rules/constants-and-urls.md) | URL, таймауты, retry-константы, precision, kline loader |
 | [testing-patterns.md](.claude/rules/testing-patterns.md) | Мокирование axios/WS, createClient, фикстуры, верификация HTTP-вызовов |
 | [adding-endpoint.md](.claude/rules/adding-endpoint.md) | Пошаговый гайд + чеклист по добавлению нового эндпоинта |
+| [api-reference.md](docs/api-reference.md) | Полная API-документация ExchangeClient: методы, типы, enum-ы, матрица поддержки |

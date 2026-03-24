@@ -25,10 +25,10 @@ BaseExchangeClient (abstract, implements ExchangeClient)
   loadTradeSymbols(): Promise<TradeSymbolBySymbol>
   fetchTickers(): Promise<TickerBySymbol>
   fetchKlines(symbol, interval, options?): Promise<Kline[]>
-  fetchAllKlines(symbolList, interval): Promise<Map<string, Kline[]>>
+  fetchAllKlines(symbolList, interval, options?): Promise<Map<string, Kline[]>>
 
 Аккаунт:
-  fetchBalance(): Promise<BalanceByAsset>
+  fetchBalances(): Promise<BalanceByAsset>
   fetchPosition(symbol): Promise<Position>
   fetchPositionMode(): Promise<PositionModeEnum>
   fetchFundingRateHistory(symbol, options?): Promise<FundingRateHistory[]>
@@ -37,6 +37,22 @@ BaseExchangeClient (abstract, implements ExchangeClient)
 Ордера:
   createOrderWebSocket(args): Promise<Order>
   fetchOrderHistory(symbol, options?): Promise<Order[]>
+  cancelOrder(symbol, orderId): Promise<Order>
+  getOrder(symbol, orderId): Promise<Order>
+  fetchOpenOrders(symbol?): Promise<Order[]>
+  modifyOrder(args: ModifyOrderArgs): Promise<Order>
+  cancelAllOrders(symbol): Promise<void>
+  createBatchOrders(orderList): Promise<Order[]>
+  cancelBatchOrders(symbol, orderIdList): Promise<void>
+
+Рыночные данные (расширенные):
+  fetchOrderBook(symbol, limit?): Promise<OrderBook>
+  fetchTrades(symbol, limit?): Promise<PublicTrade[]>
+  fetchMarkPrice(symbol?): Promise<MarkPrice[]>
+  fetchOpenInterest(symbol): Promise<OpenInterest>
+  fetchFeeRate(symbol?): Promise<FeeRate[]>
+  fetchIncome(options?): Promise<Income[]>
+  fetchClosedPnl(symbol?, options?): Promise<ClosedPnl[]>
 
 Trade WebSocket:
   isTradeWebSocketConnected(): boolean
@@ -45,10 +61,11 @@ Trade WebSocket:
 Настройки:
   setLeverage(leverage, symbol): Promise<void>
   setMarginMode(mode, symbol): Promise<void>
+  setPositionMode(mode): Promise<void>
 
 Precision:
-  amountToPrecision(symbol, amount): string
-  priceToPrecision(symbol, price): string
+  amountToPrecision(symbol, amount): number
+  priceToPrecision(symbol, price): number
   getMinOrderQty(symbol): number
   getMinNotional(symbol): number
 
@@ -71,10 +88,10 @@ WebSocket Registry:
 - `fetchTickers()` — делегирует в абстрактный `fetchAndNormalizeTickers()`
 - `fetchKlines()` — делегирует в абстрактный `fetchAndNormalizeKlines()`
 - `fetchAllKlines()` — батч-загрузка через `loadKlinesInChunks` утилиту (чанки по 200)
-- `fetchBalance()` — делегирует в абстрактный `fetchAndNormalizeBalance()`
+- `fetchBalances()` — делегирует в абстрактный `fetchAndNormalizeBalances()`, логирует `"Fetching balance"`
 - `watchTickers()` — подписка через `getPublicStream().subscribeAllTickers()` + yield `fetchTickers()`
 - `subscribeKlines()` / `unsubscribeKlines()` — делегирует в publicStream
-- `amountToPrecision()` / `priceToPrecision()` — lookup в tradeSymbols + precision utils, fallback на `String(value)`
+- `amountToPrecision()` / `priceToPrecision()` — lookup в tradeSymbols + precision utils, возвращает `number`, fallback на исходное значение
 - `getMinOrderQty()` / `getMinNotional()` — lookup в tradeSymbols, fallback 0
 
 ### Абстрактно (нужно реализовать):
@@ -82,20 +99,26 @@ WebSocket Registry:
 - `protected fetchAndNormalizeTradeSymbols(): Promise<TradeSymbolBySymbol>`
 - `protected fetchAndNormalizeTickers(): Promise<TickerBySymbol>`
 - `protected fetchAndNormalizeKlines(symbol, interval, options?): Promise<Kline[]>`
-- `protected fetchAndNormalizeBalance(): Promise<BalanceByAsset>`
+- `protected fetchAndNormalizeBalances(): Promise<BalanceByAsset>`
 - `getWebSocketConnectionInfoList(): WebSocketConnectionInfo[]`
 - `isTradeWebSocketConnected(): boolean`
 - `connectTradeWebSocket(): Promise<void>`
 - `createOrderWebSocket()`
 - `close()`
 
-### Новые поля и методы:
+### Поля и helpers:
 - `abstract exchangeLabel: string` — строковый идентификатор биржи для логирования и ExchangeError
-- `getTradeSymbolOrWarn(symbol)` — protected helper, возвращает TradeSymbol или логирует warning и возвращает undefined
+- `abstract marketLabel: string` — тип рынка ('futures', 'spot', 'linear') для логирования и ошибок
+- `abstract klineLimit: number` — лимит свечей по умолчанию
+- `getTradeSymbolOrWarn(symbol, methodName)` — private helper, возвращает TradeSymbol или логирует warning и возвращает null
 
-### Default throw (переопределяются только в futures-классах):
+### Default throw (переопределяются в подклассах):
 - `fetchOrderHistory()`, `fetchFundingRateHistory()`, `fetchFundingInfo()`, `fetchPositionMode()`
 - `fetchPosition()`, `setLeverage()`, `setMarginMode()`
+- `cancelOrder()`, `getOrder()`, `fetchOpenOrders()`, `fetchOrderBook()`, `fetchTrades()`
+- `modifyOrder()`, `cancelAllOrders()`, `createBatchOrders()`, `cancelBatchOrders()`
+- `fetchMarkPrice()`, `fetchOpenInterest()`, `fetchFeeRate()`, `fetchIncome()`, `fetchClosedPnl()`
+- `setPositionMode()`
 
 ## BinanceBaseClient — шаблонный метод
 
@@ -105,7 +128,7 @@ WebSocket Registry:
 - `fetchAndNormalizeTradeSymbols()` → `httpClient.fetchExchangeInfo()` → `normalizeBinanceTradeSymbols()`
 - `fetchAndNormalizeTickers()` → `httpClient.fetchTickers()` → `normalizeBinanceTickers()`
 - `fetchAndNormalizeKlines()` → `httpClient.fetchKlines()` → `normalizeBinanceKlines()`
-- `fetchAndNormalizeBalance()` → `httpClient.fetchAccount()` → `normalizeBinanceBalance()`
+- `fetchAndNormalizeBalances()` → `httpClient.fetchAccount()` → `normalizeBinanceBalances()`
 
 Реализует `createOrderWebSocket()` через `BinanceTradeStream` с fallback на REST:
 1. Формирует params через `buildBinanceOrderParams()`: `{ symbol, side, type, quantity, price, timeInForce, ... }`
@@ -113,6 +136,13 @@ WebSocket Registry:
 3. Для limit ордеров добавляет `timeInForce = GTC` если не указан
 4. Если `tradeStream.isConnected()` → отправляет через WebSocket
 5. Иначе fallback: `httpClient.createOrder()` → `normalizeBinanceOrder()`
+
+Реализует методы работы с ордерами (5 методов):
+- `cancelOrder(symbol, orderId)` → `httpClient.cancelOrder()` → `normalizeBinanceOrder()`
+- `getOrder(symbol, orderId)` → `httpClient.getOrder()` → `normalizeBinanceOrder()`
+- `fetchOpenOrders(symbol?)` → `httpClient.getOpenOrders()` → `map(normalizeBinanceOrder)`
+- `fetchOrderBook(symbol, limit?)` → `httpClient.fetchOrderBook()` → `normalizeBinanceOrderBook()`
+- `fetchTrades(symbol, limit?)` → `httpClient.fetchTrades()` → `normalizeBinancePublicTrades()`
 
 Реализует `isTradeWebSocketConnected()` и `connectTradeWebSocket()` через `BinanceTradeStream`.
 
@@ -123,6 +153,16 @@ WebSocket Registry:
 ### BinanceFutures
 - `marketLabel = 'futures'`, `klineLimit = 499`
 - Реализует все фьючерсные методы (position, leverage, funding, marginMode)
+- Реализует дополнительные методы (9):
+  - `modifyOrder(args)` → `httpClient.modifyOrder()` → `normalizeBinanceOrder()`
+  - `cancelAllOrders(symbol)` → `httpClient.cancelAllOrders()`
+  - `createBatchOrders(orderList)` → `httpClient.createBatchOrders()` → `map(normalizeBinanceOrder)`
+  - `cancelBatchOrders(symbol, orderIdList)` → `httpClient.cancelBatchOrders()`
+  - `fetchMarkPrice(symbol?)` → `httpClient.fetchMarkPrice()` → `normalizeBinanceMarkPriceList()`
+  - `fetchOpenInterest(symbol)` → `httpClient.fetchOpenInterest()` → `normalizeBinanceOpenInterest()`
+  - `fetchFeeRate(symbol?)` → `httpClient.fetchCommissionRate()` → `normalizeBinanceCommissionRate()`
+  - `fetchIncome(options?)` → `httpClient.fetchIncome()` → `normalizeBinanceIncomeList()`
+  - `setPositionMode(mode)` → `httpClient.setPositionMode()`
 - HTTP: `BinanceFuturesHttpClient`, WS: `BinanceFuturesPublicStream`
 
 ### BinanceSpot
@@ -134,6 +174,8 @@ WebSocket Registry:
 
 Промежуточный абстрактный класс для `BybitLinear` и `BybitSpot`. Наследует `BaseExchangeClient`.
 
+`category` — `protected readonly` поле (доступно подклассам для передачи в HTTP-вызовы).
+
 Реализует все `protected fetchAndNormalize*()` методы через `BybitHttpClient` + `bybitNormalizer`.
 
 Реализует `createOrderWebSocket()` через `BybitTradeStream` с fallback на REST:
@@ -144,6 +186,21 @@ WebSocket Registry:
 
 Реализует `isTradeWebSocketConnected()` и `connectTradeWebSocket()` через `BybitTradeStream`.
 
+Реализует методы работы с ордерами и рыночными данными (13 методов):
+- `cancelOrder(symbol, orderId)` → `httpClient.cancelOrder()` → возвращает минимальный Order со status='canceled'
+- `getOrder(symbol, orderId)` → `httpClient.getOrderHistory()` → `normalizeBybitOrder()`
+- `fetchOpenOrders(symbol?)` → `httpClient.getOpenOrders()` → `map(normalizeBybitOrder)`
+- `fetchOrderHistory(symbol, options?)` → `httpClient.getOrderHistory()` → `map(normalizeBybitOrder)`
+- `fetchOrderBook(symbol, limit?)` → `httpClient.fetchOrderBook()` → `normalizeBybitOrderBook()`
+- `fetchTrades(symbol, limit?)` → `httpClient.fetchRecentTrades()` → `normalizeBybitPublicTradeList()`
+- `fetchFeeRate(symbol?)` → `httpClient.fetchFeeRate()` → `normalizeBybitFeeRateList()`
+- `modifyOrder(args)` → `httpClient.amendOrder()` → `getOrder()` для получения обновлённого ордера
+- `cancelAllOrders(symbol)` → `httpClient.cancelAllOrders(category, symbol)`
+- `createBatchOrders(orderList)` → `httpClient.createBatchOrders()` → `map(buildBybitOrderFromCreateResponse)`
+- `cancelBatchOrders(symbol, orderIdList)` → `httpClient.cancelBatchOrders()`
+- `fetchIncome(options?)` → `httpClient.fetchTransactionLog()` → `normalizeBybitIncomeList()`
+- `fetchClosedPnl(symbol?, options?)` → `httpClient.getClosedPnl()` → `normalizeBybitClosedPnlList()`
+
 Реализует `getWebSocketConnectionInfoList()` — агрегирует `publicStream.getConnectionInfoList()` + optional `tradeStream.getConnectionInfo()`.
 
 В demo mode `tradeStream = null` — все ордера через REST.
@@ -152,6 +209,12 @@ WebSocket Registry:
 - `marketLabel = 'linear'`
 - Наследует `BybitBaseClient`
 - Реализует фьючерсные методы (position, leverage, marginMode)
+- Реализует `createOrderWebSocket()` через `buildBybitOrderParams()` + `submitOrder()`
+- Реализует дополнительные методы:
+  - `fetchOpenInterest(symbol)` → `httpClient.fetchOpenInterest()` → `normalizeBybitOpenInterest()`, symbol устанавливается
+  - `fetchFundingRateHistory(symbol, options?)` → `httpClient.fetchFundingHistory()` → `normalizeBybitFundingRateHistoryList()`
+  - `fetchFundingInfo()` → `throw new Error('Not implemented for Bybit')`
+  - `fetchPositionMode()` → `throw new Error('Not implemented for Bybit')`
 
 ### BybitSpot
 - `marketLabel = 'spot'`
@@ -182,3 +245,11 @@ ExchangeLogger поддерживает overloaded signatures:
 ## CreateOrderWebSocketArgs
 
 - `triggerDirection?: 1 | 2` — направление триггера для условных ордеров (1 = rise, 2 = fall)
+
+## ModifyOrderArgs
+
+- `symbol: string` — символ торговой пары
+- `orderId: string` — ID ордера для модификации
+- `price?: number` — новая цена
+- `amount?: number` — новый объём
+- `triggerPrice?: number` — новая триггер-цена

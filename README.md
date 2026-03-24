@@ -115,7 +115,7 @@ await client.fetchKlines(
 ): Promise<Kline[]>;
 
 // Get account balance
-await client.fetchBalance(): Promise<BalanceByAsset>;
+await client.fetchBalances(): Promise<BalanceByAsset>;
 ```
 
 #### Trading (REST + WebSocket)
@@ -307,7 +307,7 @@ These differences are transparent — the same code works for both.
    const [tickers, position, balance] = await Promise.all([
      client.fetchTickers(),
      client.fetchPosition('BTCUSDT'),
-     client.fetchBalance(),
+     client.fetchBalances(),
    ]);
    ```
 

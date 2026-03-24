@@ -24,18 +24,18 @@ describe('BinanceFuturesHttpClient', () => {
     });
   });
 
-  it('uses /fapi/v1/ and /fapi/v2/ endpoints', async () => {
+  it('uses /fapi/v1/ and /fapi/v3/ endpoints', async () => {
     await client.fetchExchangeInfo();
     expect(mockInstance.get).toHaveBeenCalledWith('/fapi/v1/exchangeInfo', expect.anything());
   });
 
   describe('fetchPositionRisk', () => {
-    it('calls signedGet /fapi/v2/positionRisk', async () => {
+    it('calls signedGet /fapi/v3/positionRisk', async () => {
       await client.fetchPositionRisk('BTCUSDT');
 
       const [url, options] = mockInstance.get.mock.calls[0];
 
-      expect(url).toBe('/fapi/v2/positionRisk');
+      expect(url).toBe('/fapi/v3/positionRisk');
       expect(options.params.symbol).toBe('BTCUSDT');
       expect(options.params.signature).toBeDefined();
     });
@@ -235,12 +235,12 @@ describe('BinanceFuturesHttpClient', () => {
   });
 
   describe('fetchFuturesAccount', () => {
-    it('calls signedGet /fapi/v2/account', async () => {
+    it('calls signedGet /fapi/v3/account', async () => {
       await client.fetchFuturesAccount();
 
       const [url, options] = mockInstance.get.mock.calls[0];
 
-      expect(url).toBe('/fapi/v2/account');
+      expect(url).toBe('/fapi/v3/account');
       expect(options.params.signature).toBeDefined();
     });
   });

@@ -6,3 +6,8 @@ export interface BybitTradeMessage extends BybitBaseWebSocketMessage {
   retCode?: number;
   retMsg?: string;
 }
+
+export interface BybitTradeOrderData {
+  orderId: string;
+  orderLinkId?: string;
+}

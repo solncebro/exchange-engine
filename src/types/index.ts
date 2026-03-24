@@ -22,9 +22,18 @@ export type {
   Order,
   Balance,
   BalanceByAsset,
+  AccountBalances,
   FundingRateHistory,
   FundingInfo,
   WebSocketConnectionInfo,
+  OrderBook,
+  OrderBookLevel,
+  PublicTrade,
+  MarkPrice,
+  OpenInterest,
+  FeeRate,
+  Income,
+  ClosedPnl,
 } from './common';
 
 export type {
@@ -32,5 +41,6 @@ export type {
   CreateOrderWebSocketArgs,
   FetchPageWithLimitArgs,
   SubscribeKlinesArgs,
+  ModifyOrderArgs,
   ExchangeClient,
 } from './exchange';

@@ -7,12 +7,19 @@ import type {
   Position,
   Order,
   Balance,
-  BalanceByAsset,
+  AccountBalances,
   FundingRateHistory,
   FundingInfo,
+  OrderBook,
+  PublicTrade,
+  MarkPrice,
+  OpenInterest,
+  FeeRate,
+  Income,
 } from '../types/common';
 import { TradeSymbolTypeEnum, PositionSideEnum, MarginModeEnum, TimeInForceEnum } from '../types/common';
 import { BINANCE_POSITION_SIDE, BINANCE_ORDER_SIDE, BINANCE_ORDER_TYPE, BINANCE_ORDER_STATUS, BINANCE_TIME_IN_FORCE } from '../constants/mappings';
+import { parseOrderBookLevel } from './normalizerUtils';
 
 interface BinanceFilterRaw {
   filterType: string;
@@ -128,6 +135,8 @@ interface BinanceFuturesAssetRaw {
 }
 
 export interface BinanceFuturesAccountRaw {
+  totalWalletBalance: string;
+  availableBalance: string;
   assets: BinanceFuturesAssetRaw[];
 }
 
@@ -277,7 +286,7 @@ export function normalizeBinanceOrder(raw: BinanceOrderResponseRaw): Order {
   };
 }
 
-export function normalizeBinanceBalance(raw: BinanceAccountRaw): BalanceByAsset {
+export function normalizeBinanceBalances(raw: BinanceAccountRaw): AccountBalances {
   const result = new Map<string, Balance>();
 
   for (const entry of raw.balances) {
@@ -298,10 +307,18 @@ export function normalizeBinanceBalance(raw: BinanceAccountRaw): BalanceByAsset 
     result.set(entry.asset, balance);
   }
 
-  return result;
+  let totalWalletBalance = 0;
+  let totalAvailableBalance = 0;
+
+  for (const balance of result.values()) {
+    totalWalletBalance += balance.total;
+    totalAvailableBalance += balance.free;
+  }
+
+  return { totalWalletBalance, totalAvailableBalance, balanceByAsset: result };
 }
 
-export function normalizeBinanceFuturesBalance(raw: BinanceFuturesAccountRaw): BalanceByAsset {
+export function normalizeBinanceFuturesBalances(raw: BinanceFuturesAccountRaw): AccountBalances {
   const result = new Map<string, Balance>();
 
   for (const entry of raw.assets) {
@@ -320,7 +337,10 @@ export function normalizeBinanceFuturesBalance(raw: BinanceFuturesAccountRaw): B
     });
   }
 
-  return result;
+  const totalWalletBalance = parseFloat(raw.totalWalletBalance);
+  const totalAvailableBalance = parseFloat(raw.availableBalance);
+
+  return { totalWalletBalance, totalAvailableBalance, balanceByAsset: result };
 }
 
 export interface BinanceFundingRateHistoryRaw {
@@ -354,5 +374,113 @@ export function normalizeBinanceFundingInfo(rawList: BinanceFundingInfoRaw[]): F
     fundingIntervalHours: raw.fundingIntervalHours,
     adjustedFundingRateCap: parseFloat(raw.adjustedFundingRateCap),
     adjustedFundingRateFloor: parseFloat(raw.adjustedFundingRateFloor),
+  }));
+}
+
+export interface BinanceOrderBookRaw {
+  lastUpdateId: number;
+  E: number;
+  T: number;
+  bids: string[][];
+  asks: string[][];
+}
+
+export interface BinancePublicTradeRaw {
+  id: number;
+  price: string;
+  qty: string;
+  quoteQty: string;
+  time: number;
+  isBuyerMaker: boolean;
+}
+
+export interface BinanceMarkPriceRaw {
+  symbol: string;
+  markPrice: string;
+  indexPrice: string;
+  lastFundingRate: string;
+  nextFundingTime: number;
+  time: number;
+}
+
+export interface BinanceOpenInterestRaw {
+  symbol: string;
+  openInterest: string;
+  time: number;
+}
+
+export interface BinanceCommissionRateRaw {
+  symbol: string;
+  makerCommissionRate: string;
+  takerCommissionRate: string;
+}
+
+export interface BinanceIncomeRaw {
+  symbol: string;
+  incomeType: string;
+  income: string;
+  asset: string;
+  time: number;
+  info: string;
+  tranId: number;
+  tradeId: string;
+}
+
+export function normalizeBinanceOrderBook(raw: BinanceOrderBookRaw, symbol: string): OrderBook {
+  return {
+    symbol,
+    askList: raw.asks.map(parseOrderBookLevel),
+    bidList: raw.bids.map(parseOrderBookLevel),
+    timestamp: raw.T ?? raw.E ?? Date.now(),
+  };
+}
+
+export function normalizeBinancePublicTrades(rawList: BinancePublicTradeRaw[], symbol: string): PublicTrade[] {
+  return rawList.map((raw) => ({
+    id: String(raw.id),
+    symbol,
+    price: parseFloat(raw.price),
+    quantity: parseFloat(raw.qty),
+    quoteQuantity: parseFloat(raw.quoteQty),
+    timestamp: raw.time,
+    isBuyerMaker: raw.isBuyerMaker,
+  }));
+}
+
+export function normalizeBinanceMarkPriceList(rawList: BinanceMarkPriceRaw[]): MarkPrice[] {
+  return rawList.map((raw) => ({
+    symbol: raw.symbol,
+    markPrice: parseFloat(raw.markPrice),
+    indexPrice: parseFloat(raw.indexPrice),
+    lastFundingRate: parseFloat(raw.lastFundingRate),
+    nextFundingTime: raw.nextFundingTime,
+    timestamp: raw.time,
+  }));
+}
+
+export function normalizeBinanceOpenInterest(raw: BinanceOpenInterestRaw): OpenInterest {
+  return {
+    symbol: raw.symbol,
+    openInterest: parseFloat(raw.openInterest),
+    timestamp: raw.time,
+  };
+}
+
+export function normalizeBinanceCommissionRate(raw: BinanceCommissionRateRaw): FeeRate[] {
+  return [{
+    symbol: raw.symbol,
+    makerRate: parseFloat(raw.makerCommissionRate),
+    takerRate: parseFloat(raw.takerCommissionRate),
+  }];
+}
+
+export function normalizeBinanceIncomeList(rawList: BinanceIncomeRaw[]): Income[] {
+  return rawList.map((raw) => ({
+    symbol: raw.symbol,
+    incomeType: raw.incomeType,
+    income: parseFloat(raw.income),
+    asset: raw.asset,
+    timestamp: raw.time,
+    info: { tranId: raw.tranId, tradeId: raw.tradeId, info: raw.info },
   }));
 }
