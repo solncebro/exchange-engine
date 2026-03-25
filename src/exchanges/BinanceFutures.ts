@@ -56,7 +56,7 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
       webSocketCombinedUrl,
       logger: args.logger,
       onNotify: args.onNotify,
-      label: '[Binance Futures] Public',
+      label: 'Binance Futures Public WebSocket',
     });
 
     super({
@@ -64,7 +64,7 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
       httpClient,
       publicStream,
       tradeWebSocketUrl,
-      tradeStreamLabel: '[Binance Futures] Orders',
+      tradeStreamLabel: 'Binance Futures Order WebSocket',
     });
   }
 

@@ -1,7 +1,7 @@
 import { hmacSha256 } from '../utils/crypto';
 import type {
-  AuthenticateBybitWebSocketArgs,
-  BybitBaseWebSocketMessage,
+    AuthenticateBybitWebSocketArgs,
+    BybitBaseWebSocketMessage,
 } from './bybitWebSocketUtils.types';
 
 const BYBIT_PING_INTERVAL = 20000;
@@ -38,20 +38,17 @@ async function authenticateBybitWebSocket(args: AuthenticateBybitWebSocketArgs):
       const errorMessage = message.ret_msg ?? record.retMsg ?? 'unknown error';
       const errorDetails = retCode !== undefined ? ` (code: ${retCode})` : '';
 
-      logger.error(`Bybit auth response: ${JSON.stringify(message)}`);
-      throw new Error(`Bybit auth failed: ${errorMessage}${errorDetails}`);
+      logger.error(`[${label}] Auth response: ${JSON.stringify(message)}`);
+      throw new Error(`[${label}] Auth failed: ${errorMessage}${errorDetails}`);
     }
 
     return false;
   }, 10000);
-
-  logger.info(`${label} authenticated`);
 }
 
+export type { AuthenticateBybitWebSocketArgs, BybitBaseWebSocketMessage } from './bybitWebSocketUtils.types';
 export {
-  isBybitPongResponse,
-  BYBIT_HEARTBEAT_CONFIG,
-  BYBIT_PING_INTERVAL,
-  authenticateBybitWebSocket,
+    authenticateBybitWebSocket, BYBIT_HEARTBEAT_CONFIG,
+    BYBIT_PING_INTERVAL, isBybitPongResponse
 };
-export type { BybitBaseWebSocketMessage, AuthenticateBybitWebSocketArgs } from './bybitWebSocketUtils.types';
+

@@ -38,7 +38,7 @@ class BinanceSpot extends BinanceBaseClient<BinanceSpotHttpClient> {
       webSocketUrl: BINANCE_SPOT_WEBSOCKET_STREAM_URL,
       logger: args.logger,
       onNotify: args.onNotify,
-      label: '[Binance Spot] Public',
+      label: 'Binance Spot Public WebSocket',
     });
 
     super({
@@ -46,7 +46,7 @@ class BinanceSpot extends BinanceBaseClient<BinanceSpotHttpClient> {
       httpClient,
       publicStream,
       tradeWebSocketUrl,
-      tradeStreamLabel: '[Binance Spot] Orders',
+      tradeStreamLabel: 'Binance Spot Order WebSocket',
     });
   }
 }

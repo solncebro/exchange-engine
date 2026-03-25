@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] - 2026-03-23
+
+### Changed
+- Standardized WebSocket connection labels across all exchange clients:
+  - `Binance Futures Public WebSocket`, `Binance Spot Public WebSocket`
+  - `Binance Futures Order WebSocket`, `Binance Spot Order WebSocket`
+  - `Bybit Linear Public WebSocket`, `Bybit Spot Public WebSocket`
+  - `Bybit Linear Order WebSocket`, `Bybit Spot Order WebSocket`
+
+### Fixed
+- `authenticateBybitWebSocket()` now includes stream label context in error logs and thrown errors to simplify troubleshooting:
+  - log format: `[<label>] Auth response: ...`
+  - error format: `[<label>] Auth failed: ...`
+- Removed redundant success log from Bybit WebSocket authentication to reduce log noise in normal flow
+
 ## [0.6.0] - 2026-03-22
 
 ### Breaking Changes
@@ -238,6 +253,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Private endpoints (balance, position, orders) require valid credentials
 - WebSocket subscriptions are stateless and can be re-established on reconnect
 
+[0.6.1]: https://github.com/solncebro/exchange-engine/releases/tag/v0.6.1
 [0.6.0]: https://github.com/solncebro/exchange-engine/releases/tag/v0.6.0
 [0.5.0]: https://github.com/solncebro/exchange-engine/releases/tag/v0.5.0
 [0.4.2]: https://github.com/solncebro/exchange-engine/releases/tag/v0.4.2

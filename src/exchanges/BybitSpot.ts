@@ -18,8 +18,8 @@ class BybitSpot extends BybitBaseClient {
       exchangeArgs: args,
       category: 'spot',
       publicWebSocketUrl,
-      publicStreamLabel: '[Bybit Spot] Public',
-      tradeStreamLabel: '[Bybit] Orders',
+      publicStreamLabel: 'Bybit Spot Public WebSocket',
+      tradeStreamLabel: 'Bybit Spot Order WebSocket',
     });
   }
 

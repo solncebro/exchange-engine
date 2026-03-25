@@ -53,7 +53,7 @@ describe('authenticateBybitWebSocket', () => {
 
     await authenticateBybitWebSocket({ context, apiKey, secret, label, logger });
 
-    expect(logger.info).toHaveBeenCalledWith(`${label} authenticated`);
+    expect(logger.info).not.toHaveBeenCalled();
   });
 
   it('resolves on Trade WS success response (retCode: 0)', async () => {
@@ -61,7 +61,7 @@ describe('authenticateBybitWebSocket', () => {
 
     await authenticateBybitWebSocket({ context, apiKey, secret, label, logger });
 
-    expect(logger.info).toHaveBeenCalledWith(`${label} authenticated`);
+    expect(logger.info).not.toHaveBeenCalled();
   });
 
   it('rejects with ret_msg when success is false', async () => {
@@ -69,9 +69,9 @@ describe('authenticateBybitWebSocket', () => {
 
     await expect(
       authenticateBybitWebSocket({ context, apiKey, secret, label, logger }),
-    ).rejects.toThrow('Bybit auth failed: Invalid API key');
+    ).rejects.toThrow(`[${label}] Auth failed: Invalid API key`);
 
-    expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('Bybit auth response'));
+    expect(logger.error).toHaveBeenCalledWith(expect.stringContaining(`[${label}] Auth response`));
   });
 
   it('rejects with retCode when retCode is non-zero', async () => {
@@ -79,7 +79,7 @@ describe('authenticateBybitWebSocket', () => {
 
     await expect(
       authenticateBybitWebSocket({ context, apiKey, secret, label, logger }),
-    ).rejects.toThrow('Bybit auth failed: Invalid key (code: 10003)');
+    ).rejects.toThrow(`[${label}] Auth failed: Invalid key (code: 10003)`);
   });
 
   it('rejects with "unknown error" when no error details provided', async () => {
@@ -87,7 +87,7 @@ describe('authenticateBybitWebSocket', () => {
 
     await expect(
       authenticateBybitWebSocket({ context, apiKey, secret, label, logger }),
-    ).rejects.toThrow('Bybit auth failed: unknown error');
+    ).rejects.toThrow(`[${label}] Auth failed: unknown error`);
   });
 
   it('does not match non-auth messages', async () => {
@@ -122,6 +122,6 @@ describe('authenticateBybitWebSocket', () => {
       authenticateBybitWebSocket({ context, apiKey, secret, label, logger }),
     ).rejects.toThrow();
 
-    expect(logger.error).toHaveBeenCalledWith(`Bybit auth response: ${JSON.stringify(response)}`);
+    expect(logger.error).toHaveBeenCalledWith(`[${label}] Auth response: ${JSON.stringify(response)}`);
   });
 });

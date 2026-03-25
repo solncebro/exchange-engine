@@ -23,8 +23,8 @@ class BybitLinear extends BybitBaseClient {
       exchangeArgs: args,
       category: 'linear',
       publicWebSocketUrl,
-      publicStreamLabel: '[Bybit Linear] Public',
-      tradeStreamLabel: '[Bybit] Orders',
+      publicStreamLabel: 'Bybit Linear Public WebSocket',
+      tradeStreamLabel: 'Bybit Linear Order WebSocket',
     });
   }
 
