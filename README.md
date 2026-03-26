@@ -14,8 +14,6 @@ Universal TypeScript client library for cryptocurrency trading on Binance and By
 ## Installation
 
 ```bash
-npm install @solncebro/exchange-engine
-# or
 yarn add @solncebro/exchange-engine
 ```
 
@@ -337,6 +335,8 @@ These differences are transparent — the same code works for both.
 ## Error Handling
 
 Exchange-specific errors are thrown as `ExchangeError` with structured `code` and `exchange` fields:
+
+Binance futures returns no-op validation responses for unchanged settings. Codes `-4059` (`No need to change position side.`) and `-4046` (`No need to change margin type.`) are handled as successful no-op operations in `setPositionMode()` and `setMarginMode()`.
 
 ```typescript
 import { ExchangeError } from '@solncebro/exchange-engine';

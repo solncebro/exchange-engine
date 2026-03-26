@@ -162,7 +162,8 @@ WebSocket Registry:
   - `fetchOpenInterest(symbol)` → `httpClient.fetchOpenInterest()` → `normalizeBinanceOpenInterest()`
   - `fetchFeeRate(symbol?)` → `httpClient.fetchCommissionRate()` → `normalizeBinanceCommissionRate()`
   - `fetchIncome(options?)` → `httpClient.fetchIncome()` → `normalizeBinanceIncomeList()`
-  - `setPositionMode(mode)` → `httpClient.setPositionMode()`
+- `setPositionMode(mode)` → `httpClient.setPositionMode()`, код Binance `-4059` (`No need to change position side.`) обрабатывается как no-op без throw (логируется на HTTP-слое)
+- `setMarginMode(mode, symbol)` для Binance futures: код Binance `-4046` (`No need to change margin type.`) обрабатывается как no-op без throw (логируется на HTTP-слое)
 - HTTP: `BinanceFuturesHttpClient`, WS: `BinanceFuturesPublicStream`
 
 ### BinanceSpot

@@ -25,6 +25,11 @@ BaseHttpClient (abstract)
 ### Private хелпер:
 - `executeRequest<T>(label, fn): Promise<T>` — общая обёртка для non-GET методов (logging + error handling). Все методы кроме `get` делегируют в `executeRequest`.
 
+### Специальная обработка no-op ошибок Binance:
+- `BaseHttpClient.handleError()` не логирует как error ответы Binance с кодами `-4046` и `-4059`
+- Для этих кодов пишется `info`-лог с текстом `msg`, который вернула биржа
+- Поведение применяется ко всем HTTP-методам (`get`, `post`, `put`, `delete`)
+
 ### BybitHttpClient ошибки:
 - Выбрасывает `ExchangeError` (из `src/errors/ExchangeError.ts`) с полями `code` и `exchange` для структурированной обработки ошибок.
 

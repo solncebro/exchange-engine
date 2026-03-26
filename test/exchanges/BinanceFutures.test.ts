@@ -140,6 +140,24 @@ describe('BinanceFutures', () => {
 
       expect(options.params.marginType).toBe('CROSSED');
     });
+
+    it('does not throw when Binance returns no-op margin type error', async () => {
+      const { client, mockInstance } = createClient();
+      const noNeedMarginTypeError = {
+        response: {
+          status: 400,
+          data: {
+            code: -4046,
+            msg: 'No need to change margin type.',
+          },
+        },
+        message: 'Request failed with status code 400',
+      };
+
+      mockInstance.post.mockRejectedValue(noNeedMarginTypeError);
+
+      await expect(client.setMarginMode(MarginModeEnum.Cross, 'BTCUSDT')).resolves.toBeUndefined();
+    });
   });
 
   describe('loadTradeSymbols', () => {
@@ -839,6 +857,24 @@ describe('BinanceFutures', () => {
       const [, , options] = mockInstance.post.mock.calls[0];
 
       expect(options.params.dualSidePosition).toBe(false);
+    });
+
+    it('does not throw when Binance returns no-op position mode error', async () => {
+      const { client, mockInstance } = createClient();
+      const noNeedPositionModeError = {
+        response: {
+          status: 400,
+          data: {
+            code: -4059,
+            msg: 'No need to change position side.',
+          },
+        },
+        message: 'Request failed with status code 400',
+      };
+
+      mockInstance.post.mockRejectedValue(noNeedPositionModeError);
+
+      await expect(client.setPositionMode(PositionModeEnum.Hedge)).resolves.toBeUndefined();
     });
   });
 

@@ -24,6 +24,25 @@ import {
   BINANCE_DEMO_FUTURES_TRADE_WEBSOCKET_URL,
 } from '../constants/binance';
 import { BinanceBaseClient } from './BinanceBaseClient';
+import type { AxiosLikeError, BinanceModifyOrderParams } from './BinanceFutures.types';
+
+const BINANCE_POSITION_MODE_NOOP_ERROR_CODE = -4059;
+const BINANCE_MARGIN_MODE_NOOP_ERROR_CODE = -4046;
+
+function parseBinanceErrorCode(error: unknown): number | null {
+  if (!error || typeof error !== 'object') {
+    return null;
+  }
+
+  const axiosLikeError = error as AxiosLikeError;
+  const code = axiosLikeError.response?.data?.code;
+
+  if (typeof code !== 'number') {
+    return null;
+  }
+
+  return code;
+}
 
 class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
   protected readonly marketLabel = 'futures';
@@ -118,7 +137,18 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
   async setMarginMode(marginMode: MarginModeEnum, symbol: string): Promise<void> {
     this.logger.info(`Setting margin mode to ${marginMode} for ${symbol}`);
     const marginType = marginMode === MarginModeEnum.Isolated ? 'ISOLATED' : 'CROSSED';
-    await this.httpClient.setMarginType(symbol, marginType);
+
+    try {
+      await this.httpClient.setMarginType(symbol, marginType);
+    } catch (error) {
+      const errorCode = parseBinanceErrorCode(error);
+
+      if (errorCode === BINANCE_MARGIN_MODE_NOOP_ERROR_CODE) {
+        return;
+      }
+
+      throw error;
+    }
   }
 
   async fetchOrderHistory(symbol: string, options?: FetchPageWithLimitArgs): Promise<Order[]> {
@@ -130,7 +160,7 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
 
   async modifyOrder(args: ModifyOrderArgs): Promise<Order> {
     this.logger.debug(`[Binance] Modifying order ${args.orderId} for ${args.symbol}`);
-    const params: Record<string, unknown> = {
+    const params: BinanceModifyOrderParams = {
       symbol: args.symbol,
       orderId: args.orderId,
     };
@@ -202,7 +232,18 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
   async setPositionMode(mode: PositionModeEnum): Promise<void> {
     this.logger.info(`[Binance] Setting position mode to ${mode}`);
     const dualSidePosition = mode === PositionModeEnum.Hedge;
-    await this.httpClient.setPositionMode(dualSidePosition);
+
+    try {
+      await this.httpClient.setPositionMode(dualSidePosition);
+    } catch (error) {
+      const errorCode = parseBinanceErrorCode(error);
+
+      if (errorCode === BINANCE_POSITION_MODE_NOOP_ERROR_CODE) {
+        return;
+      }
+
+      throw error;
+    }
   }
 }
 

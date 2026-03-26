@@ -68,9 +68,8 @@ abstract class BaseExchangeClient implements ExchangeClient {
       this.tradeSymbols.set(symbol, tradeSymbol);
     }
 
-    const symbolList = [...this.tradeSymbols.keys()];
     this.logger.info(
-      { symbolCount: this.tradeSymbols.size, symbolList },
+      { symbolCount: this.tradeSymbols.size },
       `[${this.exchangeLabel}] Fetched ${this.tradeSymbols.size} ${this.marketLabel} trade symbols`,
     );
 

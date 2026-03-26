@@ -2,7 +2,7 @@ import axios, { AxiosInstance, AxiosError, AxiosResponse } from 'axios';
 import { HttpsAgent as KeepAliveHttpsAgent } from 'agentkeepalive';
 
 import type { ExchangeLogger } from '../types/common';
-import type { BaseHttpClientArgs } from './BaseHttpClient.types';
+import type { BaseHttpClientArgs, HttpErrorResponseData, HttpHeaders, HttpQueryParams, HttpRecord } from './BaseHttpClient.types';
 
 const DEFAULT_HTTPS_AGENT = new KeepAliveHttpsAgent({
   maxSockets: 100,
@@ -13,7 +13,8 @@ const DEFAULT_HTTPS_AGENT = new KeepAliveHttpsAgent({
 });
 
 const MAX_RETRIES = 3;
-const RETRY_BASE_DELAY_MS = 1000;
+const RETRY_BASE_DELAY_MILLISECONDS = 1000;
+const BINANCE_NOOP_ERROR_CODE_LIST = [-4059, -4046];
 
 function isRetryable(error: AxiosError): boolean {
   if (!error.response) {
@@ -25,7 +26,7 @@ function isRetryable(error: AxiosError): boolean {
   return status === 429 || status >= 500;
 }
 
-function getRetryDelayMs(error: AxiosError, attempt: number): number {
+function getRetryDelayMilliseconds(error: AxiosError, attempt: number): number {
   if (error.response?.status === 429) {
     const retryAfterRaw = error.response.headers['retry-after'];
 
@@ -34,11 +35,41 @@ function getRetryDelayMs(error: AxiosError, attempt: number): number {
     }
   }
 
-  return RETRY_BASE_DELAY_MS * Math.pow(2, attempt);
+  return RETRY_BASE_DELAY_MILLISECONDS * Math.pow(2, attempt);
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function sleep(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function isBinanceNoopHttpError(data: unknown): data is HttpErrorResponseData {
+  if (!data || typeof data !== 'object') {
+    return false;
+  }
+
+  const record = data as HttpErrorResponseData;
+
+  if (typeof record.code !== 'number') {
+    return false;
+  }
+
+  return BINANCE_NOOP_ERROR_CODE_LIST.includes(record.code);
+}
+
+function parseBinanceNoopHttpErrorMessage(data: unknown): string | null {
+  if (!data || typeof data !== 'object') {
+    return null;
+  }
+
+  const record = data as HttpErrorResponseData;
+
+  const message = record.msg;
+
+  if (typeof message !== 'string') {
+    return null;
+  }
+
+  return message;
 }
 
 abstract class BaseHttpClient {
@@ -58,27 +89,28 @@ abstract class BaseHttpClient {
 
   protected async get<T>(
     url: string,
-    params?: Record<string, string | number | boolean>,
-    headers?: Record<string, string>
+    params?: HttpQueryParams,
+    headers?: HttpHeaders
   ): Promise<T> {
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
         this.logger.debug({ url, params }, `GET ${url}`);
         const response = await this.axiosInstance.get<T>(url, { params, headers });
-        this.logger.debug({ url, response: response.data as Record<string, unknown> }, `GET ${url} response`);
+        this.logger.debug({ url, response: response.data as HttpRecord }, `GET ${url} response`);
 
         return response.data;
       } catch (error) {
         const axiosError = error as AxiosError;
         this.handleError(axiosError);
 
+
         if (!isRetryable(axiosError) || attempt === MAX_RETRIES) {
           throw error;
         }
 
-        const delayMs = getRetryDelayMs(axiosError, attempt);
-        this.logger.warn(`GET ${url} failed, retrying (${attempt + 1}/${MAX_RETRIES}) in ${delayMs}ms`);
-        await sleep(delayMs);
+        const delayMilliseconds = getRetryDelayMilliseconds(axiosError, attempt);
+        this.logger.warn(`GET ${url} failed, retrying (${attempt + 1}/${MAX_RETRIES}) in ${delayMilliseconds} milliseconds`);
+        await sleep(delayMilliseconds);
       }
     }
 
@@ -87,52 +119,52 @@ abstract class BaseHttpClient {
 
   protected post<T>(
     url: string,
-    data?: Record<string, unknown>,
-    headers?: Record<string, string>
+    data?: HttpRecord,
+    headers?: HttpHeaders
   ): Promise<T> {
     return this.executeRequest(`POST ${url}`, () => this.axiosInstance.post<T>(url, data, { headers }));
   }
 
   protected postWithParams<T>(
     url: string,
-    params?: Record<string, string | number | boolean>,
-    headers?: Record<string, string>
+    params?: HttpQueryParams,
+    headers?: HttpHeaders
   ): Promise<T> {
     return this.executeRequest(`POST ${url}`, () => this.axiosInstance.post<T>(url, null, { params, headers }));
   }
 
   protected put<T>(
     url: string,
-    data?: Record<string, unknown>,
-    headers?: Record<string, string>
+    data?: HttpRecord,
+    headers?: HttpHeaders
   ): Promise<T> {
     return this.executeRequest(`PUT ${url}`, () => this.axiosInstance.put<T>(url, data, { headers }));
   }
 
   protected putWithParams<T>(
     url: string,
-    params?: Record<string, string | number | boolean>,
-    headers?: Record<string, string>
+    params?: HttpQueryParams,
+    headers?: HttpHeaders
   ): Promise<T> {
     return this.executeRequest(`PUT ${url}`, () => this.axiosInstance.put<T>(url, null, { params, headers }));
   }
 
   protected delete<T>(
     url: string,
-    params?: Record<string, string | number | boolean>,
-    headers?: Record<string, string>
+    params?: HttpQueryParams,
+    headers?: HttpHeaders
   ): Promise<T> {
     return this.executeRequest(`DELETE ${url}`, () => this.axiosInstance.delete<T>(url, { params, headers }));
   }
 
   private async executeRequest<T>(
     label: string,
-    fn: () => Promise<AxiosResponse<T>>,
+    requestFunction: () => Promise<AxiosResponse<T>>,
   ): Promise<T> {
     try {
       this.logger.debug(label);
-      const response = await fn();
-      this.logger.debug({ response: response.data as Record<string, unknown> }, `${label} response`);
+      const response = await requestFunction();
+      this.logger.debug({ response: response.data as HttpRecord }, `${label} response`);
 
       return response.data;
     } catch (error) {
@@ -144,8 +176,22 @@ abstract class BaseHttpClient {
 
   private handleError(error: AxiosError): void {
     if (error.response) {
+      if (isBinanceNoopHttpError(error.response.data)) {
+        const noopMessage = parseBinanceNoopHttpErrorMessage(error.response.data);
+
+        if (noopMessage !== null) {
+          this.logger.info(noopMessage);
+
+          return;
+        }
+
+        this.logger.info(`HTTP ${error.response.status}`);
+
+        return;
+      }
+
       this.logger.error(
-        { status: error.response.status, data: error.response.data as Record<string, unknown> },
+        { status: error.response.status, data: error.response.data as HttpRecord },
         `HTTP ${error.response.status}`,
       );
     } else if (error.request) {
