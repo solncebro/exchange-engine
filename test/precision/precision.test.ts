@@ -1,57 +1,9 @@
-import { countDecimalPlaces, roundToStep, amountToPrecision, priceToPrecision } from '../../src/precision/precision';
-import { BTCUSDT_TRADE_SYMBOL, ETHUSDT_TRADE_SYMBOL } from '../fixtures/mockTradeSymbol';
-
-describe('countDecimalPlaces', () => {
-  it('returns 0 for integer step "1"', () => {
-    expect(countDecimalPlaces('1')).toBe(0);
-  });
-
-  it('returns 2 for "0.01"', () => {
-    expect(countDecimalPlaces('0.01')).toBe(2);
-  });
-
-  it('returns 1 for "0.10" (trailing zeros stripped)', () => {
-    expect(countDecimalPlaces('0.10')).toBe(1);
-  });
-
-  it('returns 8 for "0.00000001"', () => {
-    expect(countDecimalPlaces('0.00000001')).toBe(8);
-  });
-
-  it('returns 0 for "10"', () => {
-    expect(countDecimalPlaces('10')).toBe(0);
-  });
-});
-
-describe('roundToStep', () => {
-  it('rounds to nearest step', () => {
-    expect(roundToStep(65432.15, '0.10')).toBe(65432.2);
-  });
-
-  it('rounds down correctly', () => {
-    expect(roundToStep(0.1234, '0.001')).toBe(0.123);
-  });
-
-  it('handles integer step', () => {
-    expect(roundToStep(1234.5, '1')).toBe(1235);
-  });
-
-  it('returns value as fallback when step is "0"', () => {
-    expect(roundToStep(123.456, '0')).toBe(123.456);
-  });
-
-  it('returns value as fallback when step is NaN', () => {
-    expect(roundToStep(123.456, 'abc')).toBe(123.456);
-  });
-
-  it('handles step with many decimals', () => {
-    expect(roundToStep(0.123456789, '0.00000001')).toBe(0.12345679);
-  });
-
-  it('rounds to 2 decimal places with step "0.01"', () => {
-    expect(roundToStep(3456.789, '0.01')).toBe(3456.79);
-  });
-});
+import { amountToPrecision, priceToPrecision } from '../../src/precision/precision';
+import {
+  BTCUSDT_TRADE_SYMBOL,
+  ETHUSDT_TRADE_SYMBOL,
+  MISSING_FILTER_TRADE_SYMBOL,
+} from '../fixtures/mockTradeSymbol';
 
 describe('amountToPrecision', () => {
   it('rounds amount using market stepSize', () => {
@@ -64,6 +16,45 @@ describe('amountToPrecision', () => {
     const result = amountToPrecision(ETHUSDT_TRADE_SYMBOL, 1.567);
 
     expect(result).toBe(1.57);
+  });
+
+  it('floors to integer when stepSize is "0"', () => {
+    const result = amountToPrecision(MISSING_FILTER_TRADE_SYMBOL, 120155.49534691955);
+
+    expect(result).toBe(120155);
+  });
+
+  it('floors to integer when stepSize is empty string', () => {
+    const symbol = {
+      ...MISSING_FILTER_TRADE_SYMBOL,
+      filter: { ...MISSING_FILTER_TRADE_SYMBOL.filter, stepSize: '' },
+    };
+
+    expect(amountToPrecision(symbol, 999.99)).toBe(999);
+  });
+
+  it('floors to 0 when amount is less than 1 and stepSize is invalid', () => {
+    const result = amountToPrecision(MISSING_FILTER_TRADE_SYMBOL, 0.5);
+
+    expect(result).toBe(0);
+  });
+
+  it('handles integer step', () => {
+    const symbol = {
+      ...BTCUSDT_TRADE_SYMBOL,
+      filter: { ...BTCUSDT_TRADE_SYMBOL.filter, stepSize: '1' },
+    };
+
+    expect(amountToPrecision(symbol, 1234.5)).toBe(1235);
+  });
+
+  it('handles step with many decimals', () => {
+    const symbol = {
+      ...BTCUSDT_TRADE_SYMBOL,
+      filter: { ...BTCUSDT_TRADE_SYMBOL.filter, stepSize: '0.00000001' },
+    };
+
+    expect(amountToPrecision(symbol, 0.123456789)).toBe(0.12345679);
   });
 });
 
@@ -78,5 +69,38 @@ describe('priceToPrecision', () => {
     const result = priceToPrecision(ETHUSDT_TRADE_SYMBOL, 3456.789);
 
     expect(result).toBe(3456.79);
+  });
+
+  it('rounds to 8 decimal places when tickSize is "0"', () => {
+    const result = priceToPrecision(MISSING_FILTER_TRADE_SYMBOL, 0.123456789012345);
+
+    expect(result).toBe(0.12345679);
+  });
+
+  it('rounds to 8 decimal places when tickSize is empty string', () => {
+    const symbol = {
+      ...MISSING_FILTER_TRADE_SYMBOL,
+      filter: { ...MISSING_FILTER_TRADE_SYMBOL.filter, tickSize: '' },
+    };
+
+    expect(priceToPrecision(symbol, 65432.123456789012)).toBe(65432.12345679);
+  });
+
+  it('handles step "0.10" correctly', () => {
+    const symbol = {
+      ...BTCUSDT_TRADE_SYMBOL,
+      filter: { ...BTCUSDT_TRADE_SYMBOL.filter, tickSize: '0.10' },
+    };
+
+    expect(priceToPrecision(symbol, 65432.15)).toBe(65432.2);
+  });
+
+  it('handles step "0.01" correctly', () => {
+    const symbol = {
+      ...BTCUSDT_TRADE_SYMBOL,
+      filter: { ...BTCUSDT_TRADE_SYMBOL.filter, tickSize: '0.01' },
+    };
+
+    expect(priceToPrecision(symbol, 3456.789)).toBe(3456.79);
   });
 });

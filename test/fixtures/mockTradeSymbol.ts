@@ -55,3 +55,21 @@ export const BTCUSDT_SPOT_TRADE_SYMBOL: TradeSymbol = {
   },
 };
 
+export const MISSING_FILTER_TRADE_SYMBOL: TradeSymbol = {
+  symbol: 'NEWUSDT',
+  baseAsset: 'NEW',
+  quoteAsset: 'USDT',
+  settle: 'USDT',
+  isActive: true,
+  type: TradeSymbolTypeEnum.Swap,
+  isLinear: true,
+  contractSize: 1,
+  filter: {
+    tickSize: '0',
+    stepSize: '0',
+    minQty: '0',
+    maxQty: '0',
+    minNotional: '0',
+  },
+};
+

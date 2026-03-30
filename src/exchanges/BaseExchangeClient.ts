@@ -136,7 +136,7 @@ abstract class BaseExchangeClient implements ExchangeClient {
     const tradeSymbol = this.getTradeSymbolOrWarn(symbol, 'amountToPrecision');
 
     if (!tradeSymbol) {
-      return amount;
+      return Math.floor(amount);
     }
 
     return amountToPrecision(tradeSymbol, amount);
@@ -146,7 +146,7 @@ abstract class BaseExchangeClient implements ExchangeClient {
     const tradeSymbol = this.getTradeSymbolOrWarn(symbol, 'priceToPrecision');
 
     if (!tradeSymbol) {
-      return price;
+      return parseFloat(price.toFixed(8));
     }
 
     return priceToPrecision(tradeSymbol, price);

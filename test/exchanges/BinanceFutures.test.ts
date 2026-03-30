@@ -470,12 +470,12 @@ describe('BinanceFutures', () => {
       expect(result).toBe(0.123);
     });
 
-    it('returns raw amount for unknown symbol', () => {
+    it('floors amount to integer for unknown symbol', () => {
       const { client } = createClient();
 
       const result = client.amountToPrecision('UNKNOWN', 0.12345);
 
-      expect(result).toBe(0.12345);
+      expect(result).toBe(0);
     });
   });
 
@@ -490,12 +490,12 @@ describe('BinanceFutures', () => {
       expect(result).toBe(65432.1);
     });
 
-    it('returns raw price for unknown symbol', () => {
+    it('rounds price to 8 decimals for unknown symbol', () => {
       const { client } = createClient();
 
-      const result = client.priceToPrecision('UNKNOWN', 65432.123);
+      const result = client.priceToPrecision('UNKNOWN', 65432.123456789012);
 
-      expect(result).toBe(65432.123);
+      expect(result).toBe(65432.12345679);
     });
   });
 
