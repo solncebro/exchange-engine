@@ -31,7 +31,7 @@ import type {
 import { MarginModeEnum, PositionModeEnum } from '../types/common';
 import type { PublicStreamLike } from '../types/stream';
 import { loadKlinesInChunks } from '../utils/klineLoader';
-import { amountToPrecision, priceToPrecision } from '../precision/precision';
+import { amountToPrecision, priceToPrecision, MAX_PRICE_DECIMAL_PLACES } from '../precision/precision';
 
 abstract class BaseExchangeClient implements ExchangeClient {
   readonly apiKey: string;
@@ -146,7 +146,7 @@ abstract class BaseExchangeClient implements ExchangeClient {
     const tradeSymbol = this.getTradeSymbolOrWarn(symbol, 'priceToPrecision');
 
     if (!tradeSymbol) {
-      return parseFloat(price.toFixed(8));
+      return parseFloat(price.toFixed(MAX_PRICE_DECIMAL_PLACES));
     }
 
     return priceToPrecision(tradeSymbol, price);

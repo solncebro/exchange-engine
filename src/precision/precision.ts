@@ -1,6 +1,6 @@
 import type { TradeSymbol } from '../types/common';
 
-const MAX_PRICE_DECIMAL_PLACES = 8;
+export const MAX_PRICE_DECIMAL_PLACES = 8;
 
 function countDecimalPlaces(step: string): number {
   const parts = step.split('.');
