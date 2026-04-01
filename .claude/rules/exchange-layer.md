@@ -110,7 +110,18 @@ WebSocket Registry:
 - `abstract exchangeLabel: string` — строковый идентификатор биржи для логирования и ExchangeError
 - `abstract marketLabel: string` — тип рынка ('futures', 'spot', 'linear') для логирования и ошибок
 - `abstract klineLimit: number` — лимит свечей по умолчанию
+- `onNotify` — protected, оборачивается через `createNotifyHandler()` в конструкторе
 - `getTradeSymbolOrWarn(symbol, methodName)` — private helper, возвращает TradeSymbol или логирует warning и возвращает null
+
+### createNotifyHandler (protected static)
+
+Оборачивает пользовательский `onNotify` callback для обработки CRITICAL-сообщений от WebSocket-стримов:
+- Сообщения без `'CRITICAL'` в тексте — просто проксируются в `onNotify`
+- Сообщения с `'CRITICAL'` — сначала вызывается `onNotify` (если задан), затем `process.exit(1)`
+- Поддерживает async `onNotify` — ждёт завершения Promise перед exit
+- Если `onNotify` выбрасывает ошибку — `process.exit(1)` вызывается в любом случае
+
+Binance public streams создаются до `super()`, поэтому вызывают `BaseExchangeClient.createNotifyHandler(args.onNotify)` напрямую. Остальные стримы (trade, Bybit public/trade) получают уже обёрнутый `this.onNotify`.
 
 ### Default throw (переопределяются в подклассах):
 - `fetchOrderHistory()`, `fetchFundingRateHistory()`, `fetchFundingInfo()`, `fetchPositionMode()`
@@ -137,7 +148,8 @@ WebSocket Registry:
 4. Если `tradeStream.isConnected()` → отправляет через WebSocket
 5. Иначе fallback: `httpClient.createOrder()` → `normalizeBinanceOrder()`
 
-Реализует методы работы с ордерами (5 методов):
+Реализует методы работы с ордерами (6 методов):
+- `fetchOrderHistory(symbol, options?)` → `httpClient.getAllOrders()` → `map(normalizeBinanceOrder)`
 - `cancelOrder(symbol, orderId)` → `httpClient.cancelOrder()` → `normalizeBinanceOrder()`
 - `getOrder(symbol, orderId)` → `httpClient.getOrder()` → `normalizeBinanceOrder()`
 - `fetchOpenOrders(symbol?)` → `httpClient.getOpenOrders()` → `map(normalizeBinanceOrder)`
@@ -153,7 +165,7 @@ WebSocket Registry:
 ### BinanceFutures
 - `marketLabel = 'futures'`, `klineLimit = 499`
 - Реализует все фьючерсные методы (position, leverage, funding, marginMode)
-- Реализует дополнительные методы (9):
+- Реализует дополнительные методы (8):
   - `modifyOrder(args)` → `httpClient.modifyOrder()` → `normalizeBinanceOrder()`
   - `cancelAllOrders(symbol)` → `httpClient.cancelAllOrders()`
   - `createBatchOrders(orderList)` → `httpClient.createBatchOrders()` → `map(normalizeBinanceOrder)`
@@ -212,10 +224,12 @@ WebSocket Registry:
 - Реализует фьючерсные методы (position, leverage, marginMode)
 - Реализует `createOrderWebSocket()` через `buildBybitOrderParams()` + `submitOrder()`
 - Реализует дополнительные методы:
+  - `fetchMarkPrice(symbol?)` → `httpClient.fetchTickers()` → `normalizeBybitMarkPriceList()`
   - `fetchOpenInterest(symbol)` → `httpClient.fetchOpenInterest()` → `normalizeBybitOpenInterest()`, symbol устанавливается
   - `fetchFundingRateHistory(symbol, options?)` → `httpClient.fetchFundingHistory()` → `normalizeBybitFundingRateHistoryList()`
   - `fetchFundingInfo()` → `throw new Error('Not implemented for Bybit')`
   - `fetchPositionMode()` → `throw new Error('Not implemented for Bybit')`
+- `setPositionMode(mode)` → `httpClient.setPositionMode()`, код Bybit `110025` обрабатывается как no-op без throw
 
 ### BybitSpot
 - `marketLabel = 'spot'`

@@ -25,6 +25,7 @@ export interface BinanceEndpoints {
   trades: string;
   order: string;
   openOrders: string;
+  allOrders: string;
   account: string;
   listenKey: string;
 }

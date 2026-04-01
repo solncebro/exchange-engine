@@ -47,7 +47,7 @@ abstract class BinanceBaseClient<T extends BinanceBaseHttpClient> extends BaseEx
       apiKey: args.exchangeArgs.config.apiKey,
       secret: args.exchangeArgs.config.secret,
       logger: args.exchangeArgs.logger,
-      onNotify: args.exchangeArgs.onNotify,
+      onNotify: this.onNotify,
     });
   }
 
@@ -130,6 +130,13 @@ abstract class BinanceBaseClient<T extends BinanceBaseHttpClient> extends BaseEx
     }
 
     return orderParams;
+  }
+
+  async fetchOrderHistory(symbol: string, options?: FetchPageWithLimitArgs): Promise<Order[]> {
+    this.logger.debug(`Fetching order history for ${symbol}`);
+    const rawList = await this.httpClient.getAllOrders(symbol, options);
+
+    return rawList.map(normalizeBinanceOrder);
   }
 
   async cancelOrder(symbol: string, orderId: string): Promise<Order> {

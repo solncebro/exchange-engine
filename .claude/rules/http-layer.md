@@ -84,12 +84,13 @@ Rate limiting — **только реактивный** (нет proactive thrott
 - `cancelOrder(symbol, orderId)` → `BinanceOrderResponseRaw` — signedDelete `endpoints.order`
 - `getOrder(symbol, orderId)` → `BinanceOrderResponseRaw` — signedGet `endpoints.order`
 - `getOpenOrders(symbol?)` → `BinanceOrderResponseRaw[]` — signedGet `endpoints.openOrders`
+- `getAllOrders(symbol, options?)` → `BinanceOrderResponseRaw[]` — signedGet `endpoints.allOrders`
 - `createListenKey()` / `keepAliveListenKey()` / `deleteListenKey()` — для user data stream
 
 ### BinanceEndpoints интерфейс:
 ```
 exchangeInfo, ticker24hr, depth, klines, trades,
-order, openOrders, account, listenKey
+order, openOrders, allOrders, account, listenKey
 ```
 
 Реализация в подклассах — разные префиксы путей:
@@ -111,7 +112,6 @@ order, openOrders, account, listenKey
 - `setPositionMode(dualSidePosition)` → signedPost `/fapi/v1/positionSide/dual`
 - `modifyOrder(params)` → `BinanceOrderResponseRaw` — PUT с ручным signing через `buildBinanceSignedParams`
 - `cancelAllOrders(symbol)` → signedDelete `/fapi/v1/allOpenOrders`
-- `getAllOrders(symbol, options?)` → `BinanceOrderResponseRaw[]` — signedGet `/fapi/v1/allOrders`
 - `createBatchOrders(orderList)` → `BinanceOrderResponseRaw[]` — signedPost `/fapi/v1/batchOrders`
 - `cancelBatchOrders(symbol, orderIdList)` → signedDelete `/fapi/v1/batchOrders`
 - `fetchCommissionRate(symbol?)` → `BinanceCommissionRateRaw` — signedGet `/fapi/v1/commissionRate`
@@ -169,6 +169,7 @@ order, openOrders, account, listenKey
 - `fetchWalletBalance(accountType)` → `BybitResponse<BybitWalletBalanceRaw>` — GET `/v5/account/wallet-balance`
 - `fetchAccountInfo()` → GET `/v5/account/info`
 - `setMarginMode(mode)` → POST `/v5/account/set-margin-mode`
+- `setPositionMode(category, mode, coin?)` → POST `/v5/position/switch-mode`
 - `setTradingStop(params)` → POST `/v5/position/trading-stop`
 - `fetchAllInstrumentsInfo(category)` → `BybitInstrumentInfoRaw[]` — пагинация через cursor, возвращает полный список инструментов
 

@@ -11,13 +11,15 @@ import {
   BYBIT_RAW_ORDER_RESPONSE,
   BYBIT_RAW_ORDER_BOOK,
   BYBIT_RAW_PUBLIC_TRADE_LIST,
+  BYBIT_RAW_MARK_PRICE_TICKER_LIST,
   BYBIT_RAW_OPEN_INTEREST,
   BYBIT_RAW_FEE_RATE_LIST,
   BYBIT_RAW_CLOSED_PNL_LIST,
   BYBIT_RAW_TRANSACTION_LOG_LIST,
 } from '../fixtures/bybitRaw';
 import { BTCUSDT_TRADE_SYMBOL } from '../fixtures/mockTradeSymbol';
-import { OrderTypeEnum, OrderSideEnum, PositionSideEnum, MarginModeEnum, TimeInForceEnum } from '../../src/types/common';
+import { OrderTypeEnum, OrderSideEnum, PositionSideEnum, MarginModeEnum, PositionModeEnum, TimeInForceEnum } from '../../src/types/common';
+import { ExchangeError } from '../../src/errors/ExchangeError';
 
 jest.mock('axios');
 jest.mock('../../src/ws/BybitPublicStream');
@@ -533,6 +535,40 @@ describe('BybitLinear', () => {
     });
   });
 
+  describe('fetchMarkPrice', () => {
+    it('returns normalized mark price list', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({
+        data: { result: { list: BYBIT_RAW_MARK_PRICE_TICKER_LIST } },
+      });
+
+      const result = await client.fetchMarkPrice();
+
+      expect(result).toHaveLength(2);
+      expect(result[0].symbol).toBe('BTCUSDT');
+      expect(result[0].markPrice).toBe(65450.5);
+      expect(result[0].indexPrice).toBe(65440.2);
+      expect(result[0].lastFundingRate).toBe(0.0001);
+      expect(result[0].nextFundingTime).toBe(1700028800000);
+    });
+
+    it('passes symbol to httpClient when provided', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({
+        data: { result: { list: [BYBIT_RAW_MARK_PRICE_TICKER_LIST[0]] } },
+      });
+
+      const result = await client.fetchMarkPrice('BTCUSDT');
+
+      expect(result).toHaveLength(1);
+      expect(result[0].symbol).toBe('BTCUSDT');
+
+      const [, options] = mockInstance.get.mock.calls[0];
+
+      expect(options.params.symbol).toBe('BTCUSDT');
+    });
+  });
+
   describe('fetchOpenInterest', () => {
     it('returns normalized open interest with symbol', async () => {
       const { client, mockInstance } = createClient();
@@ -614,6 +650,49 @@ describe('BybitLinear', () => {
       });
 
       await expect(client.cancelBatchOrders('BTCUSDT', ['order-1', 'order-2'])).resolves.toBeUndefined();
+    });
+  });
+
+  describe('setPositionMode', () => {
+    it('sends mode 3 for Hedge', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.post.mockResolvedValue({ data: { retCode: 0, result: {} } });
+
+      await client.setPositionMode(PositionModeEnum.Hedge);
+
+      const [, body] = mockInstance.post.mock.calls[0];
+
+      expect(body.category).toBe('linear');
+      expect(body.mode).toBe(3);
+    });
+
+    it('sends mode 0 for OneWay', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.post.mockResolvedValue({ data: { retCode: 0, result: {} } });
+
+      await client.setPositionMode(PositionModeEnum.OneWay);
+
+      const [, body] = mockInstance.post.mock.calls[0];
+
+      expect(body.mode).toBe(0);
+    });
+
+    it('silently handles no-op error 110025', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.post.mockRejectedValue(
+        new ExchangeError('Position mode is not modified', 110025, 'bybit'),
+      );
+
+      await expect(client.setPositionMode(PositionModeEnum.Hedge)).resolves.toBeUndefined();
+    });
+
+    it('re-throws other errors', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.post.mockRejectedValue(
+        new ExchangeError('Some other error', 10001, 'bybit'),
+      );
+
+      await expect(client.setPositionMode(PositionModeEnum.Hedge)).rejects.toThrow('Some other error');
     });
   });
 

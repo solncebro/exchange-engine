@@ -24,6 +24,7 @@ import {
   BINANCE_DEMO_FUTURES_TRADE_WEBSOCKET_URL,
 } from '../constants/binance';
 import { BinanceBaseClient } from './BinanceBaseClient';
+import { BaseExchangeClient } from './BaseExchangeClient';
 import type { AxiosLikeError, BinanceModifyOrderParams } from './BinanceFutures.types';
 
 const BINANCE_POSITION_MODE_NOOP_ERROR_CODE = -4059;
@@ -74,7 +75,7 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
     const publicStream = new BinanceFuturesPublicStream({
       webSocketCombinedUrl,
       logger: args.logger,
-      onNotify: args.onNotify,
+      onNotify: BaseExchangeClient.createNotifyHandler(args.onNotify),
       label: 'Binance Futures Public WebSocket',
     });
 
@@ -149,13 +150,6 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
 
       throw error;
     }
-  }
-
-  async fetchOrderHistory(symbol: string, options?: FetchPageWithLimitArgs): Promise<Order[]> {
-    this.logger.debug(`Fetching order history for ${symbol}`);
-    const rawList = await this.httpClient.getAllOrders(symbol, options);
-
-    return rawList.map(normalizeBinanceOrder);
   }
 
   async modifyOrder(args: ModifyOrderArgs): Promise<Order> {

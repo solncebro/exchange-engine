@@ -67,7 +67,7 @@ abstract class BybitBaseClient extends BaseExchangeClient {
     this.publicStream = new BybitPublicStream({
       url: args.publicWebSocketUrl,
       logger: args.exchangeArgs.logger,
-      onNotify: args.exchangeArgs.onNotify,
+      onNotify: this.onNotify,
       label: args.publicStreamLabel,
     });
 
@@ -80,7 +80,7 @@ abstract class BybitBaseClient extends BaseExchangeClient {
         apiKey: args.exchangeArgs.config.apiKey,
         secret: args.exchangeArgs.config.secret,
         logger: args.exchangeArgs.logger,
-        onNotify: args.exchangeArgs.onNotify,
+        onNotify: this.onNotify,
       });
     }
   }

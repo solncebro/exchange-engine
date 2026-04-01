@@ -141,9 +141,30 @@ describe('BinanceSpot', () => {
     await expect(client.fetchPositionMode()).rejects.toThrow('Not supported for spot market');
   });
 
-  it('throws "Not supported" for fetchOrderHistory', async () => {
-    const { client } = createClient();
+  describe('fetchOrderHistory', () => {
+    it('returns normalized order list', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: [BINANCE_RAW_ORDER_RESPONSE] });
 
-    await expect(client.fetchOrderHistory('BTCUSDT')).rejects.toThrow('Not supported for spot market');
+      const result = await client.fetchOrderHistory('BTCUSDT');
+
+      expect(result).toHaveLength(1);
+      expect(result[0].id).toBe('123456789');
+      expect(result[0].symbol).toBe('BTCUSDT');
+      expect(result[0].side).toBe(OrderSideEnum.Buy);
+    });
+
+    it('calls signedGet /api/v3/allOrders', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: [] });
+
+      await client.fetchOrderHistory('BTCUSDT');
+
+      const [url, options] = mockInstance.get.mock.calls[0];
+
+      expect(url).toBe('/api/v3/allOrders');
+      expect(options.params.symbol).toBe('BTCUSDT');
+      expect(options.params.signature).toBeDefined();
+    });
   });
 });

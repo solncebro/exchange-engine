@@ -25,6 +25,7 @@ class BinanceFuturesHttpClient extends BinanceBaseHttpClient {
     trades: '/fapi/v1/trades',
     order: '/fapi/v1/order',
     openOrders: '/fapi/v1/openOrders',
+    allOrders: '/fapi/v1/allOrders',
     account: '/fapi/v3/account',
     listenKey: '/fapi/v1/listenKey',
   };
@@ -86,16 +87,6 @@ class BinanceFuturesHttpClient extends BinanceBaseHttpClient {
       '/fapi/v1/allOpenOrders',
       { symbol },
     );
-  }
-
-  async getAllOrders(
-    symbol: string,
-    options?: FetchPageWithLimitArgs,
-  ): Promise<BinanceOrderResponseRaw[]> {
-    const params: Record<string, string | number | boolean> = { symbol };
-    applyTimeRangeOptions(params, options);
-
-    return this.signedGet<BinanceOrderResponseRaw[]>('/fapi/v1/allOrders', params);
   }
 
   async createBatchOrders(

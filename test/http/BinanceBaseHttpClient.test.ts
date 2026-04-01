@@ -16,6 +16,7 @@ class TestBinanceHttpClient extends BinanceBaseHttpClient {
     trades: '/test/trades',
     order: '/test/order',
     openOrders: '/test/openOrders',
+    allOrders: '/test/allOrders',
     account: '/test/account',
     listenKey: '/test/listenKey',
   };

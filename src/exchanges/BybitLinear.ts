@@ -1,9 +1,11 @@
 import type { CreateOrderWebSocketArgs, ExchangeArgs, FetchPageWithLimitArgs } from '../types/exchange';
-import type { Position, Order, FundingRateHistory, FundingInfo, OpenInterest } from '../types/common';
+import type { Position, Order, FundingRateHistory, FundingInfo, MarkPrice, OpenInterest } from '../types/common';
 import { MarginModeEnum, PositionModeEnum } from '../types/common';
+import { ExchangeError } from '../errors/ExchangeError';
 import {
   normalizeBybitPosition,
   normalizeBybitFundingRateHistoryList,
+  normalizeBybitMarkPriceList,
   normalizeBybitOpenInterest,
 } from '../normalizers/bybitNormalizer';
 import {
@@ -80,12 +82,34 @@ class BybitLinear extends BybitBaseClient {
     });
   }
 
+  async fetchMarkPrice(symbol?: string): Promise<MarkPrice[]> {
+    this.logger.debug('[Bybit] Fetching mark price');
+    const raw = await this.httpClient.fetchTickers(this.category, { symbol });
+
+    return normalizeBybitMarkPriceList(raw.result.list);
+  }
+
   async fetchOpenInterest(symbol: string): Promise<OpenInterest> {
     this.logger.debug(`[Bybit] Fetching open interest for ${symbol}`);
     const raw = await this.httpClient.fetchOpenInterest('linear', symbol);
     const result = normalizeBybitOpenInterest(raw.result.list[0]);
 
     return { ...result, symbol };
+  }
+
+  async setPositionMode(mode: PositionModeEnum): Promise<void> {
+    this.logger.info(`[Bybit] Setting position mode to ${mode}`);
+    const bybitMode = mode === PositionModeEnum.Hedge ? 3 : 0;
+
+    try {
+      await this.httpClient.setPositionMode(this.category, bybitMode);
+    } catch (error) {
+      if (error instanceof ExchangeError && error.code === 110025) {
+        return;
+      }
+
+      throw error;
+    }
   }
 }
 

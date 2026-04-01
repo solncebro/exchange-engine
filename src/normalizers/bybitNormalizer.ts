@@ -10,6 +10,7 @@ import type {
   AccountBalances,
   OrderBook,
   PublicTrade,
+  MarkPrice,
   OpenInterest,
   FeeRate,
   FundingRateHistory,
@@ -55,6 +56,10 @@ export interface BybitTickerRaw {
   price24hPcnt: string;
   volume24h: string;
   turnover24h: string;
+  markPrice?: string;
+  indexPrice?: string;
+  fundingRate?: string;
+  nextFundingTime?: string;
   time?: number;
 }
 
@@ -461,6 +466,17 @@ export function normalizeBybitPublicTradeList(rawList: BybitPublicTradeRaw[]): P
     quoteQuantity: parseFloat(raw.price) * parseFloat(raw.size),
     timestamp: parseFloat(raw.time),
     isBuyerMaker: raw.side === 'Sell',
+  }));
+}
+
+export function normalizeBybitMarkPriceList(rawList: BybitTickerRaw[]): MarkPrice[] {
+  return rawList.map((raw) => ({
+    symbol: raw.symbol,
+    markPrice: parseFloat(raw.markPrice ?? '0'),
+    indexPrice: parseFloat(raw.indexPrice ?? '0'),
+    lastFundingRate: parseFloat(raw.fundingRate ?? '0'),
+    nextFundingTime: parseFloat(raw.nextFundingTime ?? '0'),
+    timestamp: raw.time ?? Date.now(),
   }));
 }
 

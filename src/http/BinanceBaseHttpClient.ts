@@ -161,6 +161,16 @@ abstract class BinanceBaseHttpClient extends BaseHttpClient {
     return this.signedGet<BinanceOrderResponseRaw[]>(this.endpoints.openOrders, this.buildOptionalSymbolParams(symbol));
   }
 
+  async getAllOrders(
+    symbol: string,
+    options?: FetchPageWithLimitArgs,
+  ): Promise<BinanceOrderResponseRaw[]> {
+    const params: Record<string, string | number | boolean> = { symbol };
+    applyTimeRangeOptions(params, options);
+
+    return this.signedGet<BinanceOrderResponseRaw[]>(this.endpoints.allOrders, params);
+  }
+
   async fetchAccount(): Promise<BinanceAccountRaw> {
     return this.signedGet<BinanceAccountRaw>(this.endpoints.account);
   }

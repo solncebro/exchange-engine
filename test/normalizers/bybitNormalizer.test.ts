@@ -12,6 +12,7 @@ import {
   normalizeBybitOpenInterest,
   normalizeBybitFeeRateList,
   normalizeBybitFundingRateHistoryList,
+  normalizeBybitMarkPriceList,
   normalizeBybitClosedPnlList,
   normalizeBybitIncomeList,
 } from '../../src/normalizers/bybitNormalizer';
@@ -28,6 +29,7 @@ import {
   BYBIT_RAW_WALLET_BALANCE,
   BYBIT_RAW_ORDER_BOOK,
   BYBIT_RAW_PUBLIC_TRADE_LIST,
+  BYBIT_RAW_MARK_PRICE_TICKER_LIST,
   BYBIT_RAW_OPEN_INTEREST,
   BYBIT_RAW_FEE_RATE_LIST,
   BYBIT_RAW_FUNDING_RATE_HISTORY_LIST,
@@ -829,6 +831,43 @@ describe('normalizeBybitIncomeList', () => {
 
   it('returns empty array for empty input', () => {
     const result = normalizeBybitIncomeList([]);
+
+    expect(result).toHaveLength(0);
+  });
+});
+
+describe('normalizeBybitMarkPriceList', () => {
+  it('returns array of MarkPrice objects', () => {
+    const result = normalizeBybitMarkPriceList(BYBIT_RAW_MARK_PRICE_TICKER_LIST);
+
+    expect(result).toHaveLength(2);
+    expect(result[0].symbol).toBe('BTCUSDT');
+    expect(result[1].symbol).toBe('ETHUSDT');
+  });
+
+  it('parses numeric fields as numbers', () => {
+    const result = normalizeBybitMarkPriceList(BYBIT_RAW_MARK_PRICE_TICKER_LIST);
+
+    expect(result[0].markPrice).toBe(65450.5);
+    expect(result[0].indexPrice).toBe(65440.2);
+    expect(result[0].lastFundingRate).toBe(0.0001);
+    expect(result[0].nextFundingTime).toBe(1700028800000);
+  });
+
+  it('preserves timestamp from raw data', () => {
+    const result = normalizeBybitMarkPriceList(BYBIT_RAW_MARK_PRICE_TICKER_LIST);
+
+    expect(result[0].timestamp).toBe(1700000000000);
+  });
+
+  it('handles negative funding rate', () => {
+    const result = normalizeBybitMarkPriceList(BYBIT_RAW_MARK_PRICE_TICKER_LIST);
+
+    expect(result[1].lastFundingRate).toBe(-0.00005);
+  });
+
+  it('returns empty array for empty input', () => {
+    const result = normalizeBybitMarkPriceList([]);
 
     expect(result).toHaveLength(0);
   });

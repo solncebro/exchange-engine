@@ -434,6 +434,34 @@ describe('BybitHttpClient', () => {
     });
   });
 
+  describe('setPositionMode', () => {
+    it('calls POST /v5/position/switch-mode with category and mode', async () => {
+      await client.setPositionMode('linear', 3);
+
+      const [url, body] = mockInstance.post.mock.calls[0];
+
+      expect(url).toBe('/v5/position/switch-mode');
+      expect(body.category).toBe('linear');
+      expect(body.mode).toBe(3);
+    });
+
+    it('includes coin when provided', async () => {
+      await client.setPositionMode('linear', 0, 'USDT');
+
+      const [, body] = mockInstance.post.mock.calls[0];
+
+      expect(body.coin).toBe('USDT');
+    });
+
+    it('omits coin when not provided', async () => {
+      await client.setPositionMode('linear', 3);
+
+      const [, body] = mockInstance.post.mock.calls[0];
+
+      expect(body.coin).toBeUndefined();
+    });
+  });
+
   describe('fetchTransactionLog', () => {
     it('calls GET /v5/account/transaction-log without options', async () => {
       await client.fetchTransactionLog();

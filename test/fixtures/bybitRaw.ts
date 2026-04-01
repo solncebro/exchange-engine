@@ -139,6 +139,11 @@ export const BYBIT_RAW_PUBLIC_TRADE_LIST: BybitPublicTradeRaw[] = [
   { execId: 'exec-2', symbol: 'BTCUSDT', price: '65001.00', size: '0.200', side: 'Sell', time: '1700000001000', isBlockTrade: false },
 ];
 
+export const BYBIT_RAW_MARK_PRICE_TICKER_LIST: BybitTickerRaw[] = [
+  { symbol: 'BTCUSDT', lastPrice: '65432.10', prevPrice24h: '63900.00', highPrice24h: '66000.00', lowPrice24h: '63500.00', price24hPcnt: '0.0235', volume24h: '12345.67', turnover24h: '805000000.00', markPrice: '65450.50', indexPrice: '65440.20', fundingRate: '0.0001', nextFundingTime: '1700028800000', time: 1700000000000 },
+  { symbol: 'ETHUSDT', lastPrice: '3456.78', prevPrice24h: '3498.78', highPrice24h: '3550.00', lowPrice24h: '3400.00', price24hPcnt: '-0.0120', volume24h: '98765.43', turnover24h: '340000000.00', markPrice: '3458.30', indexPrice: '3457.10', fundingRate: '-0.00005', nextFundingTime: '1700028800000', time: 1700000000000 },
+];
+
 export const BYBIT_RAW_OPEN_INTEREST: BybitOpenInterestRaw = {
   openInterest: '12345.678',
   timestamp: '1700000000000',

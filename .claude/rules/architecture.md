@@ -98,3 +98,4 @@ exchange.close()  // → закрывает оба
 - **Spot-классы выбрасывают ошибку** для фьючерсных методов: `"Not supported for spot market"`
 - **Demo mode** — переключается в конструкторе через `isDemoMode`, влияет на URL (не runtime toggle)
 - **tradeSymbols** — `Map` на инстансе, `loadTradeSymbols()` всегда загружает свежие данные (очищает Map перед заполнением)
+- **CRITICAL handler** — `BaseExchangeClient.createNotifyHandler()` оборачивает `onNotify`: при CRITICAL-сообщении от WebSocket (FAILED status) вызывает `process.exit(1)` после уведомления

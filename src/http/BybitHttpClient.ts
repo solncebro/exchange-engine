@@ -325,6 +325,20 @@ class BybitHttpClient extends BaseHttpClient {
     return this.authenticatedPost('/v5/account/set-margin-mode', { setMarginMode: mode });
   }
 
+  async setPositionMode(
+    category: string,
+    mode: number,
+    coin?: string,
+  ): Promise<Record<string, unknown>> {
+    const body: Record<string, unknown> = { category, mode };
+
+    if (coin !== undefined) {
+      body.coin = coin;
+    }
+
+    return this.authenticatedPost('/v5/position/switch-mode', body);
+  }
+
   async fetchTransactionLog(
     options?: CategoryFilterArgs,
   ): Promise<BybitListResponse<BybitTransactionLogRaw>> {

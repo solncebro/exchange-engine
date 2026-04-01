@@ -11,6 +11,7 @@ export class BinanceSpotHttpClient extends BinanceBaseHttpClient {
     trades: '/api/v3/trades',
     order: '/api/v3/order',
     openOrders: '/api/v3/openOrders',
+    allOrders: '/api/v3/allOrders',
     account: '/api/v3/account',
     listenKey: '/api/v3/userDataStream',
   };

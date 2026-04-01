@@ -55,7 +55,7 @@ class Exchange {
 | `fetchAllKlines` | ✅ | ✅ | ✅ | ✅ |
 | `fetchOrderBook` | ✅ | ✅ | ✅ | ✅ |
 | `fetchTrades` | ✅ | ✅ | ✅ | ✅ |
-| `fetchMarkPrice` | ✅ | ❌ | ❌ | ❌ |
+| `fetchMarkPrice` | ✅ | ❌ | ✅ | ❌ |
 | `fetchOpenInterest` | ✅ | ❌ | ✅ | ❌ |
 | `fetchBalances` | ✅ | ✅ | ✅ | ✅ |
 | `fetchFeeRate` | ✅ | ❌ | ✅ | ✅ |
@@ -63,7 +63,7 @@ class Exchange {
 | `fetchClosedPnl` | ❌ | ❌ | ✅ | ✅ |
 | `fetchPosition` | ✅ | ❌ | ✅ | ❌ |
 | `fetchPositionMode` | ✅ | ❌ | ❌ | ❌ |
-| `setPositionMode` | ✅ | ❌ | ❌ | ❌ |
+| `setPositionMode` | ✅ | ❌ | ✅ | ❌ |
 | `setLeverage` | ✅ | ❌ | ✅ | ❌ |
 | `setMarginMode` | ✅ | ❌ | ✅ | ❌ |
 | `fetchFundingRateHistory` | ✅ | ❌ | ✅ | ❌ |
@@ -72,7 +72,7 @@ class Exchange {
 | `cancelOrder` | ✅ | ✅ | ✅ | ✅ |
 | `getOrder` | ✅ | ✅ | ✅ | ✅ |
 | `fetchOpenOrders` | ✅ | ✅ | ✅ | ✅ |
-| `fetchOrderHistory` | ✅ | ❌ | ✅ | ✅ |
+| `fetchOrderHistory` | ✅ | ✅ | ✅ | ✅ |
 | `modifyOrder` | ✅ | ❌ | ✅ | ✅ |
 | `cancelAllOrders` | ✅ | ❌ | ✅ | ✅ |
 | `createBatchOrders` | ✅ | ❌ | ✅ | ✅ |

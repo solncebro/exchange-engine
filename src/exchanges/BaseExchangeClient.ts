@@ -47,7 +47,28 @@ abstract class BaseExchangeClient implements ExchangeClient {
   constructor(args: ExchangeArgs) {
     this.apiKey = args.config.apiKey;
     this.logger = args.logger;
-    this.onNotify = args.onNotify;
+    this.onNotify = BaseExchangeClient.createNotifyHandler(args.onNotify);
+  }
+
+  protected static createNotifyHandler(
+    onNotify?: (message: string) => void | Promise<void>,
+  ): (message: string) => void | Promise<void> {
+    return (message: string) => {
+      if (!message.includes('CRITICAL')) {
+        return onNotify?.(message);
+      }
+
+      try {
+        const result = onNotify?.(message);
+
+        if (result instanceof Promise) {
+          return result.finally(() => process.exit(1));
+        }
+      } catch {
+      }
+
+      process.exit(1);
+    };
   }
 
   protected abstract getPublicStream(): PublicStreamLike;

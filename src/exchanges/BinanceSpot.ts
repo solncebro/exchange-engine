@@ -10,6 +10,7 @@ import {
   BINANCE_DEMO_SPOT_TRADE_WEBSOCKET_URL,
 } from '../constants/binance';
 import { BinanceBaseClient } from './BinanceBaseClient';
+import { BaseExchangeClient } from './BaseExchangeClient';
 
 class BinanceSpot extends BinanceBaseClient<BinanceSpotHttpClient> {
   protected readonly marketLabel = 'spot';
@@ -37,7 +38,7 @@ class BinanceSpot extends BinanceBaseClient<BinanceSpotHttpClient> {
     const publicStream = new BinanceSpotPublicStream({
       webSocketUrl: BINANCE_SPOT_WEBSOCKET_STREAM_URL,
       logger: args.logger,
-      onNotify: args.onNotify,
+      onNotify: BaseExchangeClient.createNotifyHandler(args.onNotify),
       label: 'Binance Spot Public WebSocket',
     });
 

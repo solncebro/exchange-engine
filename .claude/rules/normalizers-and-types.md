@@ -82,7 +82,7 @@ BinanceTicker24hrRaw { symbol, lastPrice: string, priceChangePercent: string, ti
 
 REST:
 - `BybitInstrumentInfoRaw` — `{ symbol, status, baseCoin, quoteCoin, settleCoin?, contractType?, contractSize?, lotSizeFilter?, priceFilter? }`
-- `BybitTickerRaw` — `{ symbol, lastPrice, prevPrice24h, highPrice24h, lowPrice24h, price24hPcnt, volume24h, turnover24h, time? }`
+- `BybitTickerRaw` — `{ symbol, lastPrice, prevPrice24h, highPrice24h, lowPrice24h, price24hPcnt, volume24h, turnover24h, markPrice?, indexPrice?, fundingRate?, nextFundingTime?, time? }`
 - `BybitPositionRaw` — `{ symbol, side, size, avgPrice, markPrice, unrealisedPnl, leverage, tradeMode, liqPrice, positionIdx, [key: string]: unknown }`
 - `BybitOrderResponseRaw` — `{ orderId, orderLinkId, symbol, side, orderType, timeInForce, qty, price, avgPrice, triggerPrice, cumExecQty, cumExecValue, orderStatus, reduceOnly, createdTime, updatedTime }`
 - `BybitWalletBalanceRaw` — `{ list: BybitAccountRaw[] }` (BybitAccountRaw — internal: `{ accountType, coin: BybitCoinRaw[] }`)
@@ -132,6 +132,8 @@ WebSocket:
 - `normalizeBybitPublicTradeList(rawList)` → `PublicTrade[]`
   - `execId → id`, `size → quantity`, `quoteQuantity` вычисляется как `price * size`
   - `isBuyerMaker = raw.side === 'Sell'`
+- `normalizeBybitMarkPriceList(rawList)` → `MarkPrice[]`
+  - Использует `BybitTickerRaw` (те же данные что tickers), `fundingRate → lastFundingRate`, timestamp fallback `Date.now()`
 - `normalizeBybitOpenInterest(raw)` → `OpenInterest`
   - `symbol` возвращается пустым (устанавливается вызывающим), parseFloat для строковых полей
 - `normalizeBybitFeeRateList(rawList)` → `FeeRate[]`

@@ -128,7 +128,7 @@ Bybit (test/fixtures/bybitRaw.ts):
 - `BYBIT_RAW_WEBSOCKET_KLINE`, `BYBIT_RAW_POSITION`, `BYBIT_RAW_ORDER_RESPONSE`
 - `BYBIT_RAW_INSTRUMENT_FUTURES`, `BYBIT_RAW_INSTRUMENT_NO_FILTERS`
 - `BYBIT_RAW_WALLET_BALANCE`, `BYBIT_RAW_ORDER_BOOK`, `BYBIT_RAW_PUBLIC_TRADE_LIST`
-- `BYBIT_RAW_OPEN_INTEREST`, `BYBIT_RAW_FEE_RATE_LIST`
+- `BYBIT_RAW_MARK_PRICE_TICKER_LIST`, `BYBIT_RAW_OPEN_INTEREST`, `BYBIT_RAW_FEE_RATE_LIST`
 - `BYBIT_RAW_FUNDING_RATE_HISTORY_LIST`, `BYBIT_RAW_CLOSED_PNL_LIST`
 - `BYBIT_RAW_TRANSACTION_LOG_LIST`
 
@@ -245,6 +245,12 @@ class TestTradeStream extends BaseTradeStream<any> {
   protected buildOrderRequest(params, requestId): unknown { return {}; }
 }
 ```
+
+## Тест-файлы Exchange
+
+| Файл | Покрытие |
+|------|----------|
+| BaseExchangeClient.test.ts | createNotifyHandler: проксирование non-critical, process.exit(1) для CRITICAL, async onNotify, error safety |
 
 ## Тест-файлы WebSocket
 
