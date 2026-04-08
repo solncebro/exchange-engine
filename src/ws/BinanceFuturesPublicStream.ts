@@ -87,6 +87,30 @@ class BinanceFuturesPublicStream {
     }
   }
 
+  resubscribeStream(symbol: string, interval: string): void {
+    const stream = `${symbol.toLowerCase()}_perpetual@continuousKline_${interval}`;
+
+    for (const connection of this.connectionList) {
+      if (connection.streamList.includes(stream)) {
+        try {
+          connection.webSocket.sendToConnectedSocket({
+            method: 'SUBSCRIBE',
+            params: [stream],
+            id: this.subscriptionIdCounter++,
+          });
+
+          this.logger.info(`BinanceFuturesPublicStream: resubscribed stream ${stream}`);
+        } catch {
+          this.logger.warn(`BinanceFuturesPublicStream: failed to resubscribe ${stream}`);
+        }
+
+        return;
+      }
+    }
+
+    this.logger.warn(`BinanceFuturesPublicStream: stream ${stream} not found in any connection`);
+  }
+
   getConnectionInfoList(): WebSocketConnectionInfo[] {
     return this.connectionList.map((connection, index) => ({
       label: this.connectionList.length > 1
@@ -144,19 +168,45 @@ class BinanceFuturesPublicStream {
       ? `${this.label} #${index + 1}`
       : this.label;
     const url = `${this.webSocketCombinedUrl}?streams=${streamList.join('/')}`;
+    const connectionIndex = this.connectionList.length;
     const webSocket = new ReliableWebSocket<BinanceCombinedMessage>({
       label: connectionLabel,
       url,
       logger: this.logger,
       parseMessage: (rawData) => parseWebSocketMessage<BinanceCombinedMessage>(rawData),
       onMessage: (message) => this.handleMessage(message),
+      onReconnectSuccess: () => this.resubscribeConnection(connectionIndex),
       onNotify: this.onNotify,
       configuration: {
         pingInterval: 30000,
       },
     });
 
-    this.connectionList.push({ webSocket, label: connectionLabel, streamList, url });
+    this.connectionList.push({ webSocket, label: connectionLabel, streamList, dynamicStreamList: [], url });
+  }
+
+  private resubscribeConnection(connectionIndex: number): void {
+    const connection = this.connectionList[connectionIndex];
+
+    if (!connection || connection.dynamicStreamList.length === 0) {
+      return;
+    }
+
+    try {
+      connection.webSocket.sendToConnectedSocket({
+        method: 'SUBSCRIBE',
+        params: [...connection.dynamicStreamList],
+        id: this.subscriptionIdCounter++,
+      });
+
+      this.logger.info(
+        `BinanceFuturesPublicStream: resubscribed ${connection.dynamicStreamList.length} dynamic streams for ${connection.label}`,
+      );
+    } catch {
+      this.logger.warn(
+        `BinanceFuturesPublicStream: failed to resubscribe dynamic streams for ${connection.label}`,
+      );
+    }
   }
 
   private addStreamToConnection(stream: string): void {
@@ -170,6 +220,7 @@ class BinanceFuturesPublicStream {
     }
 
     targetConnection.streamList.push(stream);
+    targetConnection.dynamicStreamList.push(stream);
 
     try {
       targetConnection.webSocket.sendToConnectedSocket({
@@ -188,6 +239,12 @@ class BinanceFuturesPublicStream {
 
       if (index !== -1) {
         connection.streamList.splice(index, 1);
+
+        const dynamicIndex = connection.dynamicStreamList.indexOf(stream);
+
+        if (dynamicIndex !== -1) {
+          connection.dynamicStreamList.splice(dynamicIndex, 1);
+        }
 
         try {
           connection.webSocket.sendToConnectedSocket({

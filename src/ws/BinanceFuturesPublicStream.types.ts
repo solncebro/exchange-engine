@@ -18,5 +18,6 @@ export interface FuturesConnection {
   webSocket: ReliableWebSocket<BinanceCombinedMessage>;
   label: string;
   streamList: string[];
+  dynamicStreamList: string[];
   url: string;
 }

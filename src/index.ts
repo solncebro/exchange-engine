@@ -9,6 +9,7 @@ export type {
   FetchPageWithLimitArgs,
   ModifyOrderArgs,
   SubscribeKlinesArgs,
+  ResubscribeKlinesArgs,
   KlineHandler,
 } from './types/exchange';
 

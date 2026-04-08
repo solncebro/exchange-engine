@@ -6,6 +6,7 @@ import type {
   ModifyOrderArgs,
   CreateOrderWebSocketArgs,
   SubscribeKlinesArgs,
+  ResubscribeKlinesArgs,
 } from '../types/exchange';
 import type {
   ExchangeLogger,
@@ -151,6 +152,10 @@ abstract class BaseExchangeClient implements ExchangeClient {
 
   unsubscribeKlines(args: SubscribeKlinesArgs): void {
     this.getPublicStream().unsubscribeKlines(args.symbol, args.interval, args.handler);
+  }
+
+  resubscribeKlines(args: ResubscribeKlinesArgs): void {
+    this.getPublicStream().resubscribeStream?.(args.symbol, args.interval);
   }
 
   amountToPrecision(symbol: string, amount: number): number {

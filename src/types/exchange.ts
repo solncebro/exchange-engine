@@ -80,6 +80,11 @@ export interface ModifyOrderArgs {
   triggerPrice?: number;
 }
 
+export interface ResubscribeKlinesArgs {
+  symbol: string;
+  interval: string;
+}
+
 export interface ExchangeClient {
   readonly apiKey: string;
   readonly tradeSymbols: TradeSymbolBySymbol;
@@ -128,4 +133,5 @@ export interface ExchangeClient {
   watchTickers(): AsyncGenerator<TickerBySymbol>;
   subscribeKlines(args: SubscribeKlinesArgs): void;
   unsubscribeKlines(args: SubscribeKlinesArgs): void;
+  resubscribeKlines(args: ResubscribeKlinesArgs): void;
 }

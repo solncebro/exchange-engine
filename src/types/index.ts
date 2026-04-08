@@ -41,6 +41,7 @@ export type {
   CreateOrderWebSocketArgs,
   FetchPageWithLimitArgs,
   SubscribeKlinesArgs,
+  ResubscribeKlinesArgs,
   ModifyOrderArgs,
   ExchangeClient,
 } from './exchange';

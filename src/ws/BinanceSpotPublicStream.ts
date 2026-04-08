@@ -73,6 +73,23 @@ class BinanceSpotPublicStream {
     }
   }
 
+  resubscribeStream(symbol: string, interval: string): void {
+    if (this.webSocket === null) {
+      this.logger.warn('BinanceSpotPublicStream: cannot resubscribe, not connected');
+
+      return;
+    }
+
+    const stream = `${symbol.toLowerCase()}@kline_${interval}`;
+
+    try {
+      this.sendSubscribe([stream]);
+      this.logger.info(`BinanceSpotPublicStream: resubscribed stream ${stream}`);
+    } catch {
+      this.logger.warn(`BinanceSpotPublicStream: failed to resubscribe ${stream}`);
+    }
+  }
+
   getConnectionInfoList(): WebSocketConnectionInfo[] {
     if (this.webSocket === null) {
       return [];
