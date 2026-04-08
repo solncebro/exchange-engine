@@ -308,16 +308,16 @@ class BinanceFuturesPublicStream {
   private handleKlineStream(message: BinanceCombinedMessage, delimiter: string, isContinuous: boolean): void {
     const klineRaw = (message.data as Record<string, unknown>)['k'] as BinanceWebSocketKlineRaw;
 
-    if (!klineRaw) {
+    if (!klineRaw || !message.stream) {
       return;
     }
 
     const kline = normalizeBinanceKlineWebSocketMessage(klineRaw);
-    const delimiterIndex = message.stream!.indexOf(delimiter);
-    const symbolPart = message.stream!.slice(0, delimiterIndex);
+    const delimiterIndex = message.stream.indexOf(delimiter);
+    const symbolPart = message.stream.slice(0, delimiterIndex);
     const symbolLower = isContinuous ? symbolPart.replace(/_perpetual$/, '') : symbolPart;
     const symbol = symbolLower.toUpperCase();
-    const binanceInterval = message.stream!.slice(delimiterIndex + delimiter.length);
+    const binanceInterval = message.stream.slice(delimiterIndex + delimiter.length);
     const unifiedInterval = resolveUnifiedBinanceInterval(binanceInterval);
     const key = `${symbol}_${unifiedInterval}`;
     const handlerSet = this.klineHandlerByKey.get(key);
