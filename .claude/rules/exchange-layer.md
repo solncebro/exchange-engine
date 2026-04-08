@@ -73,6 +73,7 @@ Precision:
   watchTickers(): AsyncGenerator<TickerBySymbol>
   subscribeKlines(args): void
   unsubscribeKlines(args): void
+  resubscribeKlines(args): void
 
 WebSocket Registry:
   getWebSocketConnectionInfoList(): WebSocketConnectionInfo[]
@@ -91,6 +92,7 @@ WebSocket Registry:
 - `fetchBalances()` — делегирует в абстрактный `fetchAndNormalizeBalances()`, логирует `"Fetching balance"`
 - `watchTickers()` — подписка через `getPublicStream().subscribeAllTickers()` + yield `fetchTickers()`
 - `subscribeKlines()` / `unsubscribeKlines()` — делегирует в publicStream
+- `resubscribeKlines()` — принудительная переподписка на стрим (вызывает `publicStream.resubscribeStream()` если поддерживается)
 - `amountToPrecision()` / `priceToPrecision()` — lookup в tradeSymbols + precision utils, возвращает `number`, fallback на исходное значение
 - `getMinOrderQty()` / `getMinNotional()` — lookup в tradeSymbols, fallback 0
 

@@ -10,6 +10,7 @@
 subscribeAllTickers(handler: (tickers: TickerBySymbol) => void): void
 subscribeKlines(symbol, interval, handler): void
 unsubscribeKlines(symbol, interval, handler): void
+resubscribeStream?(symbol, interval): void  // опциональный, для принудительной переподписки
 getConnectionInfoList(): WebSocketConnectionInfo[]
 close(): void
 ```
@@ -40,9 +41,11 @@ Exchange-классы агрегируют через `getWebSocketConnectionInf
 - **Лимит**: 200 стримов на соединение (чанкинг при превышении)
 - **Kline стрим**: `{symbol.toLowerCase()}_perpetual@continuousKline_{interval}`
 - **Тикер стрим**: `!miniTicker@arr`
-- **Подписка**: URL-based (стримы в query string при создании соединения)
+- **Подписка**: URL-based (стримы в query string при создании соединения) или динамическая через `sendToConnectedSocket()` (добавленные стримы отслеживаются в `dynamicStreamList`)
 - **Deferred connection**: `queueMicrotask()` для батчинга подписок
+- **Reconnect**: `onReconnectSuccess` callback переподписывает все динамически добавленные стримы (из `dynamicStreamList`) при reconnect
 - **Heartbeat**: дефолтный ReliableWebSocket (30s ping)
+- **Методы**: `resubscribeStream(symbol, interval)` — принудительная переподписка на конкретный стрим (найдёт соединение и отправит SUBSCRIBE)
 
 ## Binance Spot Public Stream
 
@@ -53,6 +56,7 @@ Exchange-классы агрегируют через `getWebSocketConnectionInf
 - **Подписка**: динамическая через JSON: `{ method: 'SUBSCRIBE', params: [...], id }`
 - **Reconnect**: `onReconnectSuccess → resubscribeAll()` — переподписка всех стримов
 - **Heartbeat**: `{ method: 'PING' }` → ответ с `id` и `result: null`, интервал 30s
+- **Методы**: `resubscribeStream(symbol, interval)` — принудительная переподписка на конкретный стрим через SUBSCRIBE
 
 ## Bybit Public Stream
 
@@ -155,6 +159,17 @@ Bybit конвертирует через маппинг `BYBIT_KLINE_INTERVAL`:
 ```
 '1m' → '1', '5m' → '5', '1h' → '60', '4h' → '240', '1d' → 'D', '1w' → 'W'
 ```
+
+## FuturesConnection структура
+
+Каждое соединение в `BinanceFuturesPublicStream` отслеживает:
+- `webSocket: ReliableWebSocket<BinanceCombinedMessage>` — само WebSocket соединение
+- `label: string` — человекочитаемый лейбл (e.g. `[Binance Futures] Public` или `[Binance Futures] Public #2`)
+- `streamList: string[]` — все стримы в соединении (изначальные + добавленные)
+- `dynamicStreamList: string[]` — только стримы, добавленные динамически через `sendToConnectedSocket()` (не были в URL при создании)
+- `url: string` — URL соединения с параметрами query
+
+При reconnect (`onReconnectSuccess`) переподписываются только стримы из `dynamicStreamList`.
 
 ## Type Extraction
 
