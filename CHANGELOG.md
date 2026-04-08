@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-04-08
+
+### Breaking Changes
+- `TradeSymbol.contractType: string` — new field added to identify contract type (PERPETUAL, TRADIFI_PERPETUAL, etc.). While backward compatible for existing code, consumers should update type expectations
+- `BaseExchangeClient.createNotifyHandler()` behavior simplified: CRITICAL message handling no longer automatically calls `process.exit(1)`. Consumers relying on automatic termination must implement their own shutdown logic
+
+### Added
+- Support for TRADIFI_PERPETUAL contracts in Binance Futures:
+  - `TradeSymbol.contractType` field now included in normalized data (exported in public API)
+  - `BinanceFuturesPublicStream` automatically selects correct kline stream format based on contract type
+  - TRADIFI contracts use `{symbol}@kline_{interval}` format instead of perpetual `{symbol}_perpetual@continuousKline_{interval}`
+- `setTradeSymbols()` method on `BinanceFuturesPublicStream` for dynamic stream name resolution
+
+### Changed
+- `BinanceFuturesPublicStream` now requires trade symbols context to properly differentiate between PERPETUAL and TRADIFI_PERPETUAL contracts
+- `BaseExchangeClient.createNotifyHandler()` now delegates entirely to user's `onNotify` callback without automatic process termination
+
+### Internal
+- Both `binanceNormalizer` and `bybitNormalizer` extract and preserve raw `contractType` field from exchange API
+
+## [0.8.0] - 2026-03-26
+
+### Added
+- WebSocket resubscription methods: `resubscribeStream(symbol, interval)` on `BinanceFuturesPublicStream` and `BinanceSpotPublicStream`
+- `resubscribeKlines(symbol, interval)` on `ExchangeClient` for explicit stream reconnection
+- Dynamic stream tracking in `BinanceFuturesPublicStream` to optimize reconnection behavior
+
 ## [0.6.2] - 2026-03-26
 
 ### Fixed

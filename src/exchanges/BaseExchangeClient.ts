@@ -55,20 +55,7 @@ abstract class BaseExchangeClient implements ExchangeClient {
     onNotify?: (message: string) => void | Promise<void>,
   ): (message: string) => void | Promise<void> {
     return (message: string) => {
-      if (!message.includes('CRITICAL')) {
-        return onNotify?.(message);
-      }
-
-      try {
-        const result = onNotify?.(message);
-
-        if (result instanceof Promise) {
-          return result.finally(() => process.exit(1));
-        }
-      } catch {
-      }
-
-      process.exit(1);
+      return onNotify?.(message);
     };
   }
 

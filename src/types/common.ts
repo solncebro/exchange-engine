@@ -126,6 +126,7 @@ export interface TradeSymbol {
   type: TradeSymbolTypeEnum;
   isLinear: boolean;
   contractSize: number;
+  contractType: string;
   filter: TradeSymbolFilter;
 }
 

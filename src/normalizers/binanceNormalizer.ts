@@ -154,8 +154,9 @@ export function normalizeBinanceTradeSymbols(raw: BinanceExchangeInfoRaw): Trade
       extractFilter(symbol.filters, 'MIN_NOTIONAL') ??
       extractFilter(symbol.filters, 'NOTIONAL');
 
-    const isPerp = symbol.contractType === 'PERPETUAL';
-    const isSpot = symbol.contractType === undefined || symbol.contractType === '';
+    const rawContractType = symbol.contractType ?? '';
+    const isPerp = rawContractType === 'PERPETUAL' || rawContractType === 'TRADIFI_PERPETUAL';
+    const isSpot = rawContractType === '' || rawContractType === undefined;
 
     let tradeSymbolType: TradeSymbolTypeEnum = TradeSymbolTypeEnum.Future;
 
@@ -174,6 +175,7 @@ export function normalizeBinanceTradeSymbols(raw: BinanceExchangeInfoRaw): Trade
       type: tradeSymbolType,
       isLinear: isPerp,
       contractSize: 1,
+      contractType: rawContractType,
       filter: {
         tickSize: priceFilter?.tickSize ?? '0',
         stepSize: lotSizeFilter?.stepSize ?? '0',

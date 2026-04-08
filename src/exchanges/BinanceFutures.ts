@@ -86,6 +86,8 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
       tradeWebSocketUrl,
       tradeStreamLabel: 'Binance Futures Order WebSocket',
     });
+
+    publicStream.setTradeSymbols(this.tradeSymbols);
   }
 
   protected async fetchAndNormalizeBalances(): Promise<AccountBalances> {

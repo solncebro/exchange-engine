@@ -233,6 +233,7 @@ export function normalizeBybitTradeSymbols(rawList: BybitInstrumentInfoRaw[]): T
       type: tradeSymbolType,
       isLinear,
       contractSize: parseFloat(raw.contractSize ?? '1'),
+      contractType: raw.contractType ?? '',
       filter: {
         tickSize: raw.priceFilter?.tickSize ?? '0',
         stepSize: raw.lotSizeFilter?.qtyStep ?? raw.lotSizeFilter?.basePrecision ?? '0',

@@ -30,12 +30,12 @@ const exchange = new Exchange('binance', {
   onNotify: (msg) => telegramBot.send(msg), // optional notifications
 });
 
-// Load markets
-await exchange.futures.loadMarkets();
+// Load trade symbols (markets)
+await exchange.futures.loadTradeSymbols();
 
 // Fetch historical klines
 const klines = await exchange.futures.fetchKlines('BTCUSDT', '1h', { limit: 100 });
-console.log(klines[0]); // { openTimestamp, open, high, low, close, volume, ... }
+console.log(klines[0]); // { openTimestamp, openPrice, highPrice, lowPrice, closePrice, volume, ... }
 
 // Get current tickers
 const tickers = await exchange.futures.fetchTickers();
@@ -45,18 +45,17 @@ exchange.futures.subscribeKlines({
   symbol: 'BTCUSDT',
   interval: '1m',
   handler: (kline) => {
-    console.log(`[${kline.openTimestamp}] ${kline.close}`);
+    console.log(`[${kline.openTimestamp}] ${kline.closePrice}`);
   },
 });
 
-// Create an order
-const order = await exchange.futures.createOrderWs({
+// Create an order via WebSocket
+const order = await exchange.futures.createOrderWebSocket({
   symbol: 'BTCUSDT',
   type: 'market',
   side: 'buy',
   amount: 0.01,
   price: 0, // ignored for market orders
-  params: {}, // exchange-specific params
 });
 
 // Fetch position info
@@ -96,11 +95,8 @@ All four classes (BinanceFutures, BinanceSpot, BybitLinear, BybitSpot) implement
 #### Market Data (REST)
 
 ```typescript
-// Load and cache market information
-await client.loadMarkets(reload?: boolean): Promise<MarketBySymbol>;
-
-// Get all markets (already loaded)
-const markets = client.markets; // Map<string, Market>
+// Load and cache trade symbols (markets)
+await client.loadTradeSymbols(): Promise<TradeSymbolBySymbol>;
 
 // Fetch current ticker prices
 await client.fetchTickers(): Promise<TickerBySymbol>;
@@ -109,25 +105,33 @@ await client.fetchTickers(): Promise<TickerBySymbol>;
 await client.fetchKlines(
   symbol: string,
   interval: KlineInterval,
-  options?: FetchKlinesArgs
+  options?: FetchPageWithLimitArgs
 ): Promise<Kline[]>;
 
 // Get account balance
-await client.fetchBalances(): Promise<BalanceByAsset>;
+await client.fetchBalances(): Promise<AccountBalances>;
 ```
 
 #### Trading (REST + WebSocket)
 
 ```typescript
-// Create order via WebSocket (recommended for speed)
-await client.createOrderWs({
+// Create order via WebSocket
+await client.createOrderWebSocket({
   symbol: string;
   type: 'market' | 'limit';
   side: 'buy' | 'sell';
   amount: number;
   price: number;
-  params?: Record<string, unknown>; // hedgeMode, timeInForce, etc.
 }): Promise<Order>;
+
+// Cancel an order
+await client.cancelOrder(symbol: string, orderId: string): Promise<Order>;
+
+// Fetch order history
+await client.fetchOrderHistory(symbol: string, options?: FetchPageWithLimitArgs): Promise<Order[]>;
+
+// Fetch open orders
+await client.fetchOpenOrders(symbol?: string): Promise<Order[]>;
 ```
 
 #### Futures-Specific
@@ -175,35 +179,37 @@ All types are normalized across exchanges. No raw exchange formats leak out.
 // Candlestick
 interface Kline {
   openTimestamp: number;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
+  openPrice: number;
+  highPrice: number;
+  lowPrice: number;
+  closePrice: number;
   volume: number;
   closeTimestamp: number;
-  quoteVolume: number;
-  trades: number;
+  quoteAssetVolume: number;
+  numberOfTrades: number;
+  isClosed?: boolean;
 }
 
 // Current price
 interface Ticker {
   symbol: string;
-  close: number;
-  percentage: number; // 24h change %
+  lastPrice: number;
+  priceChangePercent: number; // 24h change %
   timestamp: number;
 }
 
-// Market metadata
-interface Market {
+// Trade symbol (market metadata)
+interface TradeSymbol {
   symbol: string;
   baseAsset: string;
   quoteAsset: string;
   settle: string;
-  active: boolean;
+  isActive: boolean;
   type: 'spot' | 'swap' | 'future';
-  linear: boolean;
+  isLinear: boolean;
   contractSize: number;
-  filter: MarketFilter;
+  contractType: string;
+  filter: TradeSymbolFilter;
 }
 
 // Open position (futures)
@@ -223,12 +229,14 @@ interface Position {
 // Placed order
 interface Order {
   id: string;
+  clientOrderId: string;
   symbol: string;
-  side: 'buy' | 'sell';
-  type: 'market' | 'limit';
+  side: 'Buy' | 'Sell';
+  type: 'Market' | 'Limit' | 'StopMarket' | 'TakeProfit' | 'TrailingStop';
   amount: number;
   price: number;
-  status: string;
+  filledAmount: number;
+  status: 'open' | 'closed' | 'canceled' | 'rejected';
   timestamp: number;
 }
 
@@ -238,6 +246,13 @@ interface Balance {
   free: number;
   locked: number;
   total: number;
+}
+
+// Account balances
+interface AccountBalances {
+  balanceByAsset: BalanceByAsset; // Map<string, Balance>
+  totalWalletBalance: number;
+  totalAvailableBalance: number;
 }
 ```
 
@@ -283,8 +298,8 @@ const exchange = new Exchange('binance', {
 
 ### Order Placement
 
-- **Binance**: `createOrderWs()` uses REST (faster than WS)
-- **Bybit**: `createOrderWs()` uses dedicated trade WebSocket stream
+- **Binance**: `createOrderWebSocket()` prefers WebSocket with REST fallback
+- **Bybit**: `createOrderWebSocket()` uses dedicated trade WebSocket stream
 
 ### Position Modes
 
@@ -309,10 +324,10 @@ These differences are transparent — the same code works for both.
    ]);
    ```
 
-2. **Reuse markets** — call `loadMarkets()` once at startup
+2. **Reuse trade symbols** — call `loadTradeSymbols()` once at startup
    ```typescript
-   await client.loadMarkets();
-   const symbols = [...client.markets.keys()];
+   const tradeSymbols = await client.loadTradeSymbols();
+   const symbols = [...tradeSymbols.keys()];
    ```
 
 3. **Limit historical data** — fetch only needed range
