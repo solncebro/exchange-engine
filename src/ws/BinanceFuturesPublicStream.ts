@@ -174,6 +174,21 @@ class BinanceFuturesPublicStream {
       logger: this.logger,
       parseMessage: (rawData) => parseWebSocketMessage<BinanceCombinedMessage>(rawData),
       onMessage: (message) => this.handleMessage(message),
+      onOpen: async (context) => {
+        const connection = this.connectionList[connectionIndex];
+
+        if (connection && connection.dynamicStreamList.length > 0) {
+          context.send({
+            method: 'SUBSCRIBE',
+            params: [...connection.dynamicStreamList],
+            id: this.subscriptionIdCounter++,
+          });
+
+          this.logger.info(
+            `BinanceFuturesPublicStream: subscribed ${connection.dynamicStreamList.length} dynamic streams for ${connection.label}`,
+          );
+        }
+      },
       onReconnectSuccess: () => this.resubscribeConnection(connectionIndex),
       onNotify: this.onNotify,
       configuration: {

@@ -22,8 +22,13 @@ BaseHttpClient (abstract)
 - `putWithParams<T>(url, params?, headers?): Promise<T>`
 - `delete<T>(url, params?, headers?): Promise<T>`
 
-### Private хелпер:
+### Private хелперы:
 - `executeRequest<T>(label, fn): Promise<T>` — общая обёртка для non-GET методов (logging + error handling). Все методы кроме `get` делегируют в `executeRequest`.
+- `enrichError(error: AxiosError): Error` — трансформирует AxiosError в читаемый Error перед re-throw. Используется в `executeRequest`. Логика:
+  1. Binance no-op ошибки (`-4046`, `-4059`) — возвращает оригинальный error без изменений
+  2. Ответ с `code` + `msg` (Binance API error) — `Error("[code] msg")`
+  3. HTTP-ответ без структурированной ошибки — `Error("HTTP {status}: {message}")`
+  4. Fallback (нет response) — оригинальный error
 
 ### Специальная обработка no-op ошибок Binance:
 - `BaseHttpClient.handleError()` не логирует как error ответы Binance с кодами `-4046` и `-4059`

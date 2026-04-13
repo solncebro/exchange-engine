@@ -170,8 +170,30 @@ abstract class BaseHttpClient {
     } catch (error) {
       this.handleError(error as AxiosError);
 
-      throw error;
+      throw this.enrichError(error as AxiosError);
     }
+  }
+
+  private enrichError(error: AxiosError): Error {
+    const responseData = error.response?.data;
+
+    if (responseData && typeof responseData === 'object') {
+      const data = responseData as Record<string, unknown>;
+
+      if (isBinanceNoopHttpError(responseData)) {
+        return error;
+      }
+
+      if (data.code !== undefined && data.msg !== undefined) {
+        return new Error(`[${data.code}] ${data.msg}`);
+      }
+    }
+
+    if (error.response) {
+      return new Error(`HTTP ${error.response.status}: ${error.message}`);
+    }
+
+    return error;
   }
 
   private handleError(error: AxiosError): void {

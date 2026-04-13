@@ -43,6 +43,7 @@ Exchange-классы агрегируют через `getWebSocketConnectionInf
 - **Тикер стрим**: `!miniTicker@arr`
 - **Подписка**: URL-based (стримы в query string при создании соединения) или динамическая через `sendToConnectedSocket()` (добавленные стримы отслеживаются в `dynamicStreamList`)
 - **Deferred connection**: `queueMicrotask()` для батчинга подписок
+- **onOpen**: при первом открытии соединения подписывает все динамически добавленные стримы (из `dynamicStreamList`) через SUBSCRIBE — обеспечивает доставку данных до первого reconnect
 - **Reconnect**: `onReconnectSuccess` callback переподписывает все динамически добавленные стримы (из `dynamicStreamList`) при reconnect
 - **Heartbeat**: дефолтный ReliableWebSocket (30s ping)
 - **Методы**: `resubscribeStream(symbol, interval)` — принудительная переподписка на конкретный стрим (найдёт соединение и отправит SUBSCRIBE)
