@@ -62,13 +62,18 @@ Exchange-классы агрегируют через `getWebSocketConnectionInf
 ## Bybit Public Stream
 
 - **URL**: `wss://stream.bybit.com/v5/public/linear` или `.../spot`
-- **Одно соединение**, lazy-initialized через `ensureConnected()`
+- **Multi-connection**: `connectionList: BybitConnection[]`, чанкинг при превышении лимита
+- **Лимит**: 200 topics на соединение (`MAX_TOPICS_PER_CONNECTION`), 10 topics на SUBSCRIBE сообщение (`MAX_TOPICS_PER_SUBSCRIBE`)
 - **Kline topic**: `kline.{bybitInterval}.{symbol}` (интервал конвертируется через `BYBIT_KLINE_INTERVAL`)
 - **1s kline**: через `TradeToKlineAggregator` — подписка на `publicTrade.{symbol}`, агрегация трейдов в 1-секундные свечи
 - **Тикер topic**: `tickers.linear` или `tickers.spot` (определяется по URL)
-- **Подписка**: `{ op: 'subscribe', args: [topicList] }`
-- **Reconnect**: `onReconnectSuccess → resubscribeAll()` из `activeSubscriptionSet`, `tradeAggregator.clearSymbol()` для всех подписанных символов
+- **Подписка**: батчами по 10 topics через `sendSubscribeInBatches()`: `{ op: 'subscribe', args: [batch] }`
+- **Deferred connection**: `queueMicrotask()` для батчинга подписок (через `scheduleConnect()`)
+- **onOpen**: при открытии соединения подписывает все topics этого соединения через `sendSubscribeInBatches()` с `context.send()`
+- **Reconnect**: `onReconnectSuccess → resubscribeConnection(index)` — переподписка topics конкретного соединения, `tradeAggregator.clearSymbol()` для trade-подписок
+- **Dynamic topics**: новые подписки добавляются в соединение с наименьшим количеством topics (через `addTopicToConnection`); если все полны — создаётся новое
 - **Heartbeat**: `{ op: 'ping' }` → `{ op: 'pong' }`, интервал 20s
+- **Методы**: `resubscribeStream(symbol, interval)` — принудительная переподписка на конкретный topic (ищет в connectionList)
 
 ## TradeToKlineAggregator (src/ws/TradeToKlineAggregator.ts)
 
@@ -172,6 +177,17 @@ Bybit конвертирует через маппинг `BYBIT_KLINE_INTERVAL`:
 
 При reconnect (`onReconnectSuccess`) переподписываются только стримы из `dynamicStreamList`.
 
+## BybitConnection структура
+
+Каждое соединение в `BybitPublicStream` отслеживает:
+- `webSocket: ReliableWebSocket<BybitWebSocketMessage>` — само WebSocket соединение
+- `label: string` — человекочитаемый лейбл (e.g. `[Bybit Linear] Public` или `[Bybit Linear] Public #2`)
+- `topicList: string[]` — все topics в соединении (изначальные + добавленные)
+- `dynamicTopicList: string[]` — только topics, добавленные динамически через `addTopicToConnection()` (не были при создании)
+- `url: string` — URL соединения
+
+При reconnect (`onReconnectSuccess`) переподписываются все topics из `topicList` данного соединения.
+
 ## Type Extraction
 
 Типы вынесены в co-located `.types.ts` файлы:
@@ -180,7 +196,7 @@ Bybit конвертирует через маппинг `BYBIT_KLINE_INTERVAL`:
 - `BinanceSpotPublicStream.types.ts` — BinanceSpotPublicStreamArgs, BinanceSpotWebSocketEnvelope
 - `BinanceUserDataStream.types.ts` — BinanceUserDataStreamArgs
 - `BinanceTradeStream.types.ts` — BinanceTradeWebSocketResponse, BinanceWebSocketError
-- `BybitPublicStream.types.ts` — BybitPublicStreamArgs, BybitWebSocketMessage
+- `BybitPublicStream.types.ts` — BybitPublicStreamArgs, BybitWebSocketMessage, BybitConnection
 - `TradeToKlineAggregator.types.ts` — AggregatedKline
 - `BybitPrivateStream.types.ts` — BybitPrivateMessage, BybitPrivateStreamArgs
 - `BybitTradeStream.types.ts` — BybitTradeMessage

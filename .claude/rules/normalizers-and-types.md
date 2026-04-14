@@ -109,7 +109,7 @@ WebSocket:
 - `normalizeBybitTickers(rawList)` → `TickerBySymbol` (Map)
   - `priceChangePercent` умножается на 100 (Bybit отдаёт долю, не проценты)
   - `timestamp` fallback на `Date.now()` если отсутствует
-- `normalizeBybitKlines(rawList)` → `Kline[]` — массив строковых массивов → массив объектов, `closeTimestamp = 0`, `numberOfTrades = 0`
+- `normalizeBybitKlines(rawList)` → `Kline[]` — массив строковых массивов → массив объектов, `closeTimestamp = 0`, `numberOfTrades = 0`, `.reverse()` для хронологического порядка (Bybit возвращает newest-first)
 - `normalizeBybitKlineWebSocketMessage(raw)` → `Kline` — маппинг полей, `raw.confirm → isClosed`
 - `normalizeBybitPosition(raw)` → `Position`
   - Маппинг через `BYBIT_POSITION_SIDE` (Buy→Long, Sell→Short), fallback → Both

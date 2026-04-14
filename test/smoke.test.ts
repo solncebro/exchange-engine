@@ -316,6 +316,7 @@ const _tradeSymbol: TradeSymbol = {
   type:         TradeSymbolTypeEnum.Swap,
   isLinear:     true,
   contractSize: 1,
+  contractType: 'PERPETUAL',
   filter:       _tradeSymbolFilter,
 };
 

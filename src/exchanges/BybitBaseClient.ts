@@ -191,14 +191,22 @@ abstract class BybitBaseClient extends BaseExchangeClient {
 
   async getOrder(symbol: string, orderId: string): Promise<Order> {
     this.logger.debug(`[Bybit] Fetching order ${orderId} for ${symbol}`);
-    const raw = await this.httpClient.getOrderHistory(this.category, { symbol, orderId });
-    const order = raw.result.list[0];
 
-    if (!order) {
-      throw new Error(`Order ${orderId} not found for ${symbol}`);
+    const realtimeRaw = await this.httpClient.getOpenOrders(this.category, { symbol, orderId });
+    const realtimeOrder = realtimeRaw.result.list[0];
+
+    if (realtimeOrder) {
+      return normalizeBybitOrder(realtimeOrder);
     }
 
-    return normalizeBybitOrder(order);
+    const historyRaw = await this.httpClient.getOrderHistory(this.category, { symbol, orderId });
+    const historyOrder = historyRaw.result.list[0];
+
+    if (historyOrder) {
+      return normalizeBybitOrder(historyOrder);
+    }
+
+    throw new Error(`Order ${orderId} not found for ${symbol}`);
   }
 
   async fetchOpenOrders(symbol?: string): Promise<Order[]> {
@@ -309,7 +317,7 @@ abstract class BybitBaseClient extends BaseExchangeClient {
   }
 
   protected async submitOrder(orderParams: Record<string, unknown>, args: CreateOrderWebSocketArgs): Promise<Order> {
-    if (this.tradeStream !== null) {
+    if (this.tradeStream !== null && this.tradeStream.isConnected()) {
       this.logger.debug(`[Bybit] Creating order via WebSocket: ${args.symbol}`);
       const order = await this.tradeStream.createOrder(orderParams);
 

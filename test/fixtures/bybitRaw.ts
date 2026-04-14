@@ -42,8 +42,8 @@ export const BYBIT_RAW_TICKER_LIST: BybitTickerRaw[] = [
 ];
 
 export const BYBIT_RAW_KLINE_LIST: string[][] = [
-  ['1700000000000', '65000.00', '66000.00', '64000.00', '65500.00', '1234.56', '80500000.00'],
   ['1700003600000', '65500.00', '67000.00', '65000.00', '66800.00', '2345.67', '155000000.00'],
+  ['1700000000000', '65000.00', '66000.00', '64000.00', '65500.00', '1234.56', '80500000.00'],
 ];
 
 export const BYBIT_RAW_WEBSOCKET_KLINE: BybitWebSocketKlineRaw = {

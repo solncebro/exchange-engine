@@ -286,7 +286,7 @@ export function normalizeBybitKlines(rawList: string[][]): Kline[] {
     numberOfTrades: 0,
     takerBuyBaseAssetVolume: 0,
     takerBuyQuoteAssetVolume: 0,
-  }));
+  })).reverse();
 }
 
 export function normalizeBybitKlineWebSocketMessage(raw: BybitWebSocketKlineRaw): Kline {

@@ -220,6 +220,13 @@ describe('normalizeBybitKlines', () => {
     expect(result).toHaveLength(2);
   });
 
+  it('reverses descending API response to ascending order', () => {
+    const result = normalizeBybitKlines(BYBIT_RAW_KLINE_LIST);
+
+    expect(result[0].openTimestamp).toBe(1700000000000);
+    expect(result[1].openTimestamp).toBe(1700003600000);
+  });
+
   it('parses kline fields from string arrays', () => {
     const [kline] = normalizeBybitKlines(BYBIT_RAW_KLINE_LIST);
 

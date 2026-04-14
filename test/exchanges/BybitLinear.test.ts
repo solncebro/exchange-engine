@@ -341,27 +341,12 @@ describe('BybitLinear', () => {
   });
 
   describe('setMarginMode', () => {
-    it('sends tradeMode 1 for isolated', async () => {
+    it('is a no-op for Bybit Unified Account', async () => {
       const { client, mockInstance } = createClient();
-      mockInstance.post.mockResolvedValue({ data: {} });
 
       await client.setMarginMode(MarginModeEnum.Isolated, 'BTCUSDT');
 
-      const [, body] = mockInstance.post.mock.calls[0];
-
-      expect(body.tradeMode).toBe(1);
-      expect(body.symbol).toBe('BTCUSDT');
-    });
-
-    it('sends tradeMode 0 for cross', async () => {
-      const { client, mockInstance } = createClient();
-      mockInstance.post.mockResolvedValue({ data: {} });
-
-      await client.setMarginMode(MarginModeEnum.Cross, 'BTCUSDT');
-
-      const [, body] = mockInstance.post.mock.calls[0];
-
-      expect(body.tradeMode).toBe(0);
+      expect(mockInstance.post).not.toHaveBeenCalled();
     });
   });
 
@@ -382,6 +367,7 @@ describe('BybitLinear', () => {
       };
 
       const tradeStream = (client as any).tradeStream;
+      tradeStream.isConnected.mockReturnValue(true);
       tradeStream.createOrder.mockResolvedValue(mockOrder);
 
       const order = await client.createOrderWebSocket({
@@ -415,9 +401,9 @@ describe('BybitLinear', () => {
   });
 
   describe('getOrder', () => {
-    it('returns normalized order', async () => {
+    it('returns order from realtime when found', async () => {
       const { client, mockInstance } = createClient();
-      mockInstance.get.mockResolvedValue({
+      mockInstance.get.mockResolvedValueOnce({
         data: { result: { list: [BYBIT_RAW_ORDER_RESPONSE] } },
       });
 
@@ -427,15 +413,29 @@ describe('BybitLinear', () => {
       expect(result.symbol).toBe('BTCUSDT');
       expect(result.side).toBe(OrderSideEnum.Buy);
       expect(result.type).toBe(OrderTypeEnum.Limit);
+      expect(mockInstance.get).toHaveBeenCalledTimes(1);
     });
 
-    it('throws when order not found', async () => {
+    it('falls back to history when not found in realtime', async () => {
       const { client, mockInstance } = createClient();
-      mockInstance.get.mockResolvedValue({
-        data: { result: { list: [] } },
-      });
+      mockInstance.get
+        .mockResolvedValueOnce({ data: { result: { list: [] } } })
+        .mockResolvedValueOnce({ data: { result: { list: [BYBIT_RAW_ORDER_RESPONSE] } } });
+
+      const result = await client.getOrder('BTCUSDT', 'abc-123-def');
+
+      expect(result.id).toBe('abc-123-def');
+      expect(mockInstance.get).toHaveBeenCalledTimes(2);
+    });
+
+    it('throws when order not found in both realtime and history', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get
+        .mockResolvedValueOnce({ data: { result: { list: [] } } })
+        .mockResolvedValueOnce({ data: { result: { list: [] } } });
 
       await expect(client.getOrder('BTCUSDT', 'missing')).rejects.toThrow('Order missing not found for BTCUSDT');
+      expect(mockInstance.get).toHaveBeenCalledTimes(2);
     });
   });
 

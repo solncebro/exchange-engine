@@ -7,9 +7,12 @@ import { normalizeBybitKlineWebSocketMessage, normalizeBybitTickers } from '../n
 import type { BybitPublicTradeDataRaw, BybitTickerRaw, BybitWebSocketKlineRaw } from '../normalizers/bybitNormalizer';
 import { BYBIT_KLINE_INTERVAL } from '../constants/bybit';
 import { BYBIT_HEARTBEAT_CONFIG, BYBIT_PING_INTERVAL } from './bybitWebSocketUtils';
-import type { BybitPublicStreamArgs, BybitWebSocketMessage } from './BybitPublicStream.types';
+import type { BybitConnection, BybitPublicStreamArgs, BybitWebSocketMessage } from './BybitPublicStream.types';
 import { TradeToKlineAggregator } from './TradeToKlineAggregator';
 import { parseWebSocketMessage } from './parseWebSocketMessage';
+
+const MAX_TOPICS_PER_CONNECTION = 200;
+const MAX_TOPICS_PER_SUBSCRIBE = 10;
 
 function resolveUnifiedInterval(bybitInterval: string): KlineInterval {
   for (const [unified, bybit] of Object.entries(BYBIT_KLINE_INTERVAL)) {
@@ -22,7 +25,7 @@ function resolveUnifiedInterval(bybitInterval: string): KlineInterval {
 }
 
 class BybitPublicStream {
-  private webSocket: ReliableWebSocket<BybitWebSocketMessage> | null = null;
+  private readonly connectionList: BybitConnection[] = [];
   private readonly url: string;
   private readonly logger: ExchangeLogger;
   private readonly label: string;
@@ -32,6 +35,7 @@ class BybitPublicStream {
   private readonly activeSubscriptionSet: Set<string> = new Set();
   private tradeAggregator: TradeToKlineAggregator | null = null;
   private readonly tradeSubscribedSymbolSet: Set<string> = new Set();
+  private isConnectScheduled = false;
 
   constructor(args: BybitPublicStreamArgs) {
     this.url = args.url;
@@ -44,7 +48,7 @@ class BybitPublicStream {
     this.tickerHandlerSet.add(handler);
     const topic = this.resolveTickerTopic();
     this.activeSubscriptionSet.add(topic);
-    this.ensureConnected();
+    this.scheduleConnect();
   }
 
   unsubscribeAllTickers(handler: (tickers: TickerBySymbol) => void): void {
@@ -82,10 +86,10 @@ class BybitPublicStream {
         });
       }
 
-      if (this.webSocket !== null) {
-        this.sendSubscribe([topic]);
+      if (this.connectionList.length > 0) {
+        this.addTopicToConnection(topic);
       } else {
-        this.ensureConnected();
+        this.scheduleConnect();
       }
 
       return;
@@ -95,10 +99,10 @@ class BybitPublicStream {
     const topic = `kline.${bybitInterval}.${symbol}`;
     this.activeSubscriptionSet.add(topic);
 
-    if (this.webSocket !== null) {
-      this.sendSubscribe([topic]);
+    if (this.connectionList.length > 0) {
+      this.addTopicToConnection(topic);
     } else {
-      this.ensureConnected();
+      this.scheduleConnect();
     }
   }
 
@@ -129,9 +133,7 @@ class BybitPublicStream {
           }
         }
 
-        if (this.webSocket !== null) {
-          this.sendUnsubscribe([topic]);
-        }
+        this.removeTopicFromConnection(topic);
 
         return;
       }
@@ -140,42 +142,41 @@ class BybitPublicStream {
       const topic = `kline.${bybitInterval}.${symbol}`;
       this.activeSubscriptionSet.delete(topic);
 
-      if (this.webSocket !== null) {
-        this.sendUnsubscribe([topic]);
-      }
+      this.removeTopicFromConnection(topic);
     }
   }
 
-  getConnectionInfoList(): WebSocketConnectionInfo[] {
-    if (this.webSocket === null) {
-      return [];
-    }
+  resubscribeStream(symbol: string, interval: string): void {
+    const bybitInterval = BYBIT_KLINE_INTERVAL[interval];
+    const topic = `kline.${bybitInterval}.${symbol}`;
 
-    const subscriptionList: string[] = [];
+    for (const connection of this.connectionList) {
+      if (connection.topicList.includes(topic)) {
+        try {
+          connection.webSocket.sendToConnectedSocket({ op: 'subscribe', args: [topic] });
 
-    if (this.tickerHandlerSet.size > 0) {
-      subscriptionList.push('Tickers');
-    }
+          this.logger.info(`BybitPublicStream: resubscribed topic ${topic}`);
+        } catch {
+          this.logger.warn(`BybitPublicStream: failed to resubscribe ${topic}`);
+        }
 
-    for (const key of this.klineHandlerByKey.keys()) {
-      const separatorIndex = key.lastIndexOf('_');
-      const symbol = key.slice(0, separatorIndex);
-      const interval = key.slice(separatorIndex + 1);
-
-      if (interval === '1s') {
-        subscriptionList.push(`Trades ${symbol}`);
-      } else {
-        subscriptionList.push(`Klines ${symbol} ${interval}`);
+        return;
       }
     }
 
-    return [{
-      label: this.label,
-      url: this.url,
-      isConnected: this.webSocket.getStatus() === WebSocketStatus.CONNECTED,
+    this.logger.warn(`BybitPublicStream: topic ${topic} not found in any connection`);
+  }
+
+  getConnectionInfoList(): WebSocketConnectionInfo[] {
+    return this.connectionList.map((connection, index) => ({
+      label: this.connectionList.length > 1
+        ? `${this.label} #${index + 1}`
+        : this.label,
+      url: connection.url,
+      isConnected: connection.webSocket.getStatus() === WebSocketStatus.CONNECTED,
       type: WebSocketConnectionTypeEnum.Public,
-      subscriptionList,
-    }];
+      subscriptionList: this.buildSubscriptionList(connection),
+    }));
   }
 
   close(): void {
@@ -184,25 +185,62 @@ class BybitPublicStream {
       this.tradeAggregator = null;
     }
 
-    if (this.webSocket !== null) {
-      this.webSocket.close();
-
-      this.webSocket = null;
+    for (const connection of this.connectionList) {
+      connection.webSocket.close();
     }
+
+    this.connectionList.length = 0;
   }
 
-  private ensureConnected(): void {
-    if (this.webSocket !== null) {
+  private scheduleConnect(): void {
+    if (this.isConnectScheduled || this.connectionList.length > 0) {
       return;
     }
 
-    this.webSocket = new ReliableWebSocket<BybitWebSocketMessage>({
-      label: this.label,
+    this.isConnectScheduled = true;
+
+    queueMicrotask(() => {
+      this.isConnectScheduled = false;
+      this.createConnections();
+    });
+  }
+
+  private createConnections(): void {
+    const allTopicList = Array.from(this.activeSubscriptionSet);
+
+    if (allTopicList.length === 0) {
+      return;
+    }
+
+    for (let i = 0; i < allTopicList.length; i += MAX_TOPICS_PER_CONNECTION) {
+      const topicChunk = allTopicList.slice(i, i + MAX_TOPICS_PER_CONNECTION);
+      this.createConnection(topicChunk, this.connectionList.length);
+    }
+
+    this.logger.info(
+      `BybitPublicStream: created ${this.connectionList.length} connection(s) for ${allTopicList.length} topics`,
+    );
+  }
+
+  private createConnection(topicList: string[], index: number): void {
+    const connectionLabel = this.connectionList.length > 0 || topicList.length >= MAX_TOPICS_PER_CONNECTION
+      ? `${this.label} #${index + 1}`
+      : this.label;
+    const connectionIndex = this.connectionList.length;
+    const webSocket = new ReliableWebSocket<BybitWebSocketMessage>({
+      label: connectionLabel,
       url: this.url,
       logger: this.logger,
       parseMessage: (rawData) => parseWebSocketMessage<BybitWebSocketMessage>(rawData),
       onMessage: (message) => this.handleMessage(message),
-      onReconnectSuccess: () => this.resubscribeAll(),
+      onOpen: async (context) => {
+        const connection = this.connectionList[connectionIndex];
+
+        if (connection && connection.topicList.length > 0) {
+          this.sendSubscribeInBatches(connection.topicList, (data) => context.send(data), connection.label);
+        }
+      },
+      onReconnectSuccess: () => this.resubscribeConnection(connectionIndex),
       onNotify: this.onNotify,
       heartbeat: BYBIT_HEARTBEAT_CONFIG,
       configuration: {
@@ -210,14 +248,114 @@ class BybitPublicStream {
       },
     });
 
-    this.resubscribeAll();
+    this.connectionList.push({ webSocket, label: connectionLabel, topicList, dynamicTopicList: [], url: this.url });
+  }
+
+  private resubscribeConnection(connectionIndex: number): void {
+    const connection = this.connectionList[connectionIndex];
+
+    if (!connection || connection.topicList.length === 0) {
+      return;
+    }
+
+    if (this.tradeAggregator !== null) {
+      for (const topic of connection.topicList) {
+        if (topic.startsWith('publicTrade.')) {
+          const symbol = topic.slice('publicTrade.'.length);
+          this.tradeAggregator.clearSymbol(symbol);
+        }
+      }
+    }
+
+    this.sendSubscribeInBatches(
+      connection.topicList,
+      (data) => connection.webSocket.sendToConnectedSocket(data),
+      connection.label,
+    );
+  }
+
+  private addTopicToConnection(topic: string): void {
+    let targetConnection = this.connectionList.find(
+      (connection) => connection.topicList.length < MAX_TOPICS_PER_CONNECTION,
+    );
+
+    if (!targetConnection) {
+      this.createConnection([topic], this.connectionList.length);
+
+      return;
+    }
+
+    targetConnection.topicList.push(topic);
+    targetConnection.dynamicTopicList.push(topic);
+
+    if (targetConnection.webSocket.getStatus() === WebSocketStatus.CONNECTED) {
+      try {
+        targetConnection.webSocket.sendToConnectedSocket({ op: 'subscribe', args: [topic] });
+      } catch {
+        this.logger.warn('BybitPublicStream: failed to subscribe, socket not connected');
+      }
+    }
+  }
+
+  private removeTopicFromConnection(topic: string): void {
+    for (const connection of this.connectionList) {
+      const index = connection.topicList.indexOf(topic);
+
+      if (index !== -1) {
+        connection.topicList.splice(index, 1);
+
+        const dynamicIndex = connection.dynamicTopicList.indexOf(topic);
+
+        if (dynamicIndex !== -1) {
+          connection.dynamicTopicList.splice(dynamicIndex, 1);
+        }
+
+        try {
+          connection.webSocket.sendToConnectedSocket({ op: 'unsubscribe', args: [topic] });
+        } catch {
+          this.logger.warn('BybitPublicStream: failed to unsubscribe, socket not connected');
+        }
+
+        break;
+      }
+    }
+  }
+
+  private buildSubscriptionList(connection: BybitConnection): string[] {
+    const result: string[] = [];
+
+    for (const topic of connection.topicList) {
+      if (topic.startsWith('tickers.')) {
+        result.push('Tickers');
+
+        continue;
+      }
+
+      if (topic.startsWith('publicTrade.')) {
+        const symbol = topic.slice('publicTrade.'.length);
+        result.push(`Trades ${symbol}`);
+
+        continue;
+      }
+
+      if (topic.startsWith('kline.')) {
+        const partList = topic.split('.');
+
+        if (partList.length >= 3) {
+          const bybitInterval = partList[1];
+          const symbol = partList.slice(2).join('.');
+          const interval = resolveUnifiedInterval(bybitInterval);
+          result.push(`Klines ${symbol} ${interval}`);
+        }
+      }
+    }
+
+    return result;
   }
 
   private handleMessage(message: BybitWebSocketMessage): void {
     if (message.op === 'subscribe' || message.op === 'unsubscribe') {
-      if (message.success) {
-        this.logger.debug({ operation: message.op }, 'Bybit subscription successful');
-      } else {
+      if (!message.success) {
         this.logger.error({ subscriptionMessage: message }, 'Bybit subscription error');
       }
 
@@ -289,34 +427,23 @@ class BybitPublicStream {
     }
   }
 
-  private resubscribeAll(): void {
-    if (this.tradeAggregator !== null) {
-      for (const symbol of this.tradeSubscribedSymbolSet) {
-        this.tradeAggregator.clearSymbol(symbol);
+  private sendSubscribeInBatches(topicList: string[], send: (data: unknown) => void, label: string): void {
+    let sentCount = 0;
+
+    for (let i = 0; i < topicList.length; i += MAX_TOPICS_PER_SUBSCRIBE) {
+      const batch = topicList.slice(i, i + MAX_TOPICS_PER_SUBSCRIBE);
+
+      try {
+        send({ op: 'subscribe', args: batch });
+        sentCount += batch.length;
+      } catch {
+        this.logger.warn(`BybitPublicStream: failed to subscribe batch for ${label}, sent ${sentCount}/${topicList.length}`);
+
+        return;
       }
     }
 
-    const topicList = Array.from(this.activeSubscriptionSet);
-
-    if (topicList.length > 0) {
-      this.sendSubscribe(topicList);
-    }
-  }
-
-  private sendSubscribe(topicList: string[]): void {
-    try {
-      this.webSocket?.sendToConnectedSocket({ op: 'subscribe', args: topicList });
-    } catch {
-      this.logger.warn('BybitPublicStream: failed to subscribe, socket not connected');
-    }
-  }
-
-  private sendUnsubscribe(topicList: string[]): void {
-    try {
-      this.webSocket?.sendToConnectedSocket({ op: 'unsubscribe', args: topicList });
-    } catch {
-      this.logger.warn('BybitPublicStream: failed to unsubscribe, socket not connected');
-    }
+    this.logger.info(`BybitPublicStream: subscribed ${sentCount} topics for ${label}`);
   }
 
   private resolveTickerTopic(): string {

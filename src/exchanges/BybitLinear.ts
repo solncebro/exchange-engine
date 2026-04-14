@@ -14,6 +14,8 @@ import {
 } from '../constants/bybit';
 import { BybitBaseClient } from './BybitBaseClient';
 
+const BYBIT_LEVERAGE_NOOP_ERROR_CODE = 110043;
+
 class BybitLinear extends BybitBaseClient {
   protected readonly marketLabel = 'linear';
 
@@ -65,21 +67,20 @@ class BybitLinear extends BybitBaseClient {
 
   async setLeverage(leverage: number, symbol: string): Promise<void> {
     this.logger.info(`Setting leverage to ${leverage}x for ${symbol}`);
-    await this.httpClient.setLeverage({ category: 'linear', symbol, buyLeverage: leverage, sellLeverage: leverage });
+
+    try {
+      await this.httpClient.setLeverage({ category: 'linear', symbol, buyLeverage: leverage, sellLeverage: leverage });
+    } catch (error) {
+      if (error instanceof ExchangeError && error.code === BYBIT_LEVERAGE_NOOP_ERROR_CODE) {
+        return;
+      }
+
+      throw error;
+    }
   }
 
-  async setMarginMode(marginMode: MarginModeEnum, symbol: string): Promise<void> {
-    this.logger.info(`Setting margin mode to ${marginMode} for ${symbol}`);
-    const tradeMode = marginMode === MarginModeEnum.Isolated ? 1 : 0;
-    const defaultLeverage = 10;
-
-    await this.httpClient.switchIsolated({
-      category: 'linear',
-      symbol,
-      tradeMode,
-      buyLeverage: defaultLeverage,
-      sellLeverage: defaultLeverage,
-    });
+  async setMarginMode(_marginMode: MarginModeEnum, _symbol: string): Promise<void> {
+    this.logger.info('[Bybit] setMarginMode skipped (Unified Account manages margin mode at account level)');
   }
 
   async fetchMarkPrice(symbol?: string): Promise<MarkPrice[]> {

@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-04-14
+
+### Breaking Changes
+- `BybitLinear.setMarginMode()` is now a no-op — Bybit Unified Account manages margin mode at account level, not per-symbol. Method logs a message and returns without calling the API
+
+### Added
+- `BybitPublicStream`: multi-connection support with topic chunking (max 200 topics per connection) — automatically creates additional connections when topic count exceeds the limit
+- `BybitPublicStream`: batched subscribe messages (max 10 topics per SUBSCRIBE request) to comply with Bybit WebSocket API limits
+- `BybitPublicStream`: deferred connection via `queueMicrotask()` for batching initial subscriptions (matching Binance Futures pattern)
+- `BybitPublicStream.resubscribeStream(symbol, interval)` — explicit topic resubscription on a specific connection
+- `BybitConnection` type — internal connection state tracking (webSocket, label, topicList, dynamicTopicList, url)
+
+### Fixed
+- `BybitBaseClient.getOrder()`: now checks realtime (open orders) first, then falls back to order history — previously only queried history, missing recently placed orders
+- `BybitBaseClient.submitOrder()`: checks `tradeStream.isConnected()` before sending via WebSocket — previously only checked `tradeStream !== null`, causing failures when stream existed but was not connected
+- `BybitLinear.setLeverage()`: handles Bybit error code `110043` (leverage not modified) as no-op instead of throwing
+- `normalizeBybitKlines()`: reverses API response from descending to ascending chronological order — Bybit returns klines newest-first, consumers expect oldest-first
+
+### Internal
+- `BybitPublicStream`: refactored from single `webSocket` to `connectionList: BybitConnection[]` architecture
+- `BybitPublicStream`: subscription success messages no longer logged at debug level (reduced log noise)
+- `BybitPublicStream.getConnectionInfoList()` now returns per-connection info with numbered labels when multiple connections exist
+- `BybitPublicStream.buildSubscriptionList()` extracts human-readable subscription names from topic strings
+
 ## [0.9.1] - 2026-04-13
 
 ### Fixed
@@ -295,6 +319,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Private endpoints (balance, position, orders) require valid credentials
 - WebSocket subscriptions are stateless and can be re-established on reconnect
 
+[0.10.0]: https://github.com/solncebro/exchange-engine/releases/tag/v0.10.0
 [0.9.1]: https://github.com/solncebro/exchange-engine/releases/tag/v0.9.1
 [0.9.0]: https://github.com/solncebro/exchange-engine/releases/tag/v0.9.0
 [0.8.0]: https://github.com/solncebro/exchange-engine/releases/tag/v0.8.0
