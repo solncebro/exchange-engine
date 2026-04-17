@@ -20,6 +20,7 @@ class BybitPrivateStream {
   private readonly secret: string;
   private readonly onNotify?: (message: string) => void | Promise<void>;
   private readonly onMessageHandler: (event: Record<string, unknown>) => void;
+  private readonly topicList: string[];
 
   constructor(args: BybitPrivateStreamArgs) {
     this.logger = args.logger;
@@ -28,6 +29,7 @@ class BybitPrivateStream {
     this.secret = args.secret;
     this.onNotify = args.onNotify;
     this.onMessageHandler = args.onMessage;
+    this.topicList = args.topicList ?? [];
   }
 
   connect(): void {
@@ -77,6 +79,11 @@ class BybitPrivateStream {
 
   private async authenticate(context: WebSocketOpenContext<BybitPrivateMessage>): Promise<void> {
     await authenticateBybitWebSocket({ context, apiKey: this.apiKey, secret: this.secret, label: this.label, logger: this.logger });
+
+    if (this.topicList.length > 0) {
+      context.send({ op: 'subscribe', args: this.topicList });
+      this.logger.info(`[${this.label}] Subscribed to topics: ${this.topicList.join(', ')}`);
+    }
   }
 
   private handleMessage(message: BybitPrivateMessage): void {

@@ -286,3 +286,37 @@ export interface ClosedPnl {
   closedPnl: number;
   timestamp: number;
 }
+
+export interface OrderUpdateEvent {
+  symbol: string;
+  orderId: string;
+  clientOrderId: string;
+  side: OrderSideEnum;
+  status: string;
+  price: number;
+  avgPrice: number;
+  amount: number;
+  filledAmount: number;
+  timestamp: number;
+}
+
+export interface PositionUpdateEvent {
+  symbol: string;
+  side: string;
+  size: number;
+  entryPrice: number;
+  markPrice: number;
+  unrealisedPnl: number;
+  leverage: number;
+  liquidationPrice: number;
+  positionSide: string;
+  timestamp: number;
+}
+
+export type OrderUpdateHandler = (event: OrderUpdateEvent) => void;
+export type PositionUpdateHandler = (event: PositionUpdateEvent) => void;
+
+export interface UserDataStreamHandlerArgs {
+  onOrderUpdate: OrderUpdateHandler;
+  onPositionUpdate: PositionUpdateHandler;
+}

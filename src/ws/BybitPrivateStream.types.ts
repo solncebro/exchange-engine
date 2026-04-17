@@ -12,4 +12,5 @@ export interface BybitPrivateStreamArgs {
   logger: ExchangeLogger;
   onNotify?: (message: string) => void | Promise<void>;
   onMessage: (event: Record<string, unknown>) => void;
+  topicList?: string[];
 }

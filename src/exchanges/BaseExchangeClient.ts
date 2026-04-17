@@ -28,6 +28,7 @@ import type {
   FeeRate,
   Income,
   ClosedPnl,
+  UserDataStreamHandlerArgs,
 } from '../types/common';
 import { MarginModeEnum, PositionModeEnum } from '../types/common';
 import type { PublicStreamLike } from '../types/stream';
@@ -293,6 +294,18 @@ abstract class BaseExchangeClient implements ExchangeClient {
 
   async setPositionMode(_mode: PositionModeEnum): Promise<void> {
     throw new Error(`Not supported for ${this.marketLabel} market`);
+  }
+
+  async connectUserDataStream(_handler: UserDataStreamHandlerArgs): Promise<void> {
+    throw new Error(`Not supported for ${this.marketLabel} market`);
+  }
+
+  disconnectUserDataStream(): void {
+    throw new Error(`Not supported for ${this.marketLabel} market`);
+  }
+
+  isUserDataStreamConnected(): boolean {
+    return false;
   }
 }
 

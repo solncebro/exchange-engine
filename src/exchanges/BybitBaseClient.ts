@@ -12,6 +12,9 @@ import type {
   Income,
   ClosedPnl,
   WebSocketConnectionInfo,
+  UserDataStreamHandlerArgs,
+  OrderUpdateEvent,
+  PositionUpdateEvent,
 } from '../types/common';
 import { OrderTypeEnum, OrderSideEnum, TimeInForceEnum } from '../types/common';
 import type { PublicStreamLike } from '../types/stream';
@@ -31,6 +34,7 @@ import {
 } from '../normalizers/bybitNormalizer';
 import { BybitPublicStream } from '../ws/BybitPublicStream';
 import { BybitTradeStream } from '../ws/BybitTradeStream';
+import { BybitPrivateStream } from '../ws/BybitPrivateStream';
 import {
   BYBIT_KLINE_INTERVAL,
   BYBIT_BASE_URL,
@@ -40,14 +44,27 @@ import {
 import { BaseExchangeClient } from './BaseExchangeClient';
 import type { BybitBaseClientArgs } from './BybitBaseClient.types';
 
+const BYBIT_ORDER_STATUS_MAP: Record<string, string> = {
+  New: 'open',
+  PartiallyFilled: 'open',
+  Untriggered: 'open',
+  Filled: 'closed',
+  Cancelled: 'canceled',
+  Rejected: 'canceled',
+  Deactivated: 'expired',
+  Expired: 'expired',
+};
+
 abstract class BybitBaseClient extends BaseExchangeClient {
   protected readonly exchangeLabel = 'Bybit';
   protected readonly klineLimit = 200;
   protected readonly httpClient: BybitHttpClient;
 
   protected readonly category: string;
+  private readonly secret: string;
   private readonly publicStream: BybitPublicStream;
   private readonly tradeStream: BybitTradeStream | null;
+  private privateStream: BybitPrivateStream | null = null;
 
   constructor(args: BybitBaseClientArgs) {
     super(args.exchangeArgs);
@@ -55,6 +72,7 @@ abstract class BybitBaseClient extends BaseExchangeClient {
     const isDemoMode = args.exchangeArgs.config.isDemoMode === true;
     const baseUrl = isDemoMode ? BYBIT_DEMO_BASE_URL : BYBIT_BASE_URL;
     this.category = args.category;
+    this.secret = args.exchangeArgs.config.secret;
 
     this.httpClient = new BybitHttpClient({
       baseUrl,
@@ -330,6 +348,93 @@ abstract class BybitBaseClient extends BaseExchangeClient {
     return buildBybitOrderFromCreateResponse(args, raw.result.orderId);
   }
 
+  async connectUserDataStream(handler: UserDataStreamHandlerArgs): Promise<void> {
+    if (this.privateStream !== null) {
+      return;
+    }
+
+    this.privateStream = new BybitPrivateStream({
+      label: `Bybit ${this.marketLabel} UserData`,
+      apiKey: this.apiKey,
+      secret: this.secret,
+      logger: this.logger,
+      onNotify: this.onNotify,
+      topicList: ['order', 'position'],
+      onMessage: (event) => this.handlePrivateMessage(event, handler),
+    });
+
+    this.privateStream.connect();
+    this.logger.info(`[Bybit] User data stream connected (${this.marketLabel})`);
+  }
+
+  disconnectUserDataStream(): void {
+    if (this.privateStream) {
+      this.privateStream.close();
+      this.privateStream = null;
+    }
+
+    this.logger.info(`[Bybit] User data stream disconnected (${this.marketLabel})`);
+  }
+
+  isUserDataStreamConnected(): boolean {
+    return this.privateStream !== null && this.privateStream.isConnected();
+  }
+
+  private handlePrivateMessage(event: Record<string, unknown>, handler: UserDataStreamHandlerArgs): void {
+    const topic = event.topic as string;
+
+    if (topic === 'order') {
+      const dataList = event.data as Array<Record<string, unknown>>;
+
+      if (!Array.isArray(dataList)) {
+        return;
+      }
+
+      for (const orderData of dataList) {
+        const side = orderData.side as string;
+        const orderUpdate: OrderUpdateEvent = {
+          symbol: orderData.symbol as string,
+          orderId: orderData.orderId as string,
+          clientOrderId: (orderData.orderLinkId as string) ?? '',
+          side: side === 'Buy' ? OrderSideEnum.Buy : OrderSideEnum.Sell,
+          status: BYBIT_ORDER_STATUS_MAP[orderData.orderStatus as string] ?? 'open',
+          price: Number(orderData.price),
+          avgPrice: Number(orderData.avgPrice),
+          amount: Number(orderData.qty),
+          filledAmount: Number(orderData.cumExecQty),
+          timestamp: Number(orderData.updatedTime),
+        };
+
+        handler.onOrderUpdate(orderUpdate);
+      }
+    }
+
+    if (topic === 'position') {
+      const dataList = event.data as Array<Record<string, unknown>>;
+
+      if (!Array.isArray(dataList)) {
+        return;
+      }
+
+      for (const positionData of dataList) {
+        const positionUpdate: PositionUpdateEvent = {
+          symbol: positionData.symbol as string,
+          side: positionData.side as string,
+          size: Number(positionData.size),
+          entryPrice: Number(positionData.entryPrice),
+          markPrice: Number(positionData.markPrice),
+          unrealisedPnl: Number(positionData.unrealisedPnl),
+          leverage: Number(positionData.leverage),
+          liquidationPrice: Number(positionData.liqPrice),
+          positionSide: (positionData.positionIdx as string) ?? '',
+          timestamp: Number(positionData.updatedTime),
+        };
+
+        handler.onPositionUpdate(positionUpdate);
+      }
+    }
+  }
+
   getWebSocketConnectionInfoList(): WebSocketConnectionInfo[] {
     const result = [...this.publicStream.getConnectionInfoList()];
 
@@ -338,6 +443,14 @@ abstract class BybitBaseClient extends BaseExchangeClient {
 
       if (tradeInfo !== null) {
         result.push(tradeInfo);
+      }
+    }
+
+    if (this.privateStream !== null) {
+      const privateInfo = this.privateStream.getConnectionInfo();
+
+      if (privateInfo !== null) {
+        result.push(privateInfo);
       }
     }
 
@@ -351,6 +464,7 @@ abstract class BybitBaseClient extends BaseExchangeClient {
       this.tradeStream.disconnect();
     }
 
+    this.disconnectUserDataStream();
     this.publicStream.close();
   }
 }

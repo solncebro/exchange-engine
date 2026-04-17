@@ -150,6 +150,8 @@ function parseWebSocketMessage<T>(rawData: RawData): T
 
 - **URL**: `wss://stream.bybit.com/v5/private`
 - Аутентификация на каждый `onOpen` через `authenticateBybitWebSocket()`
+- После успешной аутентификации автоматически подписывается на топики из `topicList` (если не пустой): `{ op: 'subscribe', args: topicList }`
+- `topicList?: string[]` — опциональный список топиков для подписки, передаётся через `BybitPrivateStreamArgs`
 - Фильтрует `message.op === 'auth'` — не передаёт в хендлер
 - **Heartbeat**: `{ op: 'ping' }`, интервал 20s
 - `getConnectionInfo()` → `WebSocketConnectionInfo | null` — возвращает null если не подключён

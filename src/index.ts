@@ -54,4 +54,9 @@ export type {
   FeeRate,
   Income,
   ClosedPnl,
+  OrderUpdateEvent,
+  PositionUpdateEvent,
+  OrderUpdateHandler,
+  PositionUpdateHandler,
+  UserDataStreamHandlerArgs,
 } from './types/common';

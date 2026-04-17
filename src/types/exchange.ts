@@ -18,6 +18,7 @@ import type {
   FeeRate,
   Income,
   ClosedPnl,
+  UserDataStreamHandlerArgs,
 } from './common';
 import {
   MarginModeEnum,
@@ -134,4 +135,8 @@ export interface ExchangeClient {
   subscribeKlines(args: SubscribeKlinesArgs): void;
   unsubscribeKlines(args: SubscribeKlinesArgs): void;
   resubscribeKlines(args: ResubscribeKlinesArgs): void;
+
+  connectUserDataStream(handler: UserDataStreamHandlerArgs): Promise<void>;
+  disconnectUserDataStream(): void;
+  isUserDataStreamConnected(): boolean;
 }

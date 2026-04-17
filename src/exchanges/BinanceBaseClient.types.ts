@@ -8,4 +8,5 @@ export interface BinanceBaseClientArgs<T extends BinanceBaseHttpClient> {
   publicStream: PublicStreamLike;
   tradeWebSocketUrl: string;
   tradeStreamLabel: string;
+  userDataWebSocketUrl: string;
 }

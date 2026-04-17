@@ -82,6 +82,9 @@ class Exchange {
 | `unsubscribeKlines` | ✅ | ✅ | ✅ | ✅ |
 | `connectTradeWebSocket` | ✅ | ✅ | ✅ | ✅ |
 | `isTradeWebSocketConnected` | ✅ | ✅ | ✅ | ✅ |
+| `connectUserDataStream` | ✅ | ✅ | ✅ | ✅ |
+| `disconnectUserDataStream` | ✅ | ✅ | ✅ | ✅ |
+| `isUserDataStreamConnected` | ✅ | ✅ | ✅ | ✅ |
 | `getWebSocketConnectionInfoList` | ✅ | ✅ | ✅ | ✅ |
 | `close` | ✅ | ✅ | ✅ | ✅ |
 
@@ -894,6 +897,56 @@ isTradeWebSocketConnected(): boolean
 
 ---
 
+### `connectUserDataStream()`
+
+```typescript
+connectUserDataStream(handler: UserDataStreamHandlerArgs): Promise<void>
+```
+
+Устанавливает WebSocket-соединение для приёма приватных событий — обновлений ордеров и позиций в реальном времени.
+
+Повторный вызов при уже активном соединении — no-op.
+
+| Параметр | Тип | Обязательный | Описание |
+|---|---|:---:|---|
+| `handler.onOrderUpdate` | `OrderUpdateHandler` | да | Вызывается при изменении статуса ордера |
+| `handler.onPositionUpdate` | `PositionUpdateHandler` | да | Вызывается при изменении позиции |
+
+```typescript
+await futures.connectUserDataStream({
+  onOrderUpdate: (event) => {
+    console.log(`Order ${event.orderId}: ${event.status}, filled ${event.filledAmount}/${event.amount}`);
+  },
+  onPositionUpdate: (event) => {
+    console.log(`Position ${event.symbol}: size ${event.size}, pnl ${event.unrealisedPnl}`);
+  },
+});
+```
+
+---
+
+### `disconnectUserDataStream()`
+
+```typescript
+disconnectUserDataStream(): void
+```
+
+Закрывает user data WebSocket-соединение и освобождает связанные ресурсы (listenKey у Binance, приватный стрим у Bybit). Вызывается автоматически при `close()`.
+
+---
+
+### `isUserDataStreamConnected()`
+
+```typescript
+isUserDataStreamConnected(): boolean
+```
+
+Проверяет, подключён ли user data WebSocket.
+
+**Возврат:** `boolean` — `true` если соединение установлено.
+
+---
+
 ### `getWebSocketConnectionInfoList()`
 
 ```typescript
@@ -1280,6 +1333,52 @@ interface WebSocketConnectionInfo {
   type: WebSocketConnectionTypeEnum;
   subscriptionList: string[];
 }
+```
+
+#### `OrderUpdateEvent`
+
+```typescript
+interface OrderUpdateEvent {
+  symbol: string;
+  orderId: string;
+  clientOrderId: string;
+  side: OrderSideEnum;
+  status: string;
+  price: number;
+  avgPrice: number;
+  amount: number;
+  filledAmount: number;
+  timestamp: number;
+}
+```
+
+#### `PositionUpdateEvent`
+
+```typescript
+interface PositionUpdateEvent {
+  symbol: string;
+  side: string;
+  size: number;
+  entryPrice: number;
+  markPrice: number;
+  unrealisedPnl: number;
+  leverage: number;
+  liquidationPrice: number;
+  positionSide: string;
+  timestamp: number;
+}
+```
+
+#### `UserDataStreamHandlerArgs`
+
+```typescript
+interface UserDataStreamHandlerArgs {
+  onOrderUpdate: OrderUpdateHandler;
+  onPositionUpdate: PositionUpdateHandler;
+}
+
+type OrderUpdateHandler = (event: OrderUpdateEvent) => void;
+type PositionUpdateHandler = (event: PositionUpdateEvent) => void;
 ```
 
 ---

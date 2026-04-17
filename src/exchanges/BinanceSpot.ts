@@ -48,6 +48,7 @@ class BinanceSpot extends BinanceBaseClient<BinanceSpotHttpClient> {
       publicStream,
       tradeWebSocketUrl,
       tradeStreamLabel: 'Binance Spot Order WebSocket',
+      userDataWebSocketUrl: BINANCE_SPOT_WEBSOCKET_STREAM_URL,
     });
   }
 }

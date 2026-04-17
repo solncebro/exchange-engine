@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - 2026-04-17
+
+### Added
+- `connectUserDataStream(handler: UserDataStreamHandlerArgs): Promise<void>` — устанавливает WebSocket-соединение для приёма приватных событий (ордера, позиции)
+- `disconnectUserDataStream(): void` — закрывает соединение и освобождает ресурсы
+- `isUserDataStreamConnected(): boolean` — проверяет наличие активного соединения
+- Новые типы в публичном API: `OrderUpdateEvent`, `PositionUpdateEvent`, `OrderUpdateHandler`, `PositionUpdateHandler`, `UserDataStreamHandlerArgs`
+
+**Binance-реализация** (`BinanceFutures`, `BinanceSpot`):
+- Создаёт listenKey через REST, каждые 30 минут продлевает (`keepAliveListenKey`), при отключении удаляет (`deleteListenKey`)
+- Обрабатывает события `ORDER_TRADE_UPDATE` → `onOrderUpdate` и `ACCOUNT_UPDATE` → `onPositionUpdate`
+- Нормализация статусов ордеров через `BINANCE_ORDER_STATUS_MAP` (NEW/PARTIALLY_FILLED → open, FILLED → closed, CANCELED → canceled, EXPIRED/EXPIRED_IN_MATCH → expired)
+
+**Bybit-реализация** (`BybitLinear`, `BybitSpot`):
+- Использует `BybitPrivateStream` с подпиской на топики `['order', 'position']`
+- Обрабатывает события `order` → `onOrderUpdate` и `position` → `onPositionUpdate`
+- Нормализация статусов через `BYBIT_ORDER_STATUS_MAP` (New/PartiallyFilled/Untriggered → open, Filled → closed, Cancelled/Rejected → canceled, Deactivated/Expired → expired)
+- `getWebSocketConnectionInfoList()` теперь включает private stream info
+- `close()` теперь вызывает `disconnectUserDataStream()`
+
+### Changed
+- `BybitPrivateStream`: добавлена поддержка `topicList?: string[]` в `BybitPrivateStreamArgs` — топики автоматически подписываются после успешной аутентификации
+
 ## [0.10.0] - 2026-04-14
 
 ### Breaking Changes
@@ -319,6 +342,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Private endpoints (balance, position, orders) require valid credentials
 - WebSocket subscriptions are stateless and can be re-established on reconnect
 
+[0.11.0]: https://github.com/solncebro/exchange-engine/releases/tag/v0.11.0
 [0.10.0]: https://github.com/solncebro/exchange-engine/releases/tag/v0.10.0
 [0.9.1]: https://github.com/solncebro/exchange-engine/releases/tag/v0.9.1
 [0.9.0]: https://github.com/solncebro/exchange-engine/releases/tag/v0.9.0

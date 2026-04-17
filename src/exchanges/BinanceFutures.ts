@@ -22,6 +22,7 @@ import {
   BINANCE_DEMO_FUTURES_WEBSOCKET_COMBINED_URL,
   BINANCE_FUTURES_TRADE_WEBSOCKET_URL,
   BINANCE_DEMO_FUTURES_TRADE_WEBSOCKET_URL,
+  BINANCE_FUTURES_WEBSOCKET_STREAM_URL,
 } from '../constants/binance';
 import { BinanceBaseClient } from './BinanceBaseClient';
 import { BaseExchangeClient } from './BaseExchangeClient';
@@ -85,6 +86,7 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
       publicStream,
       tradeWebSocketUrl,
       tradeStreamLabel: 'Binance Futures Order WebSocket',
+      userDataWebSocketUrl: BINANCE_FUTURES_WEBSOCKET_STREAM_URL,
     });
 
     publicStream.setTradeSymbols(this.tradeSymbols);
