@@ -24,6 +24,7 @@ import type {
   OrderBook,
   PublicTrade,
   MarkPrice,
+  MarkPriceHandler,
   OpenInterest,
   FeeRate,
   Income,
@@ -144,6 +145,14 @@ abstract class BaseExchangeClient implements ExchangeClient {
 
   resubscribeKlines(args: ResubscribeKlinesArgs): void {
     this.getPublicStream().resubscribeStream?.(args.symbol, args.interval);
+  }
+
+  subscribeMarkPrices(handler: MarkPriceHandler): void {
+    this.getPublicStream().subscribeMarkPrices(handler);
+  }
+
+  unsubscribeMarkPrices(handler: MarkPriceHandler): void {
+    this.getPublicStream().unsubscribeMarkPrices(handler);
   }
 
   amountToPrecision(symbol: string, amount: number): number {

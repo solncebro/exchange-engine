@@ -12,6 +12,7 @@ import {
   normalizeBinanceOrderBook,
   normalizeBinancePublicTrades,
   normalizeBinanceMarkPriceList,
+  normalizeBinanceMarkPriceWebSocketList,
   normalizeBinanceOpenInterest,
   normalizeBinanceCommissionRate,
   normalizeBinanceIncomeList,
@@ -128,6 +129,98 @@ describe('normalizeBinanceTradeSymbols', () => {
     expect(filter.minQty).toBe('0');
     expect(filter.maxQty).toBe('0');
     expect(filter.minNotional).toBe('0');
+  });
+
+  it('extracts PRICE_FILTER min and max price', () => {
+    const result = normalizeBinanceTradeSymbols(BINANCE_RAW_EXCHANGE_INFO);
+    const filter = result.get('BTCUSDT')!.filter;
+
+    expect(filter.minPrice).toBe('556.80');
+    expect(filter.maxPrice).toBe('4529764');
+  });
+
+  it('extracts MARKET_LOT_SIZE filter fields', () => {
+    const result = normalizeBinanceTradeSymbols(BINANCE_RAW_EXCHANGE_INFO);
+    const filter = result.get('BTCUSDT')!.filter;
+
+    expect(filter.marketMinQty).toBe('0.001');
+    expect(filter.marketMaxQty).toBe('120');
+    expect(filter.marketStepSize).toBe('0.001');
+  });
+
+  it('builds priceLimitRisk from PERCENT_PRICE filter', () => {
+    const result = normalizeBinanceTradeSymbols(BINANCE_RAW_EXCHANGE_INFO);
+    const priceLimitRisk = result.get('BTCUSDT')!.priceLimitRisk;
+
+    expect(priceLimitRisk).toEqual({
+      source: 'binancePercentPrice',
+      multiplierUp: '1.0500',
+      multiplierDown: '0.9500',
+      multiplierDecimal: '4',
+    });
+  });
+
+  it('builds priceLimitRisk from PERCENT_PRICE_BY_SIDE filter', () => {
+    const result = normalizeBinanceTradeSymbols(BINANCE_RAW_EXCHANGE_INFO);
+    const priceLimitRisk = result.get('ETHBTC')!.priceLimitRisk;
+
+    expect(priceLimitRisk).toEqual({
+      source: 'binancePercentPriceBySide',
+      bidMultiplierUp: '5',
+      bidMultiplierDown: '0.2',
+      askMultiplierUp: '5',
+      askMultiplierDown: '0.2',
+      avgPriceMins: 5,
+    });
+  });
+
+  it('parses pricePrecision and quantityPrecision', () => {
+    const result = normalizeBinanceTradeSymbols(BINANCE_RAW_EXCHANGE_INFO);
+    const btc = result.get('BTCUSDT')!;
+
+    expect(btc.pricePrecision).toBe(2);
+    expect(btc.quantityPrecision).toBe(3);
+  });
+
+  it('parses launchTimestamp from onboardDate', () => {
+    const result = normalizeBinanceTradeSymbols(BINANCE_RAW_EXCHANGE_INFO);
+
+    expect(result.get('BTCUSDT')!.launchTimestamp).toBe(1569398400000);
+  });
+
+  it('preserves triggerProtect and liquidationFee', () => {
+    const result = normalizeBinanceTradeSymbols(BINANCE_RAW_EXCHANGE_INFO);
+    const btc = result.get('BTCUSDT')!;
+
+    expect(btc.triggerProtect).toBe('0.0500');
+    expect(btc.liquidationFee).toBe('0.017500');
+  });
+
+  it('preserves orderTypeList and timeInForceList', () => {
+    const result = normalizeBinanceTradeSymbols(BINANCE_RAW_EXCHANGE_INFO);
+    const btc = result.get('BTCUSDT')!;
+
+    expect(btc.orderTypeList).toContain('TRAILING_STOP_MARKET');
+    expect(btc.timeInForceList).toEqual(['GTC', 'IOC', 'FOK', 'GTX', 'GTD']);
+  });
+
+  it('carries raw payload in info', () => {
+    const result = normalizeBinanceTradeSymbols(BINANCE_RAW_EXCHANGE_INFO);
+    const info = result.get('BTCUSDT')!.info!;
+
+    expect(info.maintMarginPercent).toBe('2.5000');
+    expect(info.underlyingType).toBe('COIN');
+    expect(info.marketTakeBound).toBe('0.05');
+  });
+
+  it('skips priceLimitRisk when raw has no percent filter', () => {
+    const info = { symbols: [BINANCE_RAW_SYMBOL_NO_FILTERS] };
+    const result = normalizeBinanceTradeSymbols(info);
+    const symbol = result.get('XYZUSDT')!;
+
+    expect(symbol.priceLimitRisk).toBeUndefined();
+    expect(symbol.pricePrecision).toBeUndefined();
+    expect(symbol.launchTimestamp).toBeUndefined();
   });
 });
 
@@ -813,5 +906,39 @@ describe('normalizeBinanceIncomeList', () => {
     const result = normalizeBinanceIncomeList([]);
 
     expect(result).toHaveLength(0);
+  });
+});
+
+describe('normalizeBinanceMarkPriceWebSocketList', () => {
+  it('normalizes an array of Binance mark price WS payloads', () => {
+    const result = normalizeBinanceMarkPriceWebSocketList([
+      {
+        e: 'markPriceUpdate',
+        E: 1562305380000,
+        s: 'BTCUSDT',
+        p: '11794.15000000',
+        ap: '11784.62659091',
+        i: '11784.62659091',
+        P: '11784.25641265',
+        r: '0.00038167',
+        T: 1562306400000,
+      },
+    ]);
+
+    expect(result).toEqual([
+      {
+        symbol: 'BTCUSDT',
+        markPrice: 11794.15,
+        indexPrice: 11784.62659091,
+        timestamp: 1562305380000,
+      },
+    ]);
+  });
+
+  it('coerces missing index price to 0', () => {
+    const result = normalizeBinanceMarkPriceWebSocketList([
+      { e: 'markPriceUpdate', E: 1, s: 'X', p: '100', ap: '99', i: '', P: '', r: '', T: 2 },
+    ]);
+    expect(result[0].indexPrice).toBe(0);
   });
 });

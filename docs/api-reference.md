@@ -78,6 +78,7 @@ class Exchange {
 | `createBatchOrders` | ✅ | ❌ | ✅ | ✅ |
 | `cancelBatchOrders` | ✅ | ❌ | ✅ | ✅ |
 | `watchTickers` | ✅ | ✅ | ✅ | ✅ |
+| `subscribeMarkPrices` / `unsubscribeMarkPrices` | ✅ | ⚠️ | ✅ | ✅ |
 | `subscribeKlines` | ✅ | ✅ | ✅ | ✅ |
 | `unsubscribeKlines` | ✅ | ✅ | ✅ | ✅ |
 | `connectTradeWebSocket` | ✅ | ✅ | ✅ | ✅ |
@@ -89,6 +90,8 @@ class Exchange {
 | `close` | ✅ | ✅ | ✅ | ✅ |
 
 > ❌ — метод выбрасывает `Error("Not supported for ... market")` или `Error("Not implemented for ...")`.
+>
+> ⚠️ — метод вызывается без ошибки, но для этого рынка не создаётся поток mark/index (см. описание ниже).
 
 ---
 
@@ -367,17 +370,17 @@ fetchOpenInterest(symbol: string): Promise<OpenInterest>
 ### `fetchBalances()`
 
 ```typescript
-fetchBalances(): Promise<BalanceByAsset>
+fetchBalances(): Promise<AccountBalances>
 ```
 
 Получает балансы аккаунта. Нулевые балансы пропускаются.
 
-**Возврат:** `BalanceByAsset` (`Map<string, Balance>`) — балансы по активам.
+**Возврат:** `AccountBalances` — объект с агрегированными полями аккаунта и `balanceByAsset` (`Map<string, Balance>`).
 
 ```typescript
 const balances = await futures.fetchBalances();
-const usdt = balances.get('USDT');
-console.log(usdt?.free, usdt?.locked, usdt?.total);
+const usdt = balances.balanceByAsset.get('USDT');
+console.log(balances.totalWalletBalance, usdt?.free, usdt?.locked);
 ```
 
 ---
@@ -831,6 +834,34 @@ for await (const tickers of futures.watchTickers()) {
 
 ---
 
+### `subscribeMarkPrices()`
+
+```typescript
+subscribeMarkPrices(handler: MarkPriceHandler): void
+```
+
+Подписывает обработчик на потоковые обновления mark price и index price. Хендлер вызывается с батчем `MarkPriceUpdate[]` (символ, числовые цены, время события).
+
+| Рынок | Поведение |
+|------|-----------|
+| Binance Futures | Подписка на WebSocket-стрим `!markPrice@arr@1s` |
+| Binance Spot | Подписка не создаётся; в лог пишется предупреждение, хендлер не вызывается |
+| Bybit Linear / Spot | Используется тот же топик `tickers.linear` / `tickers.spot`, что и у all-tickers; в хендлер попадают только элементы с валидным `markPrice` в сообщении биржи |
+
+Требуется тот же экземпляр функции для отписки, что и для `unsubscribeMarkPrices`.
+
+---
+
+### `unsubscribeMarkPrices()`
+
+```typescript
+unsubscribeMarkPrices(handler: MarkPriceHandler): void
+```
+
+Снимает ранее зарегистрированный обработчик mark/index price. На Binance Spot вызов без эффекта.
+
+---
+
 ### `subscribeKlines()`
 
 ```typescript
@@ -1105,8 +1136,14 @@ interface Ticker {
   volume: number;
   quoteVolume: number;
   timestamp: number;
+  markPrice?: number;
+  indexPrice?: number;
+  fundingRate?: number;
+  nextFundingTime?: number;
 }
 ```
+
+Опциональные поля `markPrice`, `indexPrice`, `fundingRate`, `nextFundingTime` заполняются Bybit tickers для linear-контрактов — Binance их не возвращает в tickers-эндпоинте (используйте `fetchMarkPrice` отдельно).
 
 #### `Kline`
 
@@ -1139,9 +1176,27 @@ interface TradeSymbol {
   type: TradeSymbolTypeEnum;
   isLinear: boolean;
   contractSize: number;
+  contractType: string;
   filter: TradeSymbolFilter;
+  leverageFilter?: LeverageFilter;
+  priceLimitRisk?: PriceLimitRisk;
+  pricePrecision?: number;
+  quantityPrecision?: number;
+  funding?: TradingFunding;
+  launchTimestamp?: number;
+  triggerProtect?: string;
+  liquidationFee?: string;
+  orderTypeList?: string[];
+  timeInForceList?: string[];
+  info?: Record<string, unknown>;
 }
 ```
+
+Опциональные поля заполняются по доступности данных у биржи:
+- `leverageFilter`, `funding`, `priceLimitRisk` — preferably Bybit linear, частично Binance futures (`priceLimitRisk` → `PERCENT_PRICE` / `PERCENT_PRICE_BY_SIDE`)
+- `pricePrecision`, `quantityPrecision`, `triggerProtect`, `liquidationFee`, `orderTypeList`, `timeInForceList` — Binance futures
+- `launchTimestamp` — Bybit `launchTime`, Binance `onboardDate`
+- `info` — сырой payload биржи (для доступа к специфичным полям без кастомных нормализаторов)
 
 #### `TradeSymbolFilter`
 
@@ -1152,6 +1207,60 @@ interface TradeSymbolFilter {
   minQty: string;
   maxQty: string;
   minNotional: string;
+  minPrice?: string;
+  maxPrice?: string;
+  maxNotional?: string;
+  marketMinQty?: string;
+  marketMaxQty?: string;
+  marketStepSize?: string;
+  postOnlyMaxQty?: string;
+}
+```
+
+#### `LeverageFilter`
+
+```typescript
+interface LeverageFilter {
+  minLeverage: string;
+  maxLeverage: string;
+  leverageStep: string;
+}
+```
+
+#### `PriceLimitRisk`
+
+```typescript
+type PriceLimitRisk =
+  | {
+      source: 'binancePercentPrice';
+      multiplierUp: string;
+      multiplierDown: string;
+      multiplierDecimal: string;
+    }
+  | {
+      source: 'binancePercentPriceBySide';
+      bidMultiplierUp: string;
+      bidMultiplierDown: string;
+      askMultiplierUp: string;
+      askMultiplierDown: string;
+      avgPriceMins: number;
+    }
+  | {
+      source: 'bybitRiskParameters';
+      priceLimitRatioX: string;
+      priceLimitRatioY: string;
+    };
+```
+
+Дискриминированное объединение по полю `source` — форма payload отличается между биржами.
+
+#### `TradingFunding`
+
+```typescript
+interface TradingFunding {
+  fundingIntervalMinutes?: number;
+  upperFundingRate?: string;
+  lowerFundingRate?: string;
 }
 ```
 
@@ -1203,6 +1312,25 @@ interface Balance {
   free: number;
   locked: number;
   total: number;
+  walletBalance?: number;
+  availableToWithdraw?: number;
+  totalOrderInitialMargin?: number;
+  totalPositionInitialMargin?: number;
+}
+```
+
+Опциональные поля заполняются Bybit Unified Account (`normalizeBybitBalances`).
+
+#### `AccountBalances`
+
+```typescript
+interface AccountBalances {
+  totalWalletBalance: number;
+  totalAvailableBalance: number;
+  balanceByAsset: BalanceByAsset;
+  accountType?: string;
+  totalMarginBalance?: number;
+  totalInitialMargin?: number;
 }
 ```
 
@@ -1236,8 +1364,13 @@ interface OrderBook {
   askList: OrderBookLevel[];
   bidList: OrderBookLevel[];
   timestamp: number;
+  updateId?: number;
+  eventTimestamp?: number;
 }
 ```
+
+- `updateId` — Binance `lastUpdateId`, Bybit `u`
+- `eventTimestamp` — Binance `E` (event time), Bybit не возвращает
 
 #### `OrderBookLevel`
 
@@ -1259,8 +1392,12 @@ interface PublicTrade {
   quoteQuantity: number;
   timestamp: number;
   isBuyerMaker: boolean;
+  isBlockTrade?: boolean;
+  side?: OrderSideEnum;
 }
 ```
+
+`isBlockTrade` и `side` заполняются Bybit (`execId`-based трейды).
 
 #### `MarkPrice`
 
@@ -1273,6 +1410,27 @@ interface MarkPrice {
   nextFundingTime: number;
   timestamp: number;
 }
+```
+
+REST `fetchMarkPrice` и связанные нормализаторы. Для WebSocket используйте `MarkPriceUpdate`.
+
+#### `MarkPriceUpdate`
+
+```typescript
+interface MarkPriceUpdate {
+  symbol: string;
+  markPrice: number;
+  indexPrice: number;
+  timestamp: number;
+}
+```
+
+Потоковые обновления из `subscribeMarkPrices` (без полей funding).
+
+#### `MarkPriceHandler`
+
+```typescript
+type MarkPriceHandler = (markPriceList: MarkPriceUpdate[]) => void;
 ```
 
 #### `OpenInterest`
@@ -1305,8 +1463,11 @@ interface Income {
   asset: string;
   timestamp: number;
   info: Record<string, unknown>;
+  quantity?: number;
 }
 ```
+
+`quantity` заполняется Bybit transaction log (`qty`). Binance futures income не содержит этого поля.
 
 #### `ClosedPnl`
 

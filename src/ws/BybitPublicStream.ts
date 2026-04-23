@@ -1,6 +1,6 @@
 import { ReliableWebSocket, WebSocketStatus } from '@solncebro/websocket-engine';
 
-import type { ExchangeLogger, KlineInterval, TickerBySymbol, WebSocketConnectionInfo } from '../types/common';
+import type { ExchangeLogger, KlineInterval, MarkPriceHandler, MarkPriceUpdate, TickerBySymbol, WebSocketConnectionInfo } from '../types/common';
 import { WebSocketConnectionTypeEnum } from '../types/common';
 import type { KlineHandler } from '../types/exchange';
 import { normalizeBybitKlineWebSocketMessage, normalizeBybitTickers } from '../normalizers/bybitNormalizer';
@@ -31,6 +31,7 @@ class BybitPublicStream {
   private readonly label: string;
   private readonly onNotify?: (message: string) => void | Promise<void>;
   private readonly tickerHandlerSet: Set<(tickers: TickerBySymbol) => void> = new Set();
+  private readonly markPriceHandlerSet: Set<MarkPriceHandler> = new Set();
   private readonly klineHandlerByKey: Map<string, Set<KlineHandler>> = new Map();
   private readonly activeSubscriptionSet: Set<string> = new Set();
   private tradeAggregator: TradeToKlineAggregator | null = null;
@@ -54,7 +55,23 @@ class BybitPublicStream {
   unsubscribeAllTickers(handler: (tickers: TickerBySymbol) => void): void {
     this.tickerHandlerSet.delete(handler);
 
-    if (this.tickerHandlerSet.size === 0) {
+    if (this.tickerHandlerSet.size === 0 && this.markPriceHandlerSet.size === 0) {
+      const topic = this.resolveTickerTopic();
+      this.activeSubscriptionSet.delete(topic);
+    }
+  }
+
+  subscribeMarkPrices(handler: MarkPriceHandler): void {
+    this.markPriceHandlerSet.add(handler);
+    const topic = this.resolveTickerTopic();
+    this.activeSubscriptionSet.add(topic);
+    this.scheduleConnect();
+  }
+
+  unsubscribeMarkPrices(handler: MarkPriceHandler): void {
+    this.markPriceHandlerSet.delete(handler);
+
+    if (this.markPriceHandlerSet.size === 0 && this.tickerHandlerSet.size === 0) {
       const topic = this.resolveTickerTopic();
       this.activeSubscriptionSet.delete(topic);
     }
@@ -370,10 +387,21 @@ class BybitPublicStream {
 
     try {
       if (topic.startsWith('tickers.')) {
-        const tickerBySymbol = normalizeBybitTickers(message.data as BybitTickerRaw[]);
+        const rawTickerList = message.data as BybitTickerRaw[];
+        const tickerBySymbol = normalizeBybitTickers(rawTickerList);
 
         for (const handler of this.tickerHandlerSet) {
           handler(tickerBySymbol);
+        }
+
+        if (this.markPriceHandlerSet.size > 0) {
+          const markPriceList = this.extractMarkPriceUpdates(rawTickerList, message.ts);
+
+          if (markPriceList.length > 0) {
+            for (const handler of this.markPriceHandlerSet) {
+              handler(markPriceList);
+            }
+          }
         }
 
         return;
@@ -448,6 +476,34 @@ class BybitPublicStream {
 
   private resolveTickerTopic(): string {
     return this.url.includes('linear') ? 'tickers.linear' : 'tickers.spot';
+  }
+
+  private extractMarkPriceUpdates(
+    rawList: BybitTickerRaw[],
+    messageTs: number | undefined,
+  ): MarkPriceUpdate[] {
+    const result: MarkPriceUpdate[] = [];
+
+    for (const raw of rawList) {
+      if (raw.markPrice === undefined) {
+        continue;
+      }
+
+      const markPrice = parseFloat(raw.markPrice);
+
+      if (!Number.isFinite(markPrice) || markPrice <= 0) {
+        continue;
+      }
+
+      result.push({
+        symbol: raw.symbol,
+        markPrice,
+        indexPrice: raw.indexPrice !== undefined ? parseFloat(raw.indexPrice) : 0,
+        timestamp: raw.time ?? messageTs ?? Date.now(),
+      });
+    }
+
+    return result;
   }
 }
 

@@ -1,10 +1,18 @@
 import { ReliableWebSocket, WebSocketStatus } from '@solncebro/websocket-engine';
 
-import type { ExchangeLogger, KlineInterval, TickerBySymbol, TradeSymbolBySymbol, WebSocketConnectionInfo } from '../types/common';
+import type { ExchangeLogger, KlineInterval, MarkPriceHandler, TickerBySymbol, TradeSymbolBySymbol, WebSocketConnectionInfo } from '../types/common';
 import { WebSocketConnectionTypeEnum } from '../types/common';
 import type { KlineHandler } from '../types/exchange';
-import { normalizeBinanceKlineWebSocketMessage, normalizeBinanceTickers } from '../normalizers/binanceNormalizer';
-import type { BinanceTicker24hrRaw, BinanceWebSocketKlineRaw } from '../normalizers/binanceNormalizer';
+import {
+  normalizeBinanceKlineWebSocketMessage,
+  normalizeBinanceMarkPriceWebSocketList,
+  normalizeBinanceTickers,
+} from '../normalizers/binanceNormalizer';
+import type {
+  BinanceMarkPriceWebSocketRaw,
+  BinanceTicker24hrRaw,
+  BinanceWebSocketKlineRaw,
+} from '../normalizers/binanceNormalizer';
 import { resolveUnifiedBinanceInterval } from './binanceWebSocketUtils';
 import type { BinanceCombinedMessage, BinanceFuturesPublicStreamArgs, FuturesConnection } from './BinanceFuturesPublicStream.types';
 import { parseWebSocketMessage } from './parseWebSocketMessage';
@@ -28,6 +36,7 @@ class BinanceFuturesPublicStream {
   private readonly onNotify?: (message: string) => void | Promise<void>;
   private tradeSymbols: TradeSymbolBySymbol = new Map();
   private readonly tickerHandlerSet: Set<(tickers: TickerBySymbol) => void> = new Set();
+  private readonly markPriceHandlerSet: Set<MarkPriceHandler> = new Set();
   private readonly klineHandlerByKey: Map<string, Set<KlineHandler>> = new Map();
   private readonly connectionList: FuturesConnection[] = [];
   private isConnectScheduled = false;
@@ -51,6 +60,15 @@ class BinanceFuturesPublicStream {
 
   unsubscribeAllTickers(handler: (tickers: TickerBySymbol) => void): void {
     this.tickerHandlerSet.delete(handler);
+  }
+
+  subscribeMarkPrices(handler: MarkPriceHandler): void {
+    this.markPriceHandlerSet.add(handler);
+    this.scheduleConnect();
+  }
+
+  unsubscribeMarkPrices(handler: MarkPriceHandler): void {
+    this.markPriceHandlerSet.delete(handler);
   }
 
   subscribeKlines(symbol: string, interval: KlineInterval, handler: KlineHandler): void {
@@ -143,10 +161,16 @@ class BinanceFuturesPublicStream {
     });
   }
 
-  private createConnections(): void {
+  private buildStreamList(): string[] {
     const tickerStreamList = this.tickerHandlerSet.size > 0 ? ['!miniTicker@arr'] : [];
+    const markPriceStreamList = this.markPriceHandlerSet.size > 0 ? ['!markPrice@arr@1s'] : [];
     const klineStreamList = this.buildKlineStreamList();
-    const allStreamList = [...tickerStreamList, ...klineStreamList];
+
+    return [...tickerStreamList, ...markPriceStreamList, ...klineStreamList];
+  }
+
+  private createConnections(): void {
+    const allStreamList = this.buildStreamList();
 
     if (allStreamList.length === 0) {
       return;
@@ -279,6 +303,12 @@ class BinanceFuturesPublicStream {
     const result: string[] = [];
 
     for (const stream of connection.streamList) {
+      if (stream === '!markPrice@arr@1s') {
+        result.push('MarkPrices');
+
+        continue;
+      }
+
       if (stream === '!miniTicker@arr') {
         result.push('Tickers');
 
@@ -350,6 +380,18 @@ class BinanceFuturesPublicStream {
     }
 
     try {
+      if (message.stream === '!markPrice@arr@1s' && Array.isArray(message.data)) {
+        const markPriceList = normalizeBinanceMarkPriceWebSocketList(
+          message.data as BinanceMarkPriceWebSocketRaw[],
+        );
+
+        for (const handler of this.markPriceHandlerSet) {
+          handler(markPriceList);
+        }
+
+        return;
+      }
+
       if (Array.isArray(message.data)) {
         const tickerBySymbol = normalizeBinanceTickers(message.data as BinanceTicker24hrRaw[]);
 

@@ -157,6 +157,76 @@ describe('normalizeBybitTradeSymbols', () => {
 
     expect(xyz.filter.minNotional).toBe('0');
   });
+
+  it('preserves priceFilter min/max price', () => {
+    const result = normalizeBybitTradeSymbols(BYBIT_RAW_INSTRUMENT_LIST);
+    const btc = result.get('BTCUSDT')!;
+
+    expect(btc.filter.minPrice).toBe('0.10');
+    expect(btc.filter.maxPrice).toBe('1999999.80');
+  });
+
+  it('preserves lotSizeFilter marketMaxQty and postOnlyMaxQty', () => {
+    const result = normalizeBybitTradeSymbols(BYBIT_RAW_INSTRUMENT_LIST);
+    const btc = result.get('BTCUSDT')!;
+
+    expect(btc.filter.marketMaxQty).toBe('150.000');
+    expect(btc.filter.postOnlyMaxQty).toBe('1500.000');
+  });
+
+  it('builds leverageFilter from raw data', () => {
+    const result = normalizeBybitTradeSymbols(BYBIT_RAW_INSTRUMENT_LIST);
+    const btc = result.get('BTCUSDT')!;
+
+    expect(btc.leverageFilter).toEqual({ minLeverage: '1', maxLeverage: '100.00', leverageStep: '0.01' });
+  });
+
+  it('builds priceLimitRisk from riskParameters', () => {
+    const result = normalizeBybitTradeSymbols(BYBIT_RAW_INSTRUMENT_LIST);
+    const btc = result.get('BTCUSDT')!;
+
+    expect(btc.priceLimitRisk).toEqual({
+      source: 'bybitRiskParameters',
+      priceLimitRatioX: '0.01',
+      priceLimitRatioY: '0.02',
+    });
+  });
+
+  it('builds funding with upper/lower rate and interval', () => {
+    const result = normalizeBybitTradeSymbols(BYBIT_RAW_INSTRUMENT_LIST);
+    const btc = result.get('BTCUSDT')!;
+
+    expect(btc.funding).toEqual({
+      fundingIntervalMinutes: 480,
+      upperFundingRate: '0.005',
+      lowerFundingRate: '-0.005',
+    });
+  });
+
+  it('parses launchTimestamp from launchTime string', () => {
+    const result = normalizeBybitTradeSymbols(BYBIT_RAW_INSTRUMENT_LIST);
+    const btc = result.get('BTCUSDT')!;
+
+    expect(btc.launchTimestamp).toBe(1584230400000);
+  });
+
+  it('carries raw payload in info', () => {
+    const result = normalizeBybitTradeSymbols(BYBIT_RAW_INSTRUMENT_LIST);
+    const btc = result.get('BTCUSDT')!;
+
+    expect(btc.info).toBeDefined();
+    expect(btc.info!.priceScale).toBe('2');
+    expect(btc.info!.unifiedMarginTrade).toBe(true);
+  });
+
+  it('skips leverageFilter/priceLimitRisk/funding when raw has none', () => {
+    const result = normalizeBybitTradeSymbols([BYBIT_RAW_INSTRUMENT_NO_FILTERS]);
+    const xyz = result.get('XYZUSDT')!;
+
+    expect(xyz.leverageFilter).toBeUndefined();
+    expect(xyz.priceLimitRisk).toBeUndefined();
+    expect(xyz.funding).toBeUndefined();
+  });
 });
 
 describe('normalizeBybitTickers', () => {

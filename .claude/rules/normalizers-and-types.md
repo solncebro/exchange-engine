@@ -32,14 +32,19 @@ BinanceTicker24hrRaw { symbol, lastPrice: string, priceChangePercent: string, ti
 - `BinanceOrderBookRaw` — `{ lastUpdateId, E, T, bids: string[][], asks: string[][] }`
 - `BinancePublicTradeRaw` — `{ id, price, qty, quoteQty, time, isBuyerMaker }`
 - `BinanceMarkPriceRaw` — `{ symbol, markPrice, indexPrice, lastFundingRate, nextFundingTime, time }`
+- `BinanceMarkPriceWebSocketRaw` — событие `markPriceUpdate` c полями `e, E, s, p, ap, i, P, r, T` (символ, цены, время события)
 - `BinanceOpenInterestRaw` — `{ symbol, openInterest, time }`
 - `BinanceCommissionRateRaw` — `{ symbol, makerCommissionRate, takerCommissionRate }`
 - `BinanceIncomeRaw` — `{ symbol, incomeType, income, asset, time, info, tranId, tradeId }`
 
 ### Функции нормализации:
 - `normalizeBinanceTradeSymbols(raw)` → `TradeSymbolBySymbol` (Map)
-  - Извлекает фильтры: PRICE_FILTER (tickSize), LOT_SIZE (stepSize, minQty, maxQty), MIN_NOTIONAL/NOTIONAL
-  - Определяет тип: PERPETUAL → Swap, пустой/отсутствует contractType → Spot, остальное → Future
+  - Извлекает фильтры: PRICE_FILTER (tickSize, minPrice, maxPrice), LOT_SIZE (stepSize, minQty, maxQty), MARKET_LOT_SIZE (marketMinQty, marketMaxQty, marketStepSize), MIN_NOTIONAL (notional → minNotional), NOTIONAL (minNotional, maxNotional)
+  - Строит `priceLimitRisk` из PERCENT_PRICE (`source: 'binancePercentPrice'`) или PERCENT_PRICE_BY_SIDE (`source: 'binancePercentPriceBySide'`)
+  - Пробрасывает `pricePrecision`, `quantityPrecision`, `onboardDate → launchTimestamp`, `triggerProtect`, `liquidationFee`, `orderTypes → orderTypeList`, `timeInForce → timeInForceList`
+  - Сохраняет сырой payload в `info`
+  - Определяет тип: PERPETUAL/TRADIFI_PERPETUAL → Swap, пустой/отсутствует contractType → Spot, остальное → Future
+  - `extractFilter<T>()` — generic helper с дискриминированным union по `filterType`, возвращает точный тип фильтра
 - `normalizeBinanceTickers(rawList)` → `TickerBySymbol` (Map)
 - `normalizeBinanceKlines(rawList)` → `Kline[]` — массив массивов → массив объектов, parseFloat для строк
 - `normalizeBinanceKlineWebSocketMessage(raw)` → `Kline` — маппинг коротких ключей, `raw.x → isClosed`
@@ -63,10 +68,13 @@ BinanceTicker24hrRaw { symbol, lastPrice: string, priceChangePercent: string, ti
   - parseFloat для строковых чисел, fundingIntervalHours уже number
 - `normalizeBinanceOrderBook(raw, symbol)` → `OrderBook`
   - symbol передаётся отдельно (отсутствует в raw), timestamp fallback `T → E → Date.now()`
+  - `updateId = raw.lastUpdateId`, `eventTimestamp = raw.E`
 - `normalizeBinancePublicTrades(rawList, symbol)` → `PublicTrade[]`
   - symbol передаётся отдельно, `id` number → string, `qty → quantity`, `quoteQty → quoteQuantity`
 - `normalizeBinanceMarkPriceList(rawList)` → `MarkPrice[]`
   - parseFloat для строковых полей, `time → timestamp`
+- `normalizeBinanceMarkPriceWebSocketList(rawList)` → `MarkPriceUpdate[]`
+  - `s → symbol`, `p → markPrice`, `i → indexPrice` (пустая строка → `0`), `E → timestamp`
 - `normalizeBinanceOpenInterest(raw)` → `OpenInterest`
   - parseFloat для openInterest, `time → timestamp`
 - `normalizeBinanceCommissionRate(raw)` → `FeeRate[]`
@@ -106,9 +114,16 @@ WebSocket:
   - LinearPerpetual/LinearFutures → Swap, пустой contractType → Spot, остальное → Future
   - `stepSize` берётся из `qtyStep` (linear) или `basePrecision` (spot)
   - `minNotional` берётся из `minNotionalValue` или `minOrderAmt`
+  - `filter`: пробрасывает `priceFilter.minPrice/maxPrice`, `lotSizeFilter.maxMktOrderQty → marketMaxQty`, `lotSizeFilter.postOnlyMaxOrderQty → postOnlyMaxQty`
+  - `leverageFilter` строится из `raw.leverageFilter` (если есть хоть одно поле)
+  - `priceLimitRisk` строится из `raw.riskParameters` (`source: 'bybitRiskParameters'`, `priceLimitRatioX`, `priceLimitRatioY`)
+  - `funding` строится из `fundingInterval`, `upperFundingRate`, `lowerFundingRate`
+  - `launchTimestamp` — parseFloat от `launchTime` (если непустая строка)
+  - Сохраняет сырой payload в `info`
 - `normalizeBybitTickers(rawList)` → `TickerBySymbol` (Map)
   - `priceChangePercent` умножается на 100 (Bybit отдаёт долю, не проценты)
   - `timestamp` fallback на `Date.now()` если отсутствует
+  - Пробрасывает `markPrice`, `indexPrice`, `fundingRate`, `nextFundingTime` через parseFloat (опционально)
 - `normalizeBybitKlines(rawList)` → `Kline[]` — массив строковых массивов → массив объектов, `closeTimestamp = 0`, `numberOfTrades = 0`, `.reverse()` для хронологического порядка (Bybit возвращает newest-first)
 - `normalizeBybitKlineWebSocketMessage(raw)` → `Kline` — маппинг полей, `raw.confirm → isClosed`
 - `normalizeBybitPosition(raw)` → `Position`
@@ -122,16 +137,19 @@ WebSocket:
   - timestamp через `parseFloat(raw.createdTime)`
 - `buildBybitOrderFromCreateResponse(args, orderId)` → `Order`
   - Строит Order из `CreateOrderWebSocketArgs` + orderId, все filled-поля = 0, status = 'open'
-- `normalizeBybitBalances(raw)` → `BalanceByAsset` (Map)
+- `normalizeBybitBalances(raw)` → `AccountBalances`
   - Итерирует по `raw.list[].coin[]`, агрегирует балансы если один coin встречается в нескольких accounts
   - `free = walletBalance - totalPositionIM - totalOrderIM`
   - `locked` = frozenAmount или locked, fallback `walletBalance - free`
   - Пропускает нулевые балансы (`free + locked === 0`)
+  - На каждый asset заполняет `walletBalance`, `totalOrderInitialMargin`, `totalPositionInitialMargin`; `availableToWithdraw` — если не пусто
+  - На уровне `AccountBalances` возвращает `accountType` (primary account), `totalMarginBalance`, `totalInitialMargin`
 - `normalizeBybitOrderBook(raw, symbol)` → `OrderBook`
-  - symbol передаётся отдельно, `a → askList`, `b → bidList`, `ts → timestamp`
+  - symbol передаётся отдельно, `a → askList`, `b → bidList`, `ts → timestamp`, `u → updateId`
 - `normalizeBybitPublicTradeList(rawList)` → `PublicTrade[]`
   - `execId → id`, `size → quantity`, `quoteQuantity` вычисляется как `price * size`
   - `isBuyerMaker = raw.side === 'Sell'`
+  - Пробрасывает `isBlockTrade`; `side` маппится через `BYBIT_ORDER_SIDE` (если side валидный)
 - `normalizeBybitMarkPriceList(rawList)` → `MarkPrice[]`
   - Использует `BybitTickerRaw` (те же данные что tickers), `fundingRate → lastFundingRate`, timestamp fallback `Date.now()`
 - `normalizeBybitOpenInterest(raw)` → `OpenInterest`
@@ -145,6 +163,7 @@ WebSocket:
 - `normalizeBybitIncomeList(rawList)` → `Income[]`
   - Использует `BybitTransactionLogRaw`, `cashFlow → income`, `currency → asset`, `type → incomeType`
   - `info` собирается из `{ tradeId, orderId }`
+  - `quantity = parseFloat(raw.qty)`
 
 ## Унифицированные типы (src/types/common.ts)
 
@@ -166,23 +185,32 @@ WebSocket:
 - `ExchangeConfig` — `{ apiKey, secret, recvWindow?, isDemoMode?, httpsAgent? }`
 
 ### Интерфейсы:
-- `Ticker` — `{ symbol, lastPrice, openPrice, highPrice, lowPrice, priceChangePercent, volume, quoteVolume, timestamp }`
+- `Ticker` — `{ symbol, lastPrice, openPrice, highPrice, lowPrice, priceChangePercent, volume, quoteVolume, timestamp, markPrice?, indexPrice?, fundingRate?, nextFundingTime? }` (последние 4 поля заполняются Bybit tickers)
 - `Kline` — `{ openTimestamp, openPrice, highPrice, lowPrice, closePrice, volume, closeTimestamp, quoteAssetVolume, numberOfTrades, takerBuyBaseAssetVolume, takerBuyQuoteAssetVolume, isClosed?: boolean }`
-- `TradeSymbol` — `{ symbol, baseAsset, quoteAsset, settle, isActive, type, isLinear, contractSize, filter }`
-- `TradeSymbolFilter` — `{ tickSize, stepSize, minQty, maxQty, minNotional }` (все string)
+- `TradeSymbol` — `{ symbol, baseAsset, quoteAsset, settle, isActive, type, isLinear, contractSize, contractType, filter, leverageFilter?, priceLimitRisk?, pricePrecision?, quantityPrecision?, funding?, launchTimestamp?, triggerProtect?, liquidationFee?, orderTypeList?, timeInForceList?, info? }`
+- `TradeSymbolFilter` — `{ tickSize, stepSize, minQty, maxQty, minNotional, minPrice?, maxPrice?, maxNotional?, marketMinQty?, marketMaxQty?, marketStepSize?, postOnlyMaxQty? }` (все string)
+- `LeverageFilter` — `{ minLeverage, maxLeverage, leverageStep }` (все string)
+- `PriceLimitRisk` — дискриминированное объединение по `source`:
+  - `'binancePercentPrice'` — `{ multiplierUp, multiplierDown, multiplierDecimal }`
+  - `'binancePercentPriceBySide'` — `{ bidMultiplierUp, bidMultiplierDown, askMultiplierUp, askMultiplierDown, avgPriceMins }`
+  - `'bybitRiskParameters'` — `{ priceLimitRatioX, priceLimitRatioY }`
+- `TradingFunding` — `{ fundingIntervalMinutes?, upperFundingRate?, lowerFundingRate? }`
 - `Position` — `{ symbol, side, contracts, entryPrice, markPrice, unrealizedPnl, leverage, marginMode, liquidationPrice, info }`
 - `Order` — `{ id, clientOrderId, symbol, side, type, amount, price, avgPrice, stopPrice, filledAmount, filledQuoteAmount, status, timeInForce, reduceOnly, timestamp, updatedTimestamp }`
-- `Balance` — `{ asset, free, locked, total }`
+- `Balance` — `{ asset, free, locked, total, walletBalance?, availableToWithdraw?, totalOrderInitialMargin?, totalPositionInitialMargin? }` (опциональные поля — Bybit Unified Account)
+- `AccountBalances` — `{ totalWalletBalance, totalAvailableBalance, balanceByAsset, accountType?, totalMarginBalance?, totalInitialMargin? }`
 - `FundingRateHistory` — `{ symbol, fundingRate, fundingTime, markPrice: number | null }`
 - `FundingInfo` — `{ symbol, fundingIntervalHours, adjustedFundingRateCap, adjustedFundingRateFloor }`
 - `WebSocketConnectionInfo` — `{ label, url, isConnected, type: WebSocketConnectionTypeEnum, subscriptionList: string[] }`
 - `OrderBookLevel` — `{ price, quantity }` (оба number)
-- `OrderBook` — `{ symbol, askList: OrderBookLevel[], bidList: OrderBookLevel[], timestamp }`
-- `PublicTrade` — `{ id, symbol, price, quantity, quoteQuantity, timestamp, isBuyerMaker }`
+- `OrderBook` — `{ symbol, askList: OrderBookLevel[], bidList: OrderBookLevel[], timestamp, updateId?, eventTimestamp? }` (`updateId` — Binance `lastUpdateId` / Bybit `u`; `eventTimestamp` — Binance `E`)
+- `PublicTrade` — `{ id, symbol, price, quantity, quoteQuantity, timestamp, isBuyerMaker, isBlockTrade?, side? }` (`isBlockTrade` и `side` — Bybit)
 - `MarkPrice` — `{ symbol, markPrice, indexPrice, lastFundingRate, nextFundingTime, timestamp }`
+- `MarkPriceUpdate` — `{ symbol, markPrice, indexPrice, timestamp }` (потоковые обновления mark/index, без funding-полей)
+- `MarkPriceHandler` — `(markPriceList: MarkPriceUpdate[]) => void`
 - `OpenInterest` — `{ symbol, openInterest, timestamp }`
 - `FeeRate` — `{ symbol, makerRate, takerRate }`
-- `Income` — `{ symbol, incomeType, income, asset, timestamp, info: Record<string, unknown> }`
+- `Income` — `{ symbol, incomeType, income, asset, timestamp, info: Record<string, unknown>, quantity? }`
 - `ClosedPnl` — `{ symbol, orderId, side: OrderSideEnum, quantity, entryPrice, exitPrice, closedPnl, timestamp }`
 
 ### Collection types (Map с "By" naming):

@@ -1,4 +1,9 @@
-import type { BinanceTicker24hrRaw, BinanceWebSocketKlineRaw } from '../../src/normalizers/binanceNormalizer';
+import type { MarkPriceUpdate } from '../../src/types/common';
+import type {
+  BinanceMarkPriceWebSocketRaw,
+  BinanceTicker24hrRaw,
+  BinanceWebSocketKlineRaw,
+} from '../../src/normalizers/binanceNormalizer';
 import { BinanceFuturesPublicStream } from '../../src/ws/BinanceFuturesPublicStream';
 import { createMockLogger } from '../fixtures/mockLogger';
 
@@ -220,6 +225,59 @@ describe('BinanceFuturesPublicStream', () => {
       await Promise.resolve();
 
       expect(ReliableWebSocket).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('mark price subscription', () => {
+    it('registers handler via subscribeMarkPrices and removes via unsubscribeMarkPrices', () => {
+      const stream = new BinanceFuturesPublicStream({ webSocketCombinedUrl: url, logger: mockLogger, onNotify: undefined, label: 'test' });
+      const handler = jest.fn();
+
+      stream.subscribeMarkPrices(handler);
+      // @ts-expect-error — private access for test
+      expect(stream.markPriceHandlerSet.size).toBe(1);
+
+      stream.unsubscribeMarkPrices(handler);
+      // @ts-expect-error — private access for test
+      expect(stream.markPriceHandlerSet.size).toBe(0);
+    });
+
+    it('dispatches normalized MarkPriceUpdate list when markPrice payload arrives', async () => {
+      const stream = new BinanceFuturesPublicStream({ webSocketCombinedUrl: url, logger: mockLogger, onNotify: undefined, label: 'test' });
+      const received: MarkPriceUpdate[][] = [];
+      stream.subscribeMarkPrices((list) => received.push(list));
+      await Promise.resolve();
+
+      const rawMarkPrice: BinanceMarkPriceWebSocketRaw = {
+        e: 'markPriceUpdate',
+        E: 100,
+        s: 'BTCUSDT',
+        p: '50000.5',
+        ap: '49999',
+        i: '49998',
+        P: '',
+        r: '',
+        T: 200,
+      };
+
+      capturedOnMessage!({
+        stream: '!markPrice@arr@1s',
+        data: [rawMarkPrice],
+      });
+
+      expect(received).toHaveLength(1);
+      expect(received[0]).toEqual([
+        { symbol: 'BTCUSDT', markPrice: 50000.5, indexPrice: 49998, timestamp: 100 },
+      ]);
+    });
+
+    it('includes !markPrice@arr@1s stream name when mark price handler is registered', () => {
+      const stream = new BinanceFuturesPublicStream({ webSocketCombinedUrl: url, logger: mockLogger, onNotify: undefined, label: 'test' });
+      stream.subscribeMarkPrices(jest.fn());
+
+      // @ts-expect-error — read private method for test
+      const streamNameList = stream.buildStreamList();
+      expect(streamNameList).toContain('!markPrice@arr@1s');
     });
   });
 });

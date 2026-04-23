@@ -16,6 +16,9 @@ import type {
   FundingRateHistory,
   ClosedPnl,
   Income,
+  LeverageFilter,
+  PriceLimitRisk,
+  TradingFunding,
 } from '../types/common';
 import { TradeSymbolTypeEnum, PositionSideEnum, MarginModeEnum, TimeInForceEnum, OrderSideEnum } from '../types/common';
 import { BYBIT_POSITION_SIDE, BYBIT_ORDER_STATUS, BYBIT_ORDER_SIDE, BYBIT_ORDER_TYPE, BYBIT_TIME_IN_FORCE } from '../constants/mappings';
@@ -29,10 +32,25 @@ interface BybitLotSizeFilterRaw {
   maxOrderQty?: string;
   minNotionalValue?: string;
   minOrderAmt?: string;
+  postOnlyMaxOrderQty?: string;
+  maxMktOrderQty?: string;
 }
 
 interface BybitPriceFilterRaw {
   tickSize?: string;
+  minPrice?: string;
+  maxPrice?: string;
+}
+
+interface BybitLeverageFilterRaw {
+  minLeverage?: string;
+  maxLeverage?: string;
+  leverageStep?: string;
+}
+
+interface BybitRiskParametersRaw {
+  priceLimitRatioX?: string;
+  priceLimitRatioY?: string;
 }
 
 export interface BybitInstrumentInfoRaw {
@@ -45,6 +63,22 @@ export interface BybitInstrumentInfoRaw {
   contractSize?: string;
   lotSizeFilter?: BybitLotSizeFilterRaw;
   priceFilter?: BybitPriceFilterRaw;
+  leverageFilter?: BybitLeverageFilterRaw;
+  launchTime?: string;
+  deliveryTime?: string;
+  deliveryFeeRate?: string;
+  priceScale?: string;
+  unifiedMarginTrade?: boolean;
+  fundingInterval?: number;
+  copyTrading?: string;
+  upperFundingRate?: string;
+  lowerFundingRate?: string;
+  isPreListing?: boolean;
+  preListingInfo?: unknown;
+  riskParameters?: BybitRiskParametersRaw;
+  displayName?: string;
+  symbolType?: string;
+  forbidUplWithdrawal?: boolean;
 }
 
 export interface BybitTickerRaw {
@@ -209,6 +243,68 @@ export interface BybitTransactionLogRaw {
 
 const LINEAR_CONTRACT_TYPES = new Set(['LinearPerpetual', 'LinearFutures']);
 
+function buildBybitLeverageFilter(raw: BybitInstrumentInfoRaw): LeverageFilter | undefined {
+  const source = raw.leverageFilter;
+
+  if (source === undefined) {
+    return undefined;
+  }
+
+  if (source.minLeverage === undefined && source.maxLeverage === undefined && source.leverageStep === undefined) {
+    return undefined;
+  }
+
+  return {
+    minLeverage: source.minLeverage ?? '0',
+    maxLeverage: source.maxLeverage ?? '0',
+    leverageStep: source.leverageStep ?? '0',
+  };
+}
+
+function buildBybitPriceLimitRisk(raw: BybitInstrumentInfoRaw): PriceLimitRisk | undefined {
+  const source = raw.riskParameters;
+
+  if (source === undefined) {
+    return undefined;
+  }
+
+  if (source.priceLimitRatioX === undefined && source.priceLimitRatioY === undefined) {
+    return undefined;
+  }
+
+  return {
+    source: 'bybitRiskParameters',
+    priceLimitRatioX: source.priceLimitRatioX ?? '0',
+    priceLimitRatioY: source.priceLimitRatioY ?? '0',
+  };
+}
+
+function buildBybitFunding(raw: BybitInstrumentInfoRaw): TradingFunding | undefined {
+  const hasAny = raw.fundingInterval !== undefined
+    || raw.upperFundingRate !== undefined
+    || raw.lowerFundingRate !== undefined;
+
+  if (!hasAny) {
+    return undefined;
+  }
+
+  const funding: TradingFunding = {};
+
+  if (raw.fundingInterval !== undefined) {
+    funding.fundingIntervalMinutes = raw.fundingInterval;
+  }
+
+  if (raw.upperFundingRate !== undefined) {
+    funding.upperFundingRate = raw.upperFundingRate;
+  }
+
+  if (raw.lowerFundingRate !== undefined) {
+    funding.lowerFundingRate = raw.lowerFundingRate;
+  }
+
+  return funding;
+}
+
 export function normalizeBybitTradeSymbols(rawList: BybitInstrumentInfoRaw[]): TradeSymbolBySymbol {
   const result = new Map<string, TradeSymbol>();
 
@@ -242,8 +338,40 @@ export function normalizeBybitTradeSymbols(rawList: BybitInstrumentInfoRaw[]): T
         minNotional: raw.lotSizeFilter?.minNotionalValue
           ?? raw.lotSizeFilter?.minOrderAmt
           ?? '0',
+        ...(raw.priceFilter?.minPrice !== undefined ? { minPrice: raw.priceFilter.minPrice } : {}),
+        ...(raw.priceFilter?.maxPrice !== undefined ? { maxPrice: raw.priceFilter.maxPrice } : {}),
+        ...(raw.lotSizeFilter?.maxMktOrderQty !== undefined ? { marketMaxQty: raw.lotSizeFilter.maxMktOrderQty } : {}),
+        ...(raw.lotSizeFilter?.postOnlyMaxOrderQty !== undefined ? { postOnlyMaxQty: raw.lotSizeFilter.postOnlyMaxOrderQty } : {}),
       },
     };
+
+    const leverageFilter = buildBybitLeverageFilter(raw);
+
+    if (leverageFilter !== undefined) {
+      tradeSymbol.leverageFilter = leverageFilter;
+    }
+
+    const priceLimitRisk = buildBybitPriceLimitRisk(raw);
+
+    if (priceLimitRisk !== undefined) {
+      tradeSymbol.priceLimitRisk = priceLimitRisk;
+    }
+
+    const funding = buildBybitFunding(raw);
+
+    if (funding !== undefined) {
+      tradeSymbol.funding = funding;
+    }
+
+    if (raw.launchTime !== undefined && raw.launchTime !== '') {
+      const launchTimestamp = parseFloat(raw.launchTime);
+
+      if (!isNaN(launchTimestamp)) {
+        tradeSymbol.launchTimestamp = launchTimestamp;
+      }
+    }
+
+    tradeSymbol.info = raw as unknown as Record<string, unknown>;
 
     result.set(raw.symbol, tradeSymbol);
   }
@@ -266,6 +394,22 @@ export function normalizeBybitTickers(rawList: BybitTickerRaw[]): TickerBySymbol
       quoteVolume: parseFloat(raw.turnover24h ?? '0'),
       timestamp: raw.time ?? Date.now(),
     };
+
+    if (raw.markPrice !== undefined) {
+      ticker.markPrice = parseFloat(raw.markPrice);
+    }
+
+    if (raw.indexPrice !== undefined) {
+      ticker.indexPrice = parseFloat(raw.indexPrice);
+    }
+
+    if (raw.fundingRate !== undefined) {
+      ticker.fundingRate = parseFloat(raw.fundingRate);
+    }
+
+    if (raw.nextFundingTime !== undefined) {
+      ticker.nextFundingTime = parseFloat(raw.nextFundingTime);
+    }
 
     result.set(raw.symbol, ticker);
   }
@@ -385,6 +529,10 @@ export function normalizeBybitBalances(raw: BybitWalletBalanceRaw): AccountBalan
         continue;
       }
 
+      const availableToWithdraw = coin.availableToWithdraw !== undefined && coin.availableToWithdraw !== ''
+        ? parseFloat(coin.availableToWithdraw)
+        : undefined;
+
       const existing = balanceByAsset.get(coin.coin);
 
       if (existing !== undefined) {
@@ -393,7 +541,14 @@ export function normalizeBybitBalances(raw: BybitWalletBalanceRaw): AccountBalan
           free: existing.free + free,
           locked: existing.locked + locked,
           total: existing.total + free + locked,
+          walletBalance: (existing.walletBalance ?? 0) + walletBalance,
+          totalOrderInitialMargin: (existing.totalOrderInitialMargin ?? 0) + totalOrderIM,
+          totalPositionInitialMargin: (existing.totalPositionInitialMargin ?? 0) + totalPositionIM,
         };
+
+        if (availableToWithdraw !== undefined) {
+          balance.availableToWithdraw = (existing.availableToWithdraw ?? 0) + availableToWithdraw;
+        }
 
         balanceByAsset.set(coin.coin, balance);
 
@@ -405,7 +560,14 @@ export function normalizeBybitBalances(raw: BybitWalletBalanceRaw): AccountBalan
         free,
         locked,
         total: free + locked,
+        walletBalance,
+        totalOrderInitialMargin: totalOrderIM,
+        totalPositionInitialMargin: totalPositionIM,
       };
+
+      if (availableToWithdraw !== undefined) {
+        balance.availableToWithdraw = availableToWithdraw;
+      }
 
       balanceByAsset.set(coin.coin, balance);
     }
@@ -446,7 +608,25 @@ export function normalizeBybitBalances(raw: BybitWalletBalanceRaw): AccountBalan
     }
   }
 
-  return { totalWalletBalance, totalAvailableBalance, balanceByAsset };
+  const result: AccountBalances = { totalWalletBalance, totalAvailableBalance, balanceByAsset };
+
+  if (primaryAccount?.accountType !== undefined) {
+    result.accountType = primaryAccount.accountType;
+  }
+
+  const totalMarginBalance = parseFloat(rawTotalMargin);
+
+  if (!isNaN(totalMarginBalance)) {
+    result.totalMarginBalance = totalMarginBalance;
+  }
+
+  const totalInitialMargin = parseFloat(rawTotalInitialMargin);
+
+  if (!isNaN(totalInitialMargin)) {
+    result.totalInitialMargin = totalInitialMargin;
+  }
+
+  return result;
 }
 
 export function normalizeBybitOrderBook(raw: BybitOrderBookRaw, symbol: string): OrderBook {
@@ -455,19 +635,31 @@ export function normalizeBybitOrderBook(raw: BybitOrderBookRaw, symbol: string):
     askList: raw.a.map(parseOrderBookLevel),
     bidList: raw.b.map(parseOrderBookLevel),
     timestamp: raw.ts,
+    updateId: raw.u,
   };
 }
 
 export function normalizeBybitPublicTradeList(rawList: BybitPublicTradeRaw[]): PublicTrade[] {
-  return rawList.map((raw) => ({
-    id: raw.execId,
-    symbol: raw.symbol,
-    price: parseFloat(raw.price),
-    quantity: parseFloat(raw.size),
-    quoteQuantity: parseFloat(raw.price) * parseFloat(raw.size),
-    timestamp: parseFloat(raw.time),
-    isBuyerMaker: raw.side === 'Sell',
-  }));
+  return rawList.map((raw) => {
+    const trade: PublicTrade = {
+      id: raw.execId,
+      symbol: raw.symbol,
+      price: parseFloat(raw.price),
+      quantity: parseFloat(raw.size),
+      quoteQuantity: parseFloat(raw.price) * parseFloat(raw.size),
+      timestamp: parseFloat(raw.time),
+      isBuyerMaker: raw.side === 'Sell',
+      isBlockTrade: raw.isBlockTrade,
+    };
+
+    const mappedSide = BYBIT_ORDER_SIDE[raw.side];
+
+    if (mappedSide !== undefined) {
+      trade.side = mappedSide;
+    }
+
+    return trade;
+  });
 }
 
 export function normalizeBybitMarkPriceList(rawList: BybitTickerRaw[]): MarkPrice[] {
@@ -527,5 +719,6 @@ export function normalizeBybitIncomeList(rawList: BybitTransactionLogRaw[]): Inc
     asset: raw.currency,
     timestamp: parseFloat(raw.transactionTime),
     info: { tradeId: raw.tradeId, orderId: raw.orderId },
+    quantity: parseFloat(raw.qty),
   }));
 }

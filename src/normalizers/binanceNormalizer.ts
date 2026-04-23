@@ -13,23 +13,132 @@ import type {
   OrderBook,
   PublicTrade,
   MarkPrice,
+  MarkPriceUpdate,
   OpenInterest,
   FeeRate,
   Income,
+  PriceLimitRisk,
 } from '../types/common';
 import { TradeSymbolTypeEnum, PositionSideEnum, MarginModeEnum, TimeInForceEnum } from '../types/common';
 import { BINANCE_POSITION_SIDE, BINANCE_ORDER_SIDE, BINANCE_ORDER_TYPE, BINANCE_ORDER_STATUS, BINANCE_TIME_IN_FORCE } from '../constants/mappings';
 import { parseOrderBookLevel } from './normalizerUtils';
 
-interface BinanceFilterRaw {
-  filterType: string;
+interface BinancePriceFilterRaw {
+  filterType: 'PRICE_FILTER';
   tickSize?: string;
+  minPrice?: string;
+  maxPrice?: string;
+}
+
+interface BinanceLotSizeFilterRaw {
+  filterType: 'LOT_SIZE';
   stepSize?: string;
   minQty?: string;
   maxQty?: string;
-  minNotional?: string;
-  notional?: string;
 }
+
+interface BinanceMarketLotSizeFilterRaw {
+  filterType: 'MARKET_LOT_SIZE';
+  stepSize?: string;
+  minQty?: string;
+  maxQty?: string;
+}
+
+interface BinanceMinNotionalFilterRaw {
+  filterType: 'MIN_NOTIONAL';
+  notional?: string;
+  applyMinToMarket?: boolean;
+  maxNotional?: string;
+  applyMaxToMarket?: boolean;
+  avgPriceMins?: number;
+}
+
+interface BinanceNotionalFilterRaw {
+  filterType: 'NOTIONAL';
+  minNotional?: string;
+  maxNotional?: string;
+  applyMinToMarket?: boolean;
+  applyMaxToMarket?: boolean;
+  avgPriceMins?: number;
+}
+
+interface BinanceMaxNumOrdersFilterRaw {
+  filterType: 'MAX_NUM_ORDERS';
+  limit?: number;
+  maxNumOrders?: number;
+}
+
+interface BinancePercentPriceFilterRaw {
+  filterType: 'PERCENT_PRICE';
+  multiplierUp: string;
+  multiplierDown: string;
+  multiplierDecimal: string;
+}
+
+interface BinancePercentPriceBySideFilterRaw {
+  filterType: 'PERCENT_PRICE_BY_SIDE';
+  bidMultiplierUp: string;
+  bidMultiplierDown: string;
+  askMultiplierUp: string;
+  askMultiplierDown: string;
+  avgPriceMins: number;
+}
+
+interface BinancePositionRiskControlFilterRaw {
+  filterType: 'POSITION_RISK_CONTROL';
+  positionControlSide: string;
+}
+
+interface BinanceIcebergPartsFilterRaw {
+  filterType: 'ICEBERG_PARTS';
+  limit: number;
+}
+
+interface BinanceTrailingDeltaFilterRaw {
+  filterType: 'TRAILING_DELTA';
+  minTrailingAboveDelta: number;
+  maxTrailingAboveDelta: number;
+  minTrailingBelowDelta: number;
+  maxTrailingBelowDelta: number;
+}
+
+interface BinanceMaxNumOrderListsFilterRaw {
+  filterType: 'MAX_NUM_ORDER_LISTS';
+  maxNumOrderLists: number;
+}
+
+interface BinanceMaxNumAlgoOrdersFilterRaw {
+  filterType: 'MAX_NUM_ALGO_ORDERS';
+  maxNumAlgoOrders: number;
+}
+
+interface BinanceMaxNumOrderAmendsFilterRaw {
+  filterType: 'MAX_NUM_ORDER_AMENDS';
+  maxNumOrderAmends: number;
+}
+
+interface BinanceUnknownFilterRaw {
+  filterType: string;
+  [key: string]: unknown;
+}
+
+type BinanceKnownFilterRaw =
+  | BinancePriceFilterRaw
+  | BinanceLotSizeFilterRaw
+  | BinanceMarketLotSizeFilterRaw
+  | BinanceMinNotionalFilterRaw
+  | BinanceNotionalFilterRaw
+  | BinanceMaxNumOrdersFilterRaw
+  | BinancePercentPriceFilterRaw
+  | BinancePercentPriceBySideFilterRaw
+  | BinancePositionRiskControlFilterRaw
+  | BinanceIcebergPartsFilterRaw
+  | BinanceTrailingDeltaFilterRaw
+  | BinanceMaxNumOrderListsFilterRaw
+  | BinanceMaxNumAlgoOrdersFilterRaw
+  | BinanceMaxNumOrderAmendsFilterRaw;
+
+type BinanceFilterRaw = BinanceKnownFilterRaw | BinanceUnknownFilterRaw;
 
 interface BinanceSymbolRaw {
   symbol: string;
@@ -39,6 +148,39 @@ interface BinanceSymbolRaw {
   contractType?: string;
   marginAsset?: string;
   filters: BinanceFilterRaw[];
+  pair?: string;
+  deliveryDate?: number;
+  onboardDate?: number;
+  maintMarginPercent?: string;
+  requiredMarginPercent?: string;
+  pricePrecision?: number;
+  quantityPrecision?: number;
+  baseAssetPrecision?: number;
+  quotePrecision?: number;
+  quoteAssetPrecision?: number;
+  baseCommissionPrecision?: number;
+  quoteCommissionPrecision?: number;
+  underlyingType?: string;
+  underlyingSubType?: string[];
+  triggerProtect?: string;
+  liquidationFee?: string;
+  marketTakeBound?: string;
+  maxMoveOrderLimit?: number;
+  orderTypes?: string[];
+  timeInForce?: string[];
+  permissionSets?: unknown;
+  icebergAllowed?: boolean;
+  ocoAllowed?: boolean;
+  otoAllowed?: boolean;
+  opoAllowed?: boolean;
+  quoteOrderQtyMarketAllowed?: boolean;
+  allowTrailingStop?: boolean;
+  cancelReplaceAllowed?: boolean;
+  amendAllowed?: boolean;
+  pegInstructionsAllowed?: boolean;
+  isSpotTradingAllowed?: boolean;
+  isMarginTradingAllowed?: boolean;
+  [key: string]: unknown;
 }
 
 export interface BinanceExchangeInfoRaw {
@@ -140,8 +282,41 @@ export interface BinanceFuturesAccountRaw {
   assets: BinanceFuturesAssetRaw[];
 }
 
-function extractFilter(filterList: BinanceFilterRaw[], filterType: string): BinanceFilterRaw | undefined {
-  return filterList.find((filter) => filter.filterType === filterType);
+function extractFilter<T extends BinanceKnownFilterRaw['filterType']>(
+  filterList: BinanceFilterRaw[],
+  filterType: T,
+): Extract<BinanceKnownFilterRaw, { filterType: T }> | undefined {
+  const filter = filterList.find((entry) => entry.filterType === filterType);
+
+  return filter as Extract<BinanceKnownFilterRaw, { filterType: T }> | undefined;
+}
+
+function buildBinancePriceLimitRisk(filterList: BinanceFilterRaw[]): PriceLimitRisk | undefined {
+  const percentPrice = extractFilter(filterList, 'PERCENT_PRICE');
+
+  if (percentPrice !== undefined) {
+    return {
+      source: 'binancePercentPrice',
+      multiplierUp: percentPrice.multiplierUp,
+      multiplierDown: percentPrice.multiplierDown,
+      multiplierDecimal: percentPrice.multiplierDecimal,
+    };
+  }
+
+  const percentPriceBySide = extractFilter(filterList, 'PERCENT_PRICE_BY_SIDE');
+
+  if (percentPriceBySide !== undefined) {
+    return {
+      source: 'binancePercentPriceBySide',
+      bidMultiplierUp: percentPriceBySide.bidMultiplierUp,
+      bidMultiplierDown: percentPriceBySide.bidMultiplierDown,
+      askMultiplierUp: percentPriceBySide.askMultiplierUp,
+      askMultiplierDown: percentPriceBySide.askMultiplierDown,
+      avgPriceMins: percentPriceBySide.avgPriceMins,
+    };
+  }
+
+  return undefined;
 }
 
 export function normalizeBinanceTradeSymbols(raw: BinanceExchangeInfoRaw): TradeSymbolBySymbol {
@@ -150,9 +325,9 @@ export function normalizeBinanceTradeSymbols(raw: BinanceExchangeInfoRaw): Trade
   for (const symbol of raw.symbols) {
     const priceFilter = extractFilter(symbol.filters, 'PRICE_FILTER');
     const lotSizeFilter = extractFilter(symbol.filters, 'LOT_SIZE');
-    const minNotionalFilter =
-      extractFilter(symbol.filters, 'MIN_NOTIONAL') ??
-      extractFilter(symbol.filters, 'NOTIONAL');
+    const marketLotSizeFilter = extractFilter(symbol.filters, 'MARKET_LOT_SIZE');
+    const minNotionalFilter = extractFilter(symbol.filters, 'MIN_NOTIONAL');
+    const notionalFilter = extractFilter(symbol.filters, 'NOTIONAL');
 
     const rawContractType = symbol.contractType ?? '';
     const isPerp = rawContractType === 'PERPETUAL' || rawContractType === 'TRADIFI_PERPETUAL';
@@ -182,10 +357,52 @@ export function normalizeBinanceTradeSymbols(raw: BinanceExchangeInfoRaw): Trade
         minQty: lotSizeFilter?.minQty ?? '0',
         maxQty: lotSizeFilter?.maxQty ?? '0',
         minNotional: minNotionalFilter?.notional
-          ?? minNotionalFilter?.minNotional
+          ?? notionalFilter?.minNotional
           ?? '0',
+        ...(priceFilter?.minPrice !== undefined ? { minPrice: priceFilter.minPrice } : {}),
+        ...(priceFilter?.maxPrice !== undefined ? { maxPrice: priceFilter.maxPrice } : {}),
+        ...(notionalFilter?.maxNotional !== undefined ? { maxNotional: notionalFilter.maxNotional } : {}),
+        ...(marketLotSizeFilter?.minQty !== undefined ? { marketMinQty: marketLotSizeFilter.minQty } : {}),
+        ...(marketLotSizeFilter?.maxQty !== undefined ? { marketMaxQty: marketLotSizeFilter.maxQty } : {}),
+        ...(marketLotSizeFilter?.stepSize !== undefined ? { marketStepSize: marketLotSizeFilter.stepSize } : {}),
       },
     };
+
+    const priceLimitRisk = buildBinancePriceLimitRisk(symbol.filters);
+
+    if (priceLimitRisk !== undefined) {
+      tradeSymbol.priceLimitRisk = priceLimitRisk;
+    }
+
+    if (symbol.pricePrecision !== undefined) {
+      tradeSymbol.pricePrecision = symbol.pricePrecision;
+    }
+
+    if (symbol.quantityPrecision !== undefined) {
+      tradeSymbol.quantityPrecision = symbol.quantityPrecision;
+    }
+
+    if (symbol.onboardDate !== undefined) {
+      tradeSymbol.launchTimestamp = symbol.onboardDate;
+    }
+
+    if (symbol.triggerProtect !== undefined) {
+      tradeSymbol.triggerProtect = symbol.triggerProtect;
+    }
+
+    if (symbol.liquidationFee !== undefined) {
+      tradeSymbol.liquidationFee = symbol.liquidationFee;
+    }
+
+    if (symbol.orderTypes !== undefined) {
+      tradeSymbol.orderTypeList = symbol.orderTypes;
+    }
+
+    if (symbol.timeInForce !== undefined) {
+      tradeSymbol.timeInForceList = symbol.timeInForce;
+    }
+
+    tradeSymbol.info = symbol as unknown as Record<string, unknown>;
 
     result.set(symbol.symbol, tradeSymbol);
   }
@@ -405,6 +622,18 @@ export interface BinanceMarkPriceRaw {
   time: number;
 }
 
+export interface BinanceMarkPriceWebSocketRaw {
+  e: 'markPriceUpdate';
+  E: number;
+  s: string;
+  p: string;
+  ap: string;
+  i: string;
+  P: string;
+  r: string;
+  T: number;
+}
+
 export interface BinanceOpenInterestRaw {
   symbol: string;
   openInterest: string;
@@ -434,6 +663,8 @@ export function normalizeBinanceOrderBook(raw: BinanceOrderBookRaw, symbol: stri
     askList: raw.asks.map(parseOrderBookLevel),
     bidList: raw.bids.map(parseOrderBookLevel),
     timestamp: raw.T ?? raw.E ?? Date.now(),
+    updateId: raw.lastUpdateId,
+    eventTimestamp: raw.E,
   };
 }
 
@@ -457,6 +688,17 @@ export function normalizeBinanceMarkPriceList(rawList: BinanceMarkPriceRaw[]): M
     lastFundingRate: parseFloat(raw.lastFundingRate),
     nextFundingTime: raw.nextFundingTime,
     timestamp: raw.time,
+  }));
+}
+
+export function normalizeBinanceMarkPriceWebSocketList(
+  rawList: BinanceMarkPriceWebSocketRaw[],
+): MarkPriceUpdate[] {
+  return rawList.map((raw) => ({
+    symbol: raw.s,
+    markPrice: parseFloat(raw.p),
+    indexPrice: raw.i !== '' ? parseFloat(raw.i) : 0,
+    timestamp: raw.E,
   }));
 }
 

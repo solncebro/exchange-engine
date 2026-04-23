@@ -28,7 +28,7 @@ BaseExchangeClient (abstract, implements ExchangeClient)
   fetchAllKlines(symbolList, interval, options?): Promise<Map<string, Kline[]>>
 
 Аккаунт:
-  fetchBalances(): Promise<BalanceByAsset>
+  fetchBalances(): Promise<AccountBalances>
   fetchPosition(symbol): Promise<Position>
   fetchPositionMode(): Promise<PositionModeEnum>
   fetchFundingRateHistory(symbol, options?): Promise<FundingRateHistory[]>
@@ -79,6 +79,8 @@ Precision:
   subscribeKlines(args): void
   unsubscribeKlines(args): void
   resubscribeKlines(args): void
+  subscribeMarkPrices(handler: MarkPriceHandler): void
+  unsubscribeMarkPrices(handler: MarkPriceHandler): void
 
 WebSocket Registry:
   getWebSocketConnectionInfoList(): WebSocketConnectionInfo[]
@@ -98,6 +100,7 @@ WebSocket Registry:
 - `watchTickers()` — подписка через `getPublicStream().subscribeAllTickers()` + yield `fetchTickers()`
 - `subscribeKlines()` / `unsubscribeKlines()` — делегирует в publicStream
 - `resubscribeKlines()` — принудительная переподписка на стрим (вызывает `publicStream.resubscribeStream()` если поддерживается)
+- `subscribeMarkPrices()` / `unsubscribeMarkPrices()` — делегирует в `getPublicStream()` (Binance Futures — отдельный mark-price стрим; Bybit — данные из `tickers.*`; Binance Spot — предупреждение в стриме, без подписки)
 - `amountToPrecision()` / `priceToPrecision()` — lookup в tradeSymbols + precision utils, возвращает `number`, fallback на исходное значение
 - `getMinOrderQty()` / `getMinNotional()` — lookup в tradeSymbols, fallback 0
 
@@ -106,7 +109,7 @@ WebSocket Registry:
 - `protected fetchAndNormalizeTradeSymbols(): Promise<TradeSymbolBySymbol>`
 - `protected fetchAndNormalizeTickers(): Promise<TickerBySymbol>`
 - `protected fetchAndNormalizeKlines(symbol, interval, options?): Promise<Kline[]>`
-- `protected fetchAndNormalizeBalances(): Promise<BalanceByAsset>`
+- `protected fetchAndNormalizeBalances(): Promise<AccountBalances>`
 - `getWebSocketConnectionInfoList(): WebSocketConnectionInfo[]`
 - `isTradeWebSocketConnected(): boolean`
 - `connectTradeWebSocket(): Promise<void>`
@@ -122,11 +125,7 @@ WebSocket Registry:
 
 ### createNotifyHandler (protected static)
 
-Оборачивает пользовательский `onNotify` callback для обработки CRITICAL-сообщений от WebSocket-стримов:
-- Сообщения без `'CRITICAL'` в тексте — просто проксируются в `onNotify`
-- Сообщения с `'CRITICAL'` — сначала вызывается `onNotify` (если задан), затем `process.exit(1)`
-- Поддерживает async `onNotify` — ждёт завершения Promise перед exit
-- Если `onNotify` выбрасывает ошибку — `process.exit(1)` вызывается в любом случае
+Оборачивает пользовательский `onNotify` callback без дополнительной логики: сообщение просто проксируется в `onNotify` (если callback задан).
 
 Binance public streams создаются до `super()`, поэтому вызывают `BaseExchangeClient.createNotifyHandler(args.onNotify)` напрямую. Остальные стримы (trade, Bybit public/trade) получают уже обёрнутый `this.onNotify`.
 

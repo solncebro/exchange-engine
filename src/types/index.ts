@@ -30,6 +30,8 @@ export type {
   OrderBookLevel,
   PublicTrade,
   MarkPrice,
+  MarkPriceUpdate,
+  MarkPriceHandler,
   OpenInterest,
   FeeRate,
   Income,

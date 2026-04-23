@@ -5,6 +5,62 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] - 2026-04-19
+
+### Added
+
+**Новые унифицированные типы** (`src/types/common.ts`):
+- `LeverageFilter` — `{ minLeverage, maxLeverage, leverageStep }` (все string)
+- `PriceLimitRisk` — дискриминированное объединение с тегом `source`:
+  - `'binancePercentPrice'` — `multiplierUp`, `multiplierDown`, `multiplierDecimal`
+  - `'binancePercentPriceBySide'` — `bidMultiplierUp/Down`, `askMultiplierUp/Down`, `avgPriceMins`
+  - `'bybitRiskParameters'` — `priceLimitRatioX`, `priceLimitRatioY`
+- `TradingFunding` — `{ fundingIntervalMinutes?, upperFundingRate?, lowerFundingRate? }`
+
+**Расширение существующих типов** (все поля опциональные, обратно-совместимо):
+- `Ticker`: `markPrice?`, `indexPrice?`, `fundingRate?`, `nextFundingTime?` — Bybit tickers теперь отдают данные mark price и funding в одном запросе
+- `TradeSymbolFilter`: `minPrice?`, `maxPrice?`, `maxNotional?`, `marketMinQty?`, `marketMaxQty?`, `marketStepSize?`, `postOnlyMaxQty?`
+- `TradeSymbol`: `leverageFilter?`, `priceLimitRisk?`, `pricePrecision?`, `quantityPrecision?`, `funding?`, `launchTimestamp?`, `triggerProtect?`, `liquidationFee?`, `orderTypeList?`, `timeInForceList?`, `info?`
+- `Balance`: `walletBalance?`, `availableToWithdraw?`, `totalOrderInitialMargin?`, `totalPositionInitialMargin?`
+- `AccountBalances`: `accountType?`, `totalMarginBalance?`, `totalInitialMargin?`
+- `OrderBook`: `updateId?`, `eventTimestamp?` (Binance: `lastUpdateId` и `E`)
+- `PublicTrade`: `isBlockTrade?`, `side?: OrderSideEnum`
+- `Income`: `quantity?` — проставляется при наличии поля в ответе биржи (Bybit transaction log)
+
+**Публичные экспорты** (`src/index.ts`):
+- `PriceLimitRisk`, `LeverageFilter`, `TradingFunding`
+- `MarkPriceUpdate`, `MarkPriceHandler`
+
+**WebSocket mark/index price** (`ExchangeClient`, публичные стримы):
+- `subscribeMarkPrices(handler)` / `unsubscribeMarkPrices(handler)` — поток обновлений mark/index; хендлер получает `MarkPriceUpdate[]` (`symbol`, `markPrice`, `indexPrice`, `timestamp`)
+- **Binance Futures**: подписка на combined-stream `!markPrice@arr@1s`, разбор через `normalizeBinanceMarkPriceWebSocketList()` (`BinanceMarkPriceWebSocketRaw`)
+- **Bybit** (linear и spot): те же сообщения `tickers.*`, что и у all-tickers; при наличии подписчиков mark price из сырого тикера собирается в `MarkPriceUpdate` (записи без валидного `markPrice` отбрасываются)
+- **Binance Spot**: вызов `subscribeMarkPrices` не открывает стрим — в лог пишется предупреждение, хендлер не вызывается (`unsubscribeMarkPrices` — no-op)
+
+**Контракт стрима** (`src/types/stream.ts`):
+- Обязательные `subscribeMarkPrices` / `unsubscribeMarkPrices` на `PublicStreamLike`
+- Опциональный `unsubscribeAllTickers` — реализован у Binance/Bybit публичных стримов для снятия хендлера all-tickers
+
+### Changed
+
+**Нормализаторы**:
+- `normalizeBinanceMarkPriceWebSocketList()` — raw события mark price c фьючерсного WebSocket → `MarkPriceUpdate[]`
+- `normalizeBinanceTradeSymbols()` — извлекает `PERCENT_PRICE` / `PERCENT_PRICE_BY_SIDE` в `priceLimitRisk`, `MARKET_LOT_SIZE` в `filter.marketMinQty/marketMaxQty/marketStepSize`, `PRICE_FILTER.minPrice/maxPrice` в `filter`, а также `pricePrecision`, `quantityPrecision`, `onboardDate → launchTimestamp`, `triggerProtect`, `liquidationFee`, `orderTypes → orderTypeList`, `timeInForce → timeInForceList`; сохраняет сырой payload в `info`
+- `normalizeBybitTradeSymbols()` — строит `leverageFilter`, `priceLimitRisk` (из `riskParameters`), `funding` (из `fundingInterval`/`upperFundingRate`/`lowerFundingRate`), `launchTimestamp` (из `launchTime`); извлекает `priceFilter.minPrice/maxPrice`, `lotSizeFilter.maxMktOrderQty → marketMaxQty`, `lotSizeFilter.postOnlyMaxOrderQty → postOnlyMaxQty`; сохраняет сырой payload в `info`
+- `normalizeBybitTickers()` — пробрасывает `markPrice`, `indexPrice`, `fundingRate`, `nextFundingTime`, если присутствуют в raw-ответе
+- `normalizeBybitBalances()` — заполняет `walletBalance`, `availableToWithdraw`, `totalOrderInitialMargin`, `totalPositionInitialMargin` на каждый asset; возвращает `accountType`, `totalMarginBalance`, `totalInitialMargin` на уровне `AccountBalances`
+- `normalizeBinanceOrderBook()` — пробрасывает `updateId` (из `lastUpdateId`) и `eventTimestamp` (из `E`)
+- `normalizeBybitOrderBook()` — пробрасывает `updateId` (из `u`)
+- `normalizeBybitPublicTradeList()` — пробрасывает `isBlockTrade` и маппит `side` через `BYBIT_ORDER_SIDE`
+- `normalizeBybitIncomeList()` — пробрасывает `qty → quantity`
+
+**Типизация фильтров Binance** (внутренняя):
+- `BinanceFilterRaw` разбит на дискриминированное объединение `BinanceKnownFilterRaw` по `filterType` (`PRICE_FILTER`, `LOT_SIZE`, `MARKET_LOT_SIZE`, `MIN_NOTIONAL`, `NOTIONAL`, `PERCENT_PRICE`, `PERCENT_PRICE_BY_SIDE`, `MAX_NUM_ORDERS`, `POSITION_RISK_CONTROL`, `ICEBERG_PARTS`, `TRAILING_DELTA`, `MAX_NUM_ORDER_LISTS`, `MAX_NUM_ALGO_ORDERS`, `MAX_NUM_ORDER_AMENDS`) + fallback `BinanceUnknownFilterRaw`
+- `extractFilter<T>()` теперь возвращает точный тип фильтра по `filterType`
+
+### Internal
+- `normalizeBinanceTradeSymbols()`: извлечение `minNotional` из `MIN_NOTIONAL` и `NOTIONAL` разнесено на отдельные переменные — поведение не меняется (фильтры не сосуществуют в одном символе), упрощает дальнейшее чтение `NOTIONAL.maxNotional` для `filter.maxNotional`
+
 ## [0.11.0] - 2026-04-17
 
 ### Added
@@ -342,6 +398,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Private endpoints (balance, position, orders) require valid credentials
 - WebSocket subscriptions are stateless and can be re-established on reconnect
 
+[0.12.0]: https://github.com/solncebro/exchange-engine/releases/tag/v0.12.0
 [0.11.0]: https://github.com/solncebro/exchange-engine/releases/tag/v0.11.0
 [0.10.0]: https://github.com/solncebro/exchange-engine/releases/tag/v0.10.0
 [0.9.1]: https://github.com/solncebro/exchange-engine/releases/tag/v0.9.1

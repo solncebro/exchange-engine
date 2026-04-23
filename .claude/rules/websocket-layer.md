@@ -8,6 +8,9 @@
 
 ```
 subscribeAllTickers(handler: (tickers: TickerBySymbol) => void): void
+unsubscribeAllTickers?(handler): void  // снять хендлер all-tickers; у Bybit может отписать topic, если нет mark-price хендлеров
+subscribeMarkPrices(handler: MarkPriceHandler): void
+unsubscribeMarkPrices(handler: MarkPriceHandler): void
 subscribeKlines(symbol, interval, handler): void
 unsubscribeKlines(symbol, interval, handler): void
 resubscribeStream?(symbol, interval): void  // опциональный, для принудительной переподписки
@@ -41,6 +44,7 @@ Exchange-классы агрегируют через `getWebSocketConnectionInf
 - **Лимит**: 200 стримов на соединение (чанкинг при превышении)
 - **Kline стрим**: `{symbol.toLowerCase()}_perpetual@continuousKline_{interval}`
 - **Тикер стрим**: `!miniTicker@arr`
+- **Mark/index стрим** (если есть подписчики `subscribeMarkPrices`): `!markPrice@arr@1s` — в `subscriptionList` отображается как `MarkPrices`; payload нормализуется в `MarkPriceUpdate[]`
 - **Подписка**: URL-based (стримы в query string при создании соединения) или динамическая через `sendToConnectedSocket()` (добавленные стримы отслеживаются в `dynamicStreamList`)
 - **Deferred connection**: `queueMicrotask()` для батчинга подписок
 - **onOpen**: при первом открытии соединения подписывает все динамически добавленные стримы (из `dynamicStreamList`) через SUBSCRIBE — обеспечивает доставку данных до первого reconnect
@@ -54,6 +58,7 @@ Exchange-классы агрегируют через `getWebSocketConnectionInf
 - **Одно соединение**, lazy-initialized через `ensureConnected()`
 - **Kline стрим**: `{symbol.toLowerCase()}@kline_{interval}`
 - **Тикер стрим**: `!miniTicker@arr`
+- **Mark price**: не поддерживается — `subscribeMarkPrices` логирует предупреждение и не подписывается; `unsubscribeMarkPrices` — no-op
 - **Подписка**: динамическая через JSON: `{ method: 'SUBSCRIBE', params: [...], id }`
 - **Reconnect**: `onReconnectSuccess → resubscribeAll()` — переподписка всех стримов
 - **Heartbeat**: `{ method: 'PING' }` → ответ с `id` и `result: null`, интервал 30s
@@ -67,6 +72,7 @@ Exchange-классы агрегируют через `getWebSocketConnectionInf
 - **Kline topic**: `kline.{bybitInterval}.{symbol}` (интервал конвертируется через `BYBIT_KLINE_INTERVAL`)
 - **1s kline**: через `TradeToKlineAggregator` — подписка на `publicTrade.{symbol}`, агрегация трейдов в 1-секундные свечи
 - **Тикер topic**: `tickers.linear` или `tickers.spot` (определяется по URL)
+- **Mark/index**: не отдельный topic — при `subscribeMarkPrices` остаётся подписка на `tickers.*`; из каждого сообщения извлекаются элементы с валидным `markPrice` → `MarkPriceUpdate[]`
 - **Подписка**: батчами по 10 topics через `sendSubscribeInBatches()`: `{ op: 'subscribe', args: [batch] }`
 - **Deferred connection**: `queueMicrotask()` для батчинга подписок (через `scheduleConnect()`)
 - **onOpen**: при открытии соединения подписывает все topics этого соединения через `sendSubscribeInBatches()` с `context.send()`

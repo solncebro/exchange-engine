@@ -13,6 +13,7 @@ export interface BybitPublicStreamArgs {
 export interface BybitWebSocketMessage extends BybitBaseWebSocketMessage {
   topic?: string;
   ret_code?: number;
+  ts?: number;
 }
 
 export interface BybitConnection {

@@ -40,7 +40,7 @@ Exchange (фабрика) → ExchangeClient (интерфейс)
   │   └── ExchangeError — кастомный Error с полями `code` и `exchange`
   │
   └── WebSocket-стримы (src/ws/)
-      ├── Публичные стримы (тикеры, klines)
+      ├── Публичные стримы (тикеры, klines, mark/index price)
       ├── BaseTradeStream → BinanceTradeStream / BybitTradeStream
       ├── User data стримы (BinanceUserDataStream, BybitPrivateStream)
       └── parseWebSocketMessage — generic WS parser

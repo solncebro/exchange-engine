@@ -14,6 +14,7 @@ import type {
   OrderBook,
   PublicTrade,
   MarkPrice,
+  MarkPriceHandler,
   OpenInterest,
   FeeRate,
   Income,
@@ -135,6 +136,8 @@ export interface ExchangeClient {
   subscribeKlines(args: SubscribeKlinesArgs): void;
   unsubscribeKlines(args: SubscribeKlinesArgs): void;
   resubscribeKlines(args: ResubscribeKlinesArgs): void;
+  subscribeMarkPrices(handler: MarkPriceHandler): void;
+  unsubscribeMarkPrices(handler: MarkPriceHandler): void;
 
   connectUserDataStream(handler: UserDataStreamHandlerArgs): Promise<void>;
   disconnectUserDataStream(): void;

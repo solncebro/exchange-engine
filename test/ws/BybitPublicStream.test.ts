@@ -1,3 +1,4 @@
+import type { MarkPriceUpdate } from '../../src/types/common';
 import type { BybitPublicTradeDataRaw, BybitTickerRaw, BybitWebSocketKlineRaw } from '../../src/normalizers/bybitNormalizer';
 import { BybitPublicStream } from '../../src/ws/BybitPublicStream';
 import { createMockLogger } from '../fixtures/mockLogger';
@@ -388,6 +389,80 @@ describe('BybitPublicStream', () => {
       await Promise.resolve();
 
       expect(ReliableWebSocket).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('mark price subscription', () => {
+    it('registers and removes mark price handler', () => {
+      const stream = new BybitPublicStream({ url: 'wss://stream.bybit.com/v5/public/linear', logger: mockLogger, onNotify: undefined, label: 'test' });
+      const handler = jest.fn();
+
+      stream.subscribeMarkPrices(handler);
+      // @ts-expect-error — private access for test
+      expect(stream.markPriceHandlerSet.size).toBe(1);
+
+      stream.unsubscribeMarkPrices(handler);
+      // @ts-expect-error — private access for test
+      expect(stream.markPriceHandlerSet.size).toBe(0);
+    });
+
+    it('dispatches MarkPriceUpdate[] from tickers.linear payload', async () => {
+      const stream = new BybitPublicStream({ url: 'wss://stream.bybit.com/v5/public/linear', logger: mockLogger, onNotify: undefined, label: 'test' });
+      const received: MarkPriceUpdate[][] = [];
+      stream.subscribeMarkPrices((list) => received.push(list));
+
+      await Promise.resolve();
+
+      capturedOnMessage!({
+        topic: 'tickers.linear',
+        type: 'snapshot',
+        ts: 1000,
+        data: [
+          {
+            symbol: 'BTCUSDT',
+            lastPrice: '50000',
+            prevPrice24h: '0',
+            highPrice24h: '0',
+            lowPrice24h: '0',
+            price24hPcnt: '0',
+            volume24h: '0',
+            turnover24h: '0',
+            markPrice: '49950',
+            indexPrice: '49955',
+            time: 1000,
+          },
+        ],
+      });
+
+      expect(received).toHaveLength(1);
+      expect(received[0]).toEqual([
+        { symbol: 'BTCUSDT', markPrice: 49950, indexPrice: 49955, timestamp: 1000 },
+      ]);
+    });
+
+    it('ignores entries without markPrice (e.g. partial delta)', async () => {
+      const stream = new BybitPublicStream({ url: 'wss://stream.bybit.com/v5/public/linear', logger: mockLogger, onNotify: undefined, label: 'test' });
+      const received: MarkPriceUpdate[][] = [];
+      stream.subscribeMarkPrices((list) => received.push(list));
+
+      await Promise.resolve();
+
+      capturedOnMessage!({
+        topic: 'tickers.linear',
+        type: 'delta',
+        ts: 2000,
+        data: [{ symbol: 'BTCUSDT', lastPrice: '51000' }],
+      });
+
+      expect(received).toEqual([]);
+    });
+
+    it('activates tickers.linear subscription when subscribeMarkPrices is called', () => {
+      const stream = new BybitPublicStream({ url: 'wss://stream.bybit.com/v5/public/linear', logger: mockLogger, onNotify: undefined, label: 'test' });
+      stream.subscribeMarkPrices(jest.fn());
+
+      // @ts-expect-error — private access for test
+      expect(stream.activeSubscriptionSet.has('tickers.linear')).toBe(true);
     });
   });
 });

@@ -50,6 +50,8 @@ export type {
   OrderBookLevel,
   PublicTrade,
   MarkPrice,
+  MarkPriceUpdate,
+  MarkPriceHandler,
   OpenInterest,
   FeeRate,
   Income,
@@ -59,4 +61,7 @@ export type {
   OrderUpdateHandler,
   PositionUpdateHandler,
   UserDataStreamHandlerArgs,
+  PriceLimitRisk,
+  LeverageFilter,
+  TradingFunding,
 } from './types/common';

@@ -90,6 +90,10 @@ export interface Ticker {
   volume: number;
   quoteVolume: number;
   timestamp: number;
+  markPrice?: number;
+  indexPrice?: number;
+  fundingRate?: number;
+  nextFundingTime?: number;
 }
 
 export type TickerBySymbol = Map<string, Ticker>;
@@ -115,6 +119,46 @@ export interface TradeSymbolFilter {
   minQty: string;
   maxQty: string;
   minNotional: string;
+  minPrice?: string;
+  maxPrice?: string;
+  maxNotional?: string;
+  marketMinQty?: string;
+  marketMaxQty?: string;
+  marketStepSize?: string;
+  postOnlyMaxQty?: string;
+}
+
+export interface LeverageFilter {
+  minLeverage: string;
+  maxLeverage: string;
+  leverageStep: string;
+}
+
+export type PriceLimitRisk =
+  | {
+      source: 'binancePercentPrice';
+      multiplierUp: string;
+      multiplierDown: string;
+      multiplierDecimal: string;
+    }
+  | {
+      source: 'binancePercentPriceBySide';
+      bidMultiplierUp: string;
+      bidMultiplierDown: string;
+      askMultiplierUp: string;
+      askMultiplierDown: string;
+      avgPriceMins: number;
+    }
+  | {
+      source: 'bybitRiskParameters';
+      priceLimitRatioX: string;
+      priceLimitRatioY: string;
+    };
+
+export interface TradingFunding {
+  fundingIntervalMinutes?: number;
+  upperFundingRate?: string;
+  lowerFundingRate?: string;
 }
 
 export interface TradeSymbol {
@@ -128,6 +172,17 @@ export interface TradeSymbol {
   contractSize: number;
   contractType: string;
   filter: TradeSymbolFilter;
+  leverageFilter?: LeverageFilter;
+  priceLimitRisk?: PriceLimitRisk;
+  pricePrecision?: number;
+  quantityPrecision?: number;
+  funding?: TradingFunding;
+  launchTimestamp?: number;
+  triggerProtect?: string;
+  liquidationFee?: string;
+  orderTypeList?: string[];
+  timeInForceList?: string[];
+  info?: Record<string, unknown>;
 }
 
 export type TradeSymbolBySymbol = Map<string, TradeSymbol>;
@@ -169,6 +224,10 @@ export interface Balance {
   free: number;
   locked: number;
   total: number;
+  walletBalance?: number;
+  availableToWithdraw?: number;
+  totalOrderInitialMargin?: number;
+  totalPositionInitialMargin?: number;
 }
 
 export type BalanceByAsset = Map<string, Balance>;
@@ -177,6 +236,9 @@ export interface AccountBalances {
   totalWalletBalance: number;
   totalAvailableBalance: number;
   balanceByAsset: BalanceByAsset;
+  accountType?: string;
+  totalMarginBalance?: number;
+  totalInitialMargin?: number;
 }
 
 export interface FundingRateHistory {
@@ -234,6 +296,8 @@ export interface OrderBook {
   askList: OrderBookLevel[];
   bidList: OrderBookLevel[];
   timestamp: number;
+  updateId?: number;
+  eventTimestamp?: number;
 }
 
 export interface PublicTrade {
@@ -244,6 +308,8 @@ export interface PublicTrade {
   quoteQuantity: number;
   timestamp: number;
   isBuyerMaker: boolean;
+  isBlockTrade?: boolean;
+  side?: OrderSideEnum;
 }
 
 export interface MarkPrice {
@@ -254,6 +320,15 @@ export interface MarkPrice {
   nextFundingTime: number;
   timestamp: number;
 }
+
+export interface MarkPriceUpdate {
+  symbol: string;
+  markPrice: number;
+  indexPrice: number;
+  timestamp: number;
+}
+
+export type MarkPriceHandler = (markPriceList: MarkPriceUpdate[]) => void;
 
 export interface OpenInterest {
   symbol: string;
@@ -274,6 +349,7 @@ export interface Income {
   asset: string;
   timestamp: number;
   info: Record<string, unknown>;
+  quantity?: number;
 }
 
 export interface ClosedPnl {

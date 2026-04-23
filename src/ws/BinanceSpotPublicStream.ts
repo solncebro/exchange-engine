@@ -1,7 +1,7 @@
 import { ReliableWebSocket, WebSocketStatus } from '@solncebro/websocket-engine';
 import type { WebSocketOpenContext } from '@solncebro/websocket-engine';
 
-import type { ExchangeLogger, KlineInterval, TickerBySymbol, WebSocketConnectionInfo } from '../types/common';
+import type { ExchangeLogger, KlineInterval, MarkPriceHandler, TickerBySymbol, WebSocketConnectionInfo } from '../types/common';
 import { WebSocketConnectionTypeEnum } from '../types/common';
 import type { KlineHandler } from '../types/exchange';
 import { normalizeBinanceKlineWebSocketMessage, normalizeBinanceTickers } from '../normalizers/binanceNormalizer';
@@ -34,6 +34,14 @@ class BinanceSpotPublicStream {
 
   unsubscribeAllTickers(handler: (tickers: TickerBySymbol) => void): void {
     this.tickerHandlerSet.delete(handler);
+  }
+
+  subscribeMarkPrices(_handler: MarkPriceHandler): void {
+    this.logger.warn('BinanceSpotPublicStream: mark price is not available for spot market; subscription ignored');
+  }
+
+  unsubscribeMarkPrices(_handler: MarkPriceHandler): void {
+    // no-op — mark price is not supported on Binance spot
   }
 
   subscribeKlines(symbol: string, interval: KlineInterval, handler: KlineHandler): void {

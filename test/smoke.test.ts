@@ -110,6 +110,8 @@ function assertExchangeClient(client: ExchangeClient, label: string): void {
     'watchTickers',
     'subscribeKlines',
     'unsubscribeKlines',
+    'subscribeMarkPrices',
+    'unsubscribeMarkPrices',
   ];
 
   for (const method of requiredMethodList) {
