@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.1] - 2026-04-24
+
+### Fixed
+- `BinanceBaseClient.createOrderWebSocket()`: `reduceOnly` больше не отправляется в hedge mode, если задан `positionSide`; параметр остаётся доступен для one-way mode.
+- `BybitBaseClient.createOrderWebSocket()`: для linear-рынка добавлено корректное сопоставление `positionSide` → `positionIdx` (`Long` → `1`, `Short` → `2`), что делает хедж-ордера валидными для Bybit API.
+
+### Tests
+- `BinanceFutures.test.ts`: добавлена проверка, что `reduceOnly` отбрасывается при наличии `positionSide`.
+- `BybitLinear.test.ts`: добавлены сценарии для `positionIdx` в hedge/one-way режимах и совместимости с `reduceOnly`.
+- `BybitSpot.test.ts`: добавлена проверка, что `positionIdx` не добавляется для spot-ордеров.
+
 ## [0.12.0] - 2026-04-19
 
 ### Added
@@ -398,6 +409,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Private endpoints (balance, position, orders) require valid credentials
 - WebSocket subscriptions are stateless and can be re-established on reconnect
 
+[0.12.1]: https://github.com/solncebro/exchange-engine/releases/tag/v0.12.1
 [0.12.0]: https://github.com/solncebro/exchange-engine/releases/tag/v0.12.0
 [0.11.0]: https://github.com/solncebro/exchange-engine/releases/tag/v0.11.0
 [0.10.0]: https://github.com/solncebro/exchange-engine/releases/tag/v0.10.0

@@ -211,6 +211,91 @@ describe('BybitLinear', () => {
 
       expect(body.orderLinkId).toBe('my-id-123');
     });
+
+    it('maps positionSide=Long to positionIdx=1 in hedge mode', async () => {
+      const { client, mockInstance } = createClient(true);
+      client.tradeSymbols.set('BTCUSDT', BTCUSDT_TRADE_SYMBOL);
+
+      mockInstance.post.mockResolvedValue({
+        data: { retCode: 0, result: { orderId: '1', symbol: 'BTCUSDT', side: 'Buy', orderType: 'Market', qty: '0.001', price: '0', orderStatus: 'New', createdTime: '1700000000000' } },
+      });
+
+      await client.createOrderWebSocket({
+        symbol: 'BTCUSDT',
+        type: OrderTypeEnum.Market,
+        side: OrderSideEnum.Buy,
+        amount: 0.001,
+        positionSide: PositionSideEnum.Long,
+      });
+
+      const [, body] = mockInstance.post.mock.calls[0];
+
+      expect(body.positionIdx).toBe(1);
+    });
+
+    it('maps positionSide=Short to positionIdx=2 in hedge mode', async () => {
+      const { client, mockInstance } = createClient(true);
+      client.tradeSymbols.set('BTCUSDT', BTCUSDT_TRADE_SYMBOL);
+
+      mockInstance.post.mockResolvedValue({
+        data: { retCode: 0, result: { orderId: '1', symbol: 'BTCUSDT', side: 'Sell', orderType: 'Market', qty: '0.001', price: '0', orderStatus: 'New', createdTime: '1700000000000' } },
+      });
+
+      await client.createOrderWebSocket({
+        symbol: 'BTCUSDT',
+        type: OrderTypeEnum.Market,
+        side: OrderSideEnum.Sell,
+        amount: 0.001,
+        positionSide: PositionSideEnum.Short,
+      });
+
+      const [, body] = mockInstance.post.mock.calls[0];
+
+      expect(body.positionIdx).toBe(2);
+    });
+
+    it('omits positionIdx when positionSide is undefined (one-way mode)', async () => {
+      const { client, mockInstance } = createClient(true);
+      client.tradeSymbols.set('BTCUSDT', BTCUSDT_TRADE_SYMBOL);
+
+      mockInstance.post.mockResolvedValue({
+        data: { retCode: 0, result: { orderId: '1', symbol: 'BTCUSDT', side: 'Buy', orderType: 'Market', qty: '0.001', price: '0', orderStatus: 'New', createdTime: '1700000000000' } },
+      });
+
+      await client.createOrderWebSocket({
+        symbol: 'BTCUSDT',
+        type: OrderTypeEnum.Market,
+        side: OrderSideEnum.Buy,
+        amount: 0.001,
+      });
+
+      const [, body] = mockInstance.post.mock.calls[0];
+
+      expect(body.positionIdx).toBeUndefined();
+    });
+
+    it('keeps reduceOnly alongside positionIdx in hedge mode', async () => {
+      const { client, mockInstance } = createClient(true);
+      client.tradeSymbols.set('BTCUSDT', BTCUSDT_TRADE_SYMBOL);
+
+      mockInstance.post.mockResolvedValue({
+        data: { retCode: 0, result: { orderId: '1', symbol: 'BTCUSDT', side: 'Sell', orderType: 'Market', qty: '0.001', price: '0', orderStatus: 'New', createdTime: '1700000000000' } },
+      });
+
+      await client.createOrderWebSocket({
+        symbol: 'BTCUSDT',
+        type: OrderTypeEnum.Market,
+        side: OrderSideEnum.Sell,
+        amount: 0.001,
+        positionSide: PositionSideEnum.Long,
+        reduceOnly: true,
+      });
+
+      const [, body] = mockInstance.post.mock.calls[0];
+
+      expect(body.positionIdx).toBe(1);
+      expect(body.reduceOnly).toBe(true);
+    });
   });
 
   describe('fetchOrderHistory', () => {

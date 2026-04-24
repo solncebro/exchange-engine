@@ -14,7 +14,7 @@ import {
   BYBIT_RAW_CLOSED_PNL_LIST,
 } from '../fixtures/bybitRaw';
 import { BTCUSDT_SPOT_TRADE_SYMBOL } from '../fixtures/mockTradeSymbol';
-import { OrderTypeEnum, OrderSideEnum, MarginModeEnum } from '../../src/types/common';
+import { OrderTypeEnum, OrderSideEnum, MarginModeEnum, PositionSideEnum } from '../../src/types/common';
 
 jest.mock('axios');
 jest.mock('../../src/ws/BybitPublicStream');
@@ -91,6 +91,27 @@ describe('BybitSpot', () => {
       const [, body] = mockInstance.post.mock.calls[0];
 
       expect(body.orderLinkId).toBe('custom-id');
+    });
+
+    it('never adds positionIdx to spot orders even if positionSide is provided', async () => {
+      const { client, mockInstance } = createClient(true);
+      client.tradeSymbols.set('BTCUSDT', BTCUSDT_SPOT_TRADE_SYMBOL);
+
+      mockInstance.post.mockResolvedValue({
+        data: { retCode: 0, result: { orderId: '123', symbol: 'BTCUSDT', side: 'Buy', orderType: 'Market', qty: '0.001', price: '0', orderStatus: 'New', createdTime: '1700000000000' } },
+      });
+
+      await client.createOrderWebSocket({
+        symbol: 'BTCUSDT',
+        type: OrderTypeEnum.Market,
+        side: OrderSideEnum.Buy,
+        amount: 0.001,
+        positionSide: PositionSideEnum.Long,
+      });
+
+      const [, body] = mockInstance.post.mock.calls[0];
+
+      expect(body.positionIdx).toBeUndefined();
     });
   });
 

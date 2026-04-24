@@ -397,7 +397,7 @@ describe('BinanceFutures', () => {
       expect(options.params.positionSide).toBe('LONG');
     });
 
-    it('sends reduceOnly when provided', async () => {
+    it('sends reduceOnly when provided in one-way mode (no positionSide)', async () => {
       const { client, mockInstance } = createClient();
       mockInstance.get.mockResolvedValue({ data: BINANCE_RAW_EXCHANGE_INFO });
       await client.loadTradeSymbols();
@@ -415,6 +415,28 @@ describe('BinanceFutures', () => {
       const [, , options] = mockInstance.post.mock.calls[0];
 
       expect(options.params.reduceOnly).toBe(true);
+    });
+
+    it('drops reduceOnly in hedge mode (when positionSide is present)', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: BINANCE_RAW_EXCHANGE_INFO });
+      await client.loadTradeSymbols();
+
+      mockInstance.post.mockResolvedValue({ data: BINANCE_RAW_ORDER_RESPONSE });
+
+      await client.createOrderWebSocket({
+        symbol: 'BTCUSDT',
+        type: OrderTypeEnum.Market,
+        side: OrderSideEnum.Sell,
+        amount: 0.1,
+        positionSide: PositionSideEnum.Long,
+        reduceOnly: true,
+      });
+
+      const [, , options] = mockInstance.post.mock.calls[0];
+
+      expect(options.params.positionSide).toBe('LONG');
+      expect(options.params.reduceOnly).toBeUndefined();
     });
 
     it('sends clientOrderId as newClientOrderId when provided', async () => {

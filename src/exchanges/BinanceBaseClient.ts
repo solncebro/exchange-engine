@@ -131,11 +131,14 @@ abstract class BinanceBaseClient<T extends BinanceBaseHttpClient> extends BaseEx
       orderParams.workingType = BINANCE_WORKING_TYPE[args.workingType] ?? args.workingType;
     }
 
-    if (args.positionSide !== undefined) {
-      orderParams.positionSide = args.positionSide.toUpperCase();
+    const positionSide = args.positionSide;
+    const isHedgeMode = positionSide !== undefined;
+
+    if (isHedgeMode) {
+      orderParams.positionSide = positionSide.toUpperCase();
     }
 
-    if (args.reduceOnly !== undefined) {
+    if (args.reduceOnly !== undefined && !isHedgeMode) {
       orderParams.reduceOnly = args.reduceOnly;
     }
 

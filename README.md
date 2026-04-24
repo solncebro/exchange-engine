@@ -2,6 +2,16 @@
 
 Universal TypeScript client library for cryptocurrency trading on Binance and Bybit with unified API, WebSocket support, and native type safety.
 
+## Latest Release
+
+Current version: `0.12.1`
+
+- Fixed Binance hedge-mode order params: `reduceOnly` is omitted when `positionSide` is provided.
+- Fixed Bybit linear hedge-mode order params: `positionSide` is correctly mapped to `positionIdx`.
+- Added regression tests for Binance Futures, Bybit Linear, and Bybit Spot order parameter mapping.
+
+Full release notes: [CHANGELOG.md](./CHANGELOG.md)
+
 ## Features
 
 - 🔀 **Single API for multiple exchanges** — same code works with Binance or Bybit

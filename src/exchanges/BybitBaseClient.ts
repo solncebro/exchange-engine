@@ -16,7 +16,7 @@ import type {
   OrderUpdateEvent,
   PositionUpdateEvent,
 } from '../types/common';
-import { OrderTypeEnum, OrderSideEnum, TimeInForceEnum } from '../types/common';
+import { OrderTypeEnum, OrderSideEnum, PositionSideEnum, TimeInForceEnum } from '../types/common';
 import type { PublicStreamLike } from '../types/stream';
 import { BybitHttpClient } from '../http/BybitHttpClient';
 import {
@@ -178,6 +178,14 @@ abstract class BybitBaseClient extends BaseExchangeClient {
 
     if (args.clientOrderId !== undefined) {
       orderParams.orderLinkId = args.clientOrderId;
+    }
+
+    if (this.category === 'linear' && args.positionSide !== undefined) {
+      if (args.positionSide === PositionSideEnum.Long) {
+        orderParams.positionIdx = 1;
+      } else if (args.positionSide === PositionSideEnum.Short) {
+        orderParams.positionIdx = 2;
+      }
     }
 
     return orderParams;
