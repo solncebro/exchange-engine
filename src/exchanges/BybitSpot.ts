@@ -1,6 +1,6 @@
 import type { CreateOrderWebSocketArgs, ExchangeArgs } from '../types/exchange';
 import type { Order } from '../types/common';
-import { OrderTypeEnum } from '../types/common';
+import { MarketUnitEnum, OrderTypeEnum } from '../types/common';
 import {
   BYBIT_PUBLIC_SPOT_WEBSOCKET_URL,
   BYBIT_DEMO_PUBLIC_SPOT_WEBSOCKET_URL,
@@ -26,8 +26,8 @@ class BybitSpot extends BybitBaseClient {
   async createOrderWebSocket(args: CreateOrderWebSocketArgs): Promise<Order> {
     const orderParams = this.buildBybitOrderParams(args);
 
-    if (args.type === OrderTypeEnum.Market) {
-      orderParams.marketUnit = 'baseCoin';
+    if (args.type === OrderTypeEnum.Market && orderParams.marketUnit === undefined && args.quoteOrderQty === undefined) {
+      orderParams.marketUnit = MarketUnitEnum.BaseCoin;
     }
 
     return this.submitOrder(orderParams, args);

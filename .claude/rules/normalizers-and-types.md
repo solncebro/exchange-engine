@@ -111,6 +111,7 @@ WebSocket:
 
 ### Функции нормализации:
 - `normalizeBybitTradeSymbols(rawList)` → `TradeSymbolBySymbol` (Map)
+  - `isActive`: `status === 'Trading'` или `status === 'PreLaunch'`
   - LinearPerpetual/LinearFutures → Swap, пустой contractType → Spot, остальное → Future
   - `stepSize` берётся из `qtyStep` (linear) или `basePrecision` (spot)
   - `minNotional` берётся из `minNotionalValue` или `minOrderAmt`
@@ -170,13 +171,16 @@ WebSocket:
 ### Enums:
 - `ExchangeNameEnum` — Binance, Bybit
 - `OrderSideEnum` — Buy, Sell
-- `OrderTypeEnum` — Market, Limit, StopMarket, TakeProfitMarket, Stop, TakeProfit, TrailingStop
+- `OrderTypeEnum` — Market, Limit, StopMarket, StopLimit, TakeProfitMarket, TakeProfitLimit, Stop, TakeProfit, TrailingStop (0.13.0: добавлены `StopLimit`/`TakeProfitLimit`)
 - `MarginModeEnum` — Isolated, Cross
 - `PositionSideEnum` — Long, Short, Both
 - `PositionModeEnum` — Hedge, OneWay
 - `TradeSymbolTypeEnum` — Spot, Swap, Future
 - `TimeInForceEnum` — Gtc, Ioc, Fok, PostOnly
 - `WorkingTypeEnum` — MarkPrice, ContractPrice
+- `TriggerByEnum` — MarkPrice, LastPrice, IndexPrice (0.13.0; conditional/stop ордера на Bybit Linear)
+- `OrderFilterEnum` — Order, tpslOrder, StopOrder (0.13.0; Bybit Spot conditional/TPSL filter)
+- `MarketUnitEnum` — baseCoin, quoteCoin (0.13.0; Bybit Spot Market amount unit)
 - `MarketTypeEnum` — Futures, Spot
 - `MARKET_TYPE_LIST: MarketTypeEnum[]` — `Object.values(MarketTypeEnum)`
 - `WebSocketConnectionTypeEnum` — Public, Trade, UserData

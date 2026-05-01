@@ -25,7 +25,7 @@ import {
   normalizeBinanceOrderBook,
   normalizeBinancePublicTrades,
 } from '../normalizers/binanceNormalizer';
-import { BINANCE_ORDER_TYPE_REVERSE, BINANCE_WORKING_TYPE } from '../constants/mappings';
+import { BINANCE_FUTURES_ORDER_TYPE_REVERSE, BINANCE_SPOT_ORDER_TYPE_REVERSE, BINANCE_WORKING_TYPE } from '../constants/mappings';
 import { BinanceUserDataStream } from '../ws/BinanceUserDataStream';
 import { BinanceTradeStream } from '../ws/BinanceTradeStream';
 import { BaseExchangeClient } from './BaseExchangeClient';
@@ -106,14 +106,21 @@ abstract class BinanceBaseClient<T extends BinanceBaseHttpClient> extends BaseEx
   }
 
   protected buildBinanceOrderParams(args: CreateOrderWebSocketArgs): Record<string, unknown> {
-    const binanceType = BINANCE_ORDER_TYPE_REVERSE[args.type] ?? args.type.toUpperCase();
+    const isSpot = this.marketLabel === 'spot';
+    const typeMap = isSpot ? BINANCE_SPOT_ORDER_TYPE_REVERSE : BINANCE_FUTURES_ORDER_TYPE_REVERSE;
+    const binanceType = typeMap[args.type] ?? args.type.toUpperCase();
 
     const orderParams: Record<string, unknown> = {
       symbol: args.symbol,
       side: args.side.toUpperCase(),
       type: binanceType,
-      quantity: String(this.amountToPrecision(args.symbol, args.amount)),
     };
+
+    if (isSpot && args.quoteOrderQty !== undefined && args.quoteOrderQty > 0) {
+      orderParams.quoteOrderQty = String(args.quoteOrderQty);
+    } else {
+      orderParams.quantity = String(this.amountToPrecision(args.symbol, args.amount));
+    }
 
     if (args.price !== undefined && args.price > 0) {
       orderParams.price = String(this.priceToPrecision(args.symbol, args.price));
@@ -123,22 +130,26 @@ abstract class BinanceBaseClient<T extends BinanceBaseHttpClient> extends BaseEx
       orderParams.stopPrice = String(this.priceToPrecision(args.symbol, args.stopPrice));
     }
 
-    if (args.closePosition !== undefined) {
+    if (args.trailingDelta !== undefined) {
+      orderParams.trailingDelta = String(args.trailingDelta);
+    }
+
+    if (!isSpot && args.closePosition !== undefined) {
       orderParams.closePosition = args.closePosition;
     }
 
-    if (args.workingType !== undefined) {
+    if (!isSpot && args.workingType !== undefined) {
       orderParams.workingType = BINANCE_WORKING_TYPE[args.workingType] ?? args.workingType;
     }
 
     const positionSide = args.positionSide;
-    const isHedgeMode = positionSide !== undefined;
+    const isHedgeMode = !isSpot && positionSide !== undefined;
 
-    if (isHedgeMode) {
+    if (isHedgeMode && positionSide !== undefined) {
       orderParams.positionSide = positionSide.toUpperCase();
     }
 
-    if (args.reduceOnly !== undefined && !isHedgeMode) {
+    if (!isSpot && args.reduceOnly !== undefined && !isHedgeMode) {
       orderParams.reduceOnly = args.reduceOnly;
     }
 
@@ -146,7 +157,12 @@ abstract class BinanceBaseClient<T extends BinanceBaseHttpClient> extends BaseEx
       orderParams.newClientOrderId = args.clientOrderId;
     }
 
-    if (args.type === OrderTypeEnum.Limit) {
+    const isLimitLike =
+      args.type === OrderTypeEnum.Limit ||
+      args.type === OrderTypeEnum.StopLimit ||
+      args.type === OrderTypeEnum.TakeProfitLimit;
+
+    if (isLimitLike) {
       orderParams.timeInForce = args.timeInForce ?? TimeInForceEnum.Gtc;
     }
 

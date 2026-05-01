@@ -325,7 +325,7 @@ export function normalizeBybitTradeSymbols(rawList: BybitInstrumentInfoRaw[]): T
       baseAsset: raw.baseCoin,
       quoteAsset: raw.quoteCoin,
       settle: isLinear ? (raw.settleCoin ?? 'USDT') : '',
-      isActive: raw.status === 'Trading',
+      isActive: raw.status === 'Trading' || raw.status === 'PreLaunch',
       type: tradeSymbolType,
       isLinear,
       contractSize: parseFloat(raw.contractSize ?? '1'),

@@ -20,6 +20,8 @@ export interface SymbolLimitFilterArgs {
   symbol?: string;
   limit?: number;
   orderId?: string;
+  settleCoin?: string;
+  baseCoin?: string;
 }
 
 export interface PeriodFilterArgs {

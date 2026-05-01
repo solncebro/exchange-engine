@@ -13,8 +13,12 @@ describe('export contract', () => {
     expect(api.TimeInForceEnum).toBeDefined();
     expect(api.PositionModeEnum).toBeDefined();
     expect(api.WorkingTypeEnum).toBeDefined();
+    expect(api.TriggerByEnum).toBeDefined();
+    expect(api.OrderFilterEnum).toBeDefined();
+    expect(api.MarketUnitEnum).toBeDefined();
     expect(api.MarketTypeEnum).toBeDefined();
     expect(api.WebSocketConnectionTypeEnum).toBeDefined();
+    expect(api.formatWebSocketConnectionsReport).toBeDefined();
     expect(api.MARKET_TYPE_LIST).toEqual(['futures', 'spot']);
   });
 });

@@ -23,11 +23,14 @@ import type {
 } from './common';
 import {
   MarginModeEnum,
+  MarketUnitEnum,
+  OrderFilterEnum,
   OrderSideEnum,
   OrderTypeEnum,
   PositionModeEnum,
   PositionSideEnum,
   TimeInForceEnum,
+  TriggerByEnum,
   WorkingTypeEnum,
 } from './common';
 
@@ -45,12 +48,18 @@ export interface CreateOrderWebSocketArgs {
   price?: number;
   stopPrice?: number;
   triggerDirection?: 1 | 2;
+  triggerBy?: TriggerByEnum;
   closePosition?: boolean;
   workingType?: WorkingTypeEnum;
   positionSide?: PositionSideEnum;
   reduceOnly?: boolean;
+  closeOnTrigger?: boolean;
   timeInForce?: TimeInForceEnum;
   clientOrderId?: string;
+  orderFilter?: OrderFilterEnum;
+  marketUnit?: MarketUnitEnum;
+  trailingDelta?: number;
+  quoteOrderQty?: number;
 }
 
 export interface FetchPageWithLimitArgs {
@@ -105,7 +114,7 @@ export interface ExchangeClient {
   getMinOrderQty(symbol: string): number;
   getMinNotional(symbol: string): number;
   fetchFundingInfo(symbol?: string): Promise<FundingInfo[]>;
-  fetchPositionMode(): Promise<PositionModeEnum>;
+  fetchPositionMode(): Promise<PositionModeEnum | undefined>;
   createOrderWebSocket(args: CreateOrderWebSocketArgs): Promise<Order>;
   fetchOrderHistory(symbol: string, options?: FetchPageWithLimitArgs): Promise<Order[]>;
   isTradeWebSocketConnected(): boolean;
@@ -138,6 +147,7 @@ export interface ExchangeClient {
   resubscribeKlines(args: ResubscribeKlinesArgs): void;
   subscribeMarkPrices(handler: MarkPriceHandler): void;
   unsubscribeMarkPrices(handler: MarkPriceHandler): void;
+  awaitWebSocketConnectionsReady(): Promise<void>;
 
   connectUserDataStream(handler: UserDataStreamHandlerArgs): Promise<void>;
   disconnectUserDataStream(): void;

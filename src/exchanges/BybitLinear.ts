@@ -49,8 +49,18 @@ class BybitLinear extends BybitBaseClient {
     throw new Error('Not implemented for Bybit');
   }
 
-  async fetchPositionMode(): Promise<PositionModeEnum> {
-    throw new Error('Not implemented for Bybit');
+  async fetchPositionMode(): Promise<PositionModeEnum | undefined> {
+    this.logger.debug('[Bybit] Fetching position mode via USDT settleCoin position list');
+    const raw = await this.httpClient.getPositionList('linear', { settleCoin: 'USDT' });
+    const positionList = raw.result.list ?? [];
+
+    if (positionList.length === 0) {
+      return undefined;
+    }
+
+    const hasHedgePosition = positionList.some((position) => position.positionIdx === 1 || position.positionIdx === 2);
+
+    return hasHedgePosition ? PositionModeEnum.Hedge : PositionModeEnum.OneWay;
   }
 
   async fetchPosition(symbol: string): Promise<Position> {

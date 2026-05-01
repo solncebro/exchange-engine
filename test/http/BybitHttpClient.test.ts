@@ -94,6 +94,66 @@ describe('BybitHttpClient', () => {
     });
   });
 
+  describe('fetchAllInstrumentsInfo', () => {
+    it('makes two requests for linear (Trading + PreLaunch) and concatenates results', async () => {
+      mockInstance.get
+        .mockResolvedValueOnce({
+          data: { retCode: 0, result: { list: [{ symbol: 'BTCUSDT' }, { symbol: 'ETHUSDT' }], nextPageCursor: '' } },
+        })
+        .mockResolvedValueOnce({
+          data: { retCode: 0, result: { list: [{ symbol: 'MEGAUSDT' }], nextPageCursor: '' } },
+        });
+
+      const result = await client.fetchAllInstrumentsInfo('linear');
+
+      expect(mockInstance.get).toHaveBeenCalledTimes(2);
+      expect(mockInstance.get.mock.calls[0][1].params).toEqual(
+        expect.objectContaining({ category: 'linear', status: 'Trading', limit: 1000 }),
+      );
+      expect(mockInstance.get.mock.calls[1][1].params).toEqual(
+        expect.objectContaining({ category: 'linear', status: 'PreLaunch', limit: 1000 }),
+      );
+      expect(result.map((r) => r.symbol)).toEqual(['BTCUSDT', 'ETHUSDT', 'MEGAUSDT']);
+    });
+
+    it('makes a single request for spot (only Trading)', async () => {
+      mockInstance.get.mockResolvedValueOnce({
+        data: { retCode: 0, result: { list: [{ symbol: 'BTCUSDT' }], nextPageCursor: '' } },
+      });
+
+      const result = await client.fetchAllInstrumentsInfo('spot');
+
+      expect(mockInstance.get).toHaveBeenCalledTimes(1);
+      expect(mockInstance.get.mock.calls[0][1].params).toEqual(
+        expect.objectContaining({ category: 'spot', status: 'Trading', limit: 1000 }),
+      );
+      expect(result.map((r) => r.symbol)).toEqual(['BTCUSDT']);
+    });
+
+    it('paginates Trading and PreLaunch independently using nextPageCursor', async () => {
+      mockInstance.get
+        .mockResolvedValueOnce({
+          data: { retCode: 0, result: { list: [{ symbol: 'BTCUSDT' }], nextPageCursor: 'tradingCursor' } },
+        })
+        .mockResolvedValueOnce({
+          data: { retCode: 0, result: { list: [{ symbol: 'ETHUSDT' }], nextPageCursor: '' } },
+        })
+        .mockResolvedValueOnce({
+          data: { retCode: 0, result: { list: [{ symbol: 'MEGAUSDT' }], nextPageCursor: '' } },
+        });
+
+      const result = await client.fetchAllInstrumentsInfo('linear');
+
+      expect(mockInstance.get).toHaveBeenCalledTimes(3);
+      expect(mockInstance.get.mock.calls[0][1].params.cursor).toBeUndefined();
+      expect(mockInstance.get.mock.calls[1][1].params.cursor).toBe('tradingCursor');
+      expect(mockInstance.get.mock.calls[1][1].params.status).toBe('Trading');
+      expect(mockInstance.get.mock.calls[2][1].params.status).toBe('PreLaunch');
+      expect(mockInstance.get.mock.calls[2][1].params.cursor).toBeUndefined();
+      expect(result.map((r) => r.symbol)).toEqual(['BTCUSDT', 'ETHUSDT', 'MEGAUSDT']);
+    });
+  });
+
   describe('setLeverage', () => {
     it('sends stringified leverage values', async () => {
       await client.setLeverage({ category: 'linear', symbol: 'BTCUSDT', buyLeverage: 10, sellLeverage: 10 });

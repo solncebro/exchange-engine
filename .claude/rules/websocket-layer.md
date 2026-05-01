@@ -15,6 +15,7 @@ subscribeKlines(symbol, interval, handler): void
 unsubscribeKlines(symbol, interval, handler): void
 resubscribeStream?(symbol, interval): void  // опциональный, для принудительной переподписки
 getConnectionInfoList(): WebSocketConnectionInfo[]
+awaitConnectionsReady?(): Promise<void>
 close(): void
 ```
 
@@ -31,26 +32,29 @@ close(): void
 - `isConnected` — текущее состояние (через `WebSocketStatus.CONNECTED`)
 - `type` — `WebSocketConnectionTypeEnum` (Public / Trade / UserData)
 - `subscriptionList` — список подписок: `'Tickers'`, `'Klines BTCUSDT 30m'`, `'Trades ETHUSDT'`, или `[]` для trade/userData стримов
+- `messageCount?`, `lastMessageTimestamp?` — опциональная диагностика per-connection (Binance Futures public заполняет)
 
 Лейблы передаются в стримы через конструктор (Args-паттерн), формируются в exchange-классах.
 
-BinanceFuturesPublicStream при нескольких connections нумерует: `#1`, `#2`, `#3`.
+`BinanceFuturesPublicStream`: лейбл соединения включает `groupKey` (например `tickers-markprices`, `interval-1m`).
 
 Exchange-классы агрегируют через `getWebSocketConnectionInfoList()`: public + trade + optional userData.
 
 ## Binance Futures Public Stream
 
-- **URL**: `wss://fstream.binance.com/stream?streams={stream1}/{stream2}/...`
-- **Лимит**: 200 стримов на соединение (чанкинг при превышении)
-- **Kline стрим**: `{symbol.toLowerCase()}_perpetual@continuousKline_{interval}`
+- **URL**: `wss://fstream.binance.com/market/ws` (demo: `wss://fstream.binancefuture.com/market/ws`) — один endpoint без списка стримов в query; подписка только через JSON после `onOpen`
+- **Группировка соединений**: одно соединение на не-kline стримы (`!miniTicker@arr`, при необходимости `!markPrice@arr@1s`); отдельное соединение на каждый kline interval (все символы этого интервала в одном `connectionList`-элементе). TRADIFI perpetual использует `{symbol}@kline_{interval}` вместо `continuousKline`
+- **Kline стрим**: `{symbol}_perpetual@continuousKline_{interval}` или spot-формат для TRADIFI
 - **Тикер стрим**: `!miniTicker@arr`
-- **Mark/index стрим** (если есть подписчики `subscribeMarkPrices`): `!markPrice@arr@1s` — в `subscriptionList` отображается как `MarkPrices`; payload нормализуется в `MarkPriceUpdate[]`
-- **Подписка**: URL-based (стримы в query string при создании соединения) или динамическая через `sendToConnectedSocket()` (добавленные стримы отслеживаются в `dynamicStreamList`)
-- **Deferred connection**: `queueMicrotask()` для батчинга подписок
-- **onOpen**: при первом открытии соединения подписывает все динамически добавленные стримы (из `dynamicStreamList`) через SUBSCRIBE — обеспечивает доставку данных до первого reconnect
-- **Reconnect**: `onReconnectSuccess` callback переподписывает все динамически добавленные стримы (из `dynamicStreamList`) при reconnect
-- **Heartbeat**: дефолтный ReliableWebSocket (30s ping)
-- **Методы**: `resubscribeStream(symbol, interval)` — принудительная переподписка на конкретный стрим (найдёт соединение и отправит SUBSCRIBE)
+- **Mark/index стрим** (если есть подписчики `subscribeMarkPrices`): `!markPrice@arr@1s` — в `subscriptionList` как `MarkPrices`; payload → `MarkPriceUpdate[]`
+- **Подписка**: в `onOpen` батчами `{"method":"SUBSCRIBE","params":[...streams],"id"}` (`subscribeBatchSize`, пауза `pauseBetweenSubscribeBatchesMs` между батчами). У каждого соединения свой `readyPromise`, резолвится после отправки всех батчей
+- **Deferred connect**: `scheduleConnect()` через `queueMicrotask`; между созданием соединений — `pauseBetweenConnectionsMs` (rate limit)
+- **Динамические kline**: `addStreamToIntervalGroup` / удаление — пересоздание соединения группы; гонка с незавершённым `onOpen` обрабатывается через `readyPromise.then(...)` перед `SUBSCRIBE`
+- **Stale watcher**: периодически проверяет возраст `lastMessageTimestamp`; при превышении `staleThresholdMs` — `recreateConnection` (с дедупом и grace после recreate)
+- **Диагностика**: `messageCount`, `lastMessageTimestamp` на `FuturesConnection` и в `WebSocketConnectionInfo`
+- **Heartbeat**: ReliableWebSocket ping 30s
+- **Методы**: `awaitConnectionsReady()` — `Promise.all` по `readyPromise` активных соединений; `resubscribeStream(symbol, interval)` — `recreateConnection` для соединения, где есть стрим
+- **Аргументы** (`BinanceFuturesPublicStreamArgs`): опционально `pauseBetweenConnectionsMs`, `staleThresholdMs`, `staleCheckIntervalMs`, `subscribeBatchSize`, `pauseBetweenSubscribeBatchesMs`
 
 ## Binance Spot Public Stream
 
@@ -177,13 +181,14 @@ Bybit конвертирует через маппинг `BYBIT_KLINE_INTERVAL`:
 ## FuturesConnection структура
 
 Каждое соединение в `BinanceFuturesPublicStream` отслеживает:
-- `webSocket: ReliableWebSocket<BinanceCombinedMessage>` — само WebSocket соединение
-- `label: string` — человекочитаемый лейбл (e.g. `[Binance Futures] Public` или `[Binance Futures] Public #2`)
-- `streamList: string[]` — все стримы в соединении (изначальные + добавленные)
-- `dynamicStreamList: string[]` — только стримы, добавленные динамически через `sendToConnectedSocket()` (не были в URL при создании)
-- `url: string` — URL соединения с параметрами query
-
-При reconnect (`onReconnectSuccess`) переподписываются только стримы из `dynamicStreamList`.
+- `webSocket: ReliableWebSocket<BinanceCombinedMessage>`
+- `label: string` — включает `groupKey` (например `Binance Futures Public WebSocket interval-1m`)
+- `streamList: string[]` — стримы, подписанные на этом соединении
+- `url: string` — базовый market WS URL
+- `messageCount: number`, `lastMessageTimestamp: number`
+- `groupKey: string` — ключ группы (`tickers-markprices` или `interval-{interval}`)
+- `recreateCount`, `lastRecreateTimestamp` — учёт пересозданий
+- `readyPromise: Promise<void>`, `resolveReady?` — готовность после SUBSCRIBE-батчей
 
 ## BybitConnection структура
 

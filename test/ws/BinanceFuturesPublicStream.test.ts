@@ -14,12 +14,19 @@ const mockWebSocket = {
   sendToConnectedSocket: jest.fn(),
 };
 
+const mockSend = jest.fn();
+
 jest.mock('@solncebro/websocket-engine', () => {
   const actual = jest.requireActual('@solncebro/websocket-engine');
   return {
     ...actual,
     ReliableWebSocket: jest.fn().mockImplementation((args: any) => {
       capturedOnMessage = args.onMessage;
+
+      if (args.onOpen) {
+        Promise.resolve().then(() => args.onOpen({ send: mockSend }));
+      }
+
       return mockWebSocket;
     }),
   };
@@ -52,6 +59,24 @@ const MOCK_KLINE_RAW: BinanceWebSocketKlineRaw = {
   x: true,
 };
 
+const flushAsync = async (): Promise<void> => {
+  for (let i = 0; i < 5; i++) {
+    await Promise.resolve();
+  }
+};
+
+const createStreamForTest = (args: {
+  url: string;
+  mockLogger: ReturnType<typeof createMockLogger>;
+}): BinanceFuturesPublicStream =>
+  new BinanceFuturesPublicStream({
+    webSocketUrl: args.url,
+    logger: args.mockLogger,
+    onNotify: undefined,
+    label: 'test',
+    pauseBetweenConnectionsMs: 0,
+  });
+
 describe('BinanceFuturesPublicStream', () => {
   const mockLogger = createMockLogger();
   const url = 'wss://fstream.binance.com/stream';
@@ -59,31 +84,35 @@ describe('BinanceFuturesPublicStream', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     capturedOnMessage = undefined;
+    mockSend.mockReset();
   });
 
   describe('subscribeAllTickers', () => {
-    it('creates connection with miniTicker stream in URL', async () => {
+    it('creates connection without stream in URL (pure SUBSCRIBE pattern)', async () => {
       const { ReliableWebSocket } = require('@solncebro/websocket-engine');
-      const stream = new BinanceFuturesPublicStream({ webSocketCombinedUrl: url, logger: mockLogger, onNotify: undefined, label: 'test' });
+      const stream = createStreamForTest({ url, mockLogger });
       const handler = jest.fn();
 
       stream.subscribeAllTickers(handler);
 
-      await Promise.resolve();
+      await flushAsync();
 
       expect(ReliableWebSocket).toHaveBeenCalledWith(
         expect.objectContaining({
-          url: expect.stringContaining('!miniTicker@arr'),
+          url,
         }),
       );
+
+      const callArgs = ReliableWebSocket.mock.calls[0][0];
+      expect(callArgs.url).not.toContain('?streams=');
     });
 
     it('calls handler with normalized tickers on array message', async () => {
-      const stream = new BinanceFuturesPublicStream({ webSocketCombinedUrl: url, logger: mockLogger, onNotify: undefined, label: 'test' });
+      const stream = createStreamForTest({ url, mockLogger });
       const handler = jest.fn();
 
       stream.subscribeAllTickers(handler);
-      await Promise.resolve();
+      await flushAsync();
 
       capturedOnMessage!({ data: [MOCK_TICKER_RAW] });
 
@@ -95,24 +124,22 @@ describe('BinanceFuturesPublicStream', () => {
   });
 
   describe('subscribeKlines', () => {
-    it('includes kline stream in connection URL', async () => {
+    it('creates connection without stream in URL (streams subscribed via SUBSCRIBE batch in onOpen)', async () => {
       const { ReliableWebSocket } = require('@solncebro/websocket-engine');
-      const stream = new BinanceFuturesPublicStream({ webSocketCombinedUrl: url, logger: mockLogger, onNotify: undefined, label: 'test' });
+      const stream = createStreamForTest({ url, mockLogger });
 
       stream.subscribeKlines('BTCUSDT', '1m', jest.fn());
-      await Promise.resolve();
+      await flushAsync();
 
-      expect(ReliableWebSocket).toHaveBeenCalledWith(
-        expect.objectContaining({
-          url: expect.stringContaining('btcusdt_perpetual@continuousKline_1m'),
-        }),
-      );
+      const callArgs = ReliableWebSocket.mock.calls[0][0];
+      expect(callArgs.url).toBe(url);
+      expect(callArgs.url).not.toContain('?streams=');
     });
 
-    it('sends SUBSCRIBE for dynamic subscription when connection exists', async () => {
-      const stream = new BinanceFuturesPublicStream({ webSocketCombinedUrl: url, logger: mockLogger, onNotify: undefined, label: 'test' });
-      stream.subscribeAllTickers(jest.fn());
-      await Promise.resolve();
+    it('sends SUBSCRIBE for dynamic subscription when connection of the same timeframe exists', async () => {
+      const stream = createStreamForTest({ url, mockLogger });
+      stream.subscribeKlines('BTCUSDT', '5m', jest.fn());
+      await flushAsync();
 
       stream.subscribeKlines('ETHUSDT', '5m', jest.fn());
 
@@ -125,11 +152,11 @@ describe('BinanceFuturesPublicStream', () => {
     });
 
     it('calls handler when kline message arrives', async () => {
-      const stream = new BinanceFuturesPublicStream({ webSocketCombinedUrl: url, logger: mockLogger, onNotify: undefined, label: 'test' });
+      const stream = createStreamForTest({ url, mockLogger });
       const handler = jest.fn();
 
       stream.subscribeKlines('BTCUSDT', '1m', handler);
-      await Promise.resolve();
+      await flushAsync();
 
       capturedOnMessage!({
         stream: 'btcusdt_perpetual@continuousKline_1m',
@@ -143,11 +170,11 @@ describe('BinanceFuturesPublicStream', () => {
 
   describe('unsubscribeKlines', () => {
     it('sends UNSUBSCRIBE when last handler removed', async () => {
-      const stream = new BinanceFuturesPublicStream({ webSocketCombinedUrl: url, logger: mockLogger, onNotify: undefined, label: 'test' });
+      const stream = createStreamForTest({ url, mockLogger });
       const handler = jest.fn();
 
       stream.subscribeAllTickers(jest.fn());
-      await Promise.resolve();
+      await flushAsync();
 
       stream.subscribeKlines('BTCUSDT', '1m', handler);
       stream.unsubscribeKlines('BTCUSDT', '1m', handler);
@@ -163,10 +190,10 @@ describe('BinanceFuturesPublicStream', () => {
 
   describe('handleMessage', () => {
     it('ignores message without data', async () => {
-      const stream = new BinanceFuturesPublicStream({ webSocketCombinedUrl: url, logger: mockLogger, onNotify: undefined, label: 'test' });
+      const stream = createStreamForTest({ url, mockLogger });
       const handler = jest.fn();
       stream.subscribeAllTickers(handler);
-      await Promise.resolve();
+      await flushAsync();
 
       capturedOnMessage!({});
 
@@ -174,12 +201,12 @@ describe('BinanceFuturesPublicStream', () => {
     });
 
     it('logs error when handler throws', async () => {
-      const stream = new BinanceFuturesPublicStream({ webSocketCombinedUrl: url, logger: mockLogger, onNotify: undefined, label: 'test' });
+      const stream = createStreamForTest({ url, mockLogger });
       const handler = jest.fn().mockImplementation(() => {
         throw new Error('handler boom');
       });
       stream.subscribeAllTickers(handler);
-      await Promise.resolve();
+      await flushAsync();
 
       capturedOnMessage!({ data: [MOCK_TICKER_RAW] });
 
@@ -187,10 +214,10 @@ describe('BinanceFuturesPublicStream', () => {
     });
 
     it('ignores kline message without k field', async () => {
-      const stream = new BinanceFuturesPublicStream({ webSocketCombinedUrl: url, logger: mockLogger, onNotify: undefined, label: 'test' });
+      const stream = createStreamForTest({ url, mockLogger });
       const handler = jest.fn();
       stream.subscribeKlines('BTCUSDT', '1m', handler);
-      await Promise.resolve();
+      await flushAsync();
 
       capturedOnMessage!({
         stream: 'btcusdt_perpetual@continuousKline_1m',
@@ -203,9 +230,9 @@ describe('BinanceFuturesPublicStream', () => {
 
   describe('close', () => {
     it('closes all connections', async () => {
-      const stream = new BinanceFuturesPublicStream({ webSocketCombinedUrl: url, logger: mockLogger, onNotify: undefined, label: 'test' });
+      const stream = createStreamForTest({ url, mockLogger });
       stream.subscribeAllTickers(jest.fn());
-      await Promise.resolve();
+      await flushAsync();
 
       stream.close();
 
@@ -213,24 +240,53 @@ describe('BinanceFuturesPublicStream', () => {
     });
   });
 
-  describe('chunking', () => {
-    it('creates multiple connections when streams exceed limit', async () => {
+  describe('interval grouping', () => {
+    it('puts all symbols of one interval into a single connection', async () => {
       const { ReliableWebSocket } = require('@solncebro/websocket-engine');
-      const stream = new BinanceFuturesPublicStream({ webSocketCombinedUrl: url, logger: mockLogger, onNotify: undefined, label: 'test' });
+      const stream = createStreamForTest({ url, mockLogger });
 
-      for (let i = 0; i < 201; i++) {
+      for (let i = 0; i < 100; i++) {
         stream.subscribeKlines(`SYMBOL${i}USDT`, '1m', jest.fn());
       }
 
-      await Promise.resolve();
+      await flushAsync();
 
-      expect(ReliableWebSocket).toHaveBeenCalledTimes(2);
+      expect(ReliableWebSocket).toHaveBeenCalledTimes(1);
+    });
+
+    it('creates a separate connection per interval', async () => {
+      const { ReliableWebSocket } = require('@solncebro/websocket-engine');
+      const stream = createStreamForTest({ url, mockLogger });
+
+      stream.subscribeKlines('BTCUSDT', '1m', jest.fn());
+      stream.subscribeKlines('BTCUSDT', '5m', jest.fn());
+      stream.subscribeKlines('BTCUSDT', '1h', jest.fn());
+      stream.subscribeKlines('BTCUSDT', '4h', jest.fn());
+
+      await flushAsync();
+
+      expect(ReliableWebSocket).toHaveBeenCalledTimes(4);
+    });
+
+    it('keeps URL clean (no streams query) regardless of subscription count', async () => {
+      const { ReliableWebSocket } = require('@solncebro/websocket-engine');
+      const stream = createStreamForTest({ url, mockLogger });
+
+      for (let i = 0; i < 100; i++) {
+        stream.subscribeKlines(`SYMBOL${i}USDT`, '1m', jest.fn());
+      }
+
+      await flushAsync();
+
+      const callArgs = ReliableWebSocket.mock.calls[0][0];
+      expect(callArgs.url).toBe(url);
+      expect(callArgs.url).not.toContain('?streams=');
     });
   });
 
   describe('mark price subscription', () => {
     it('registers handler via subscribeMarkPrices and removes via unsubscribeMarkPrices', () => {
-      const stream = new BinanceFuturesPublicStream({ webSocketCombinedUrl: url, logger: mockLogger, onNotify: undefined, label: 'test' });
+      const stream = createStreamForTest({ url, mockLogger });
       const handler = jest.fn();
 
       stream.subscribeMarkPrices(handler);
@@ -243,10 +299,10 @@ describe('BinanceFuturesPublicStream', () => {
     });
 
     it('dispatches normalized MarkPriceUpdate list when markPrice payload arrives', async () => {
-      const stream = new BinanceFuturesPublicStream({ webSocketCombinedUrl: url, logger: mockLogger, onNotify: undefined, label: 'test' });
+      const stream = createStreamForTest({ url, mockLogger });
       const received: MarkPriceUpdate[][] = [];
       stream.subscribeMarkPrices((list) => received.push(list));
-      await Promise.resolve();
+      await flushAsync();
 
       const rawMarkPrice: BinanceMarkPriceWebSocketRaw = {
         e: 'markPriceUpdate',
@@ -272,11 +328,11 @@ describe('BinanceFuturesPublicStream', () => {
     });
 
     it('includes !markPrice@arr@1s stream name when mark price handler is registered', () => {
-      const stream = new BinanceFuturesPublicStream({ webSocketCombinedUrl: url, logger: mockLogger, onNotify: undefined, label: 'test' });
+      const stream = createStreamForTest({ url, mockLogger });
       stream.subscribeMarkPrices(jest.fn());
 
       // @ts-expect-error — read private method for test
-      const streamNameList = stream.buildStreamList();
+      const streamNameList = stream.buildNonKlineStreamList();
       expect(streamNameList).toContain('!markPrice@arr@1s');
     });
   });

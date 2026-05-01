@@ -147,6 +147,10 @@ abstract class BaseExchangeClient implements ExchangeClient {
     this.getPublicStream().resubscribeStream?.(args.symbol, args.interval);
   }
 
+  awaitWebSocketConnectionsReady(): Promise<void> {
+    return this.getPublicStream().awaitConnectionsReady?.() ?? Promise.resolve();
+  }
+
   subscribeMarkPrices(handler: MarkPriceHandler): void {
     this.getPublicStream().subscribeMarkPrices(handler);
   }
@@ -200,7 +204,7 @@ abstract class BaseExchangeClient implements ExchangeClient {
 
     if (!tradeSymbol) {
       this.logger.warn(
-        { symbol, loadedSymbolCount: this.tradeSymbols.size, availableSymbolList: [...this.tradeSymbols.keys()] },
+        { symbol, loadedSymbolCount: this.tradeSymbols.size },
         `[${this.exchangeLabel}] TradeSymbol ${symbol} not found for ${methodName}`,
       );
 
@@ -229,7 +233,7 @@ abstract class BaseExchangeClient implements ExchangeClient {
     throw new Error(`Not supported for ${this.marketLabel} market`);
   }
 
-  async fetchPositionMode(): Promise<PositionModeEnum> {
+  async fetchPositionMode(): Promise<PositionModeEnum | undefined> {
     throw new Error(`Not supported for ${this.marketLabel} market`);
   }
 

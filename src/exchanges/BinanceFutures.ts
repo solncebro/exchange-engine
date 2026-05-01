@@ -18,11 +18,11 @@ import {
   BINANCE_KLINE_LIMIT_FUTURES,
   BINANCE_FUTURES_BASE_URL,
   BINANCE_DEMO_FUTURES_BASE_URL,
-  BINANCE_FUTURES_WEBSOCKET_COMBINED_URL,
-  BINANCE_DEMO_FUTURES_WEBSOCKET_COMBINED_URL,
   BINANCE_FUTURES_TRADE_WEBSOCKET_URL,
   BINANCE_DEMO_FUTURES_TRADE_WEBSOCKET_URL,
   BINANCE_FUTURES_WEBSOCKET_STREAM_URL,
+  BINANCE_FUTURES_WEBSOCKET_MARKET_URL,
+  BINANCE_DEMO_FUTURES_WEBSOCKET_MARKET_URL,
 } from '../constants/binance';
 import { BinanceBaseClient } from './BinanceBaseClient';
 import { BaseExchangeClient } from './BaseExchangeClient';
@@ -57,9 +57,9 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
       ? BINANCE_DEMO_FUTURES_BASE_URL
       : BINANCE_FUTURES_BASE_URL;
 
-    const webSocketCombinedUrl = isDemoMode
-      ? BINANCE_DEMO_FUTURES_WEBSOCKET_COMBINED_URL
-      : BINANCE_FUTURES_WEBSOCKET_COMBINED_URL;
+    const webSocketStreamUrl = isDemoMode
+      ? BINANCE_DEMO_FUTURES_WEBSOCKET_MARKET_URL
+      : BINANCE_FUTURES_WEBSOCKET_MARKET_URL;
 
     const tradeWebSocketUrl = isDemoMode
       ? BINANCE_DEMO_FUTURES_TRADE_WEBSOCKET_URL
@@ -74,7 +74,7 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
     });
 
     const publicStream = new BinanceFuturesPublicStream({
-      webSocketCombinedUrl,
+      webSocketUrl: webSocketStreamUrl,
       logger: args.logger,
       onNotify: BaseExchangeClient.createNotifyHandler(args.onNotify),
       label: 'Binance Futures Public WebSocket',

@@ -10,5 +10,6 @@ export interface PublicStreamLike {
   unsubscribeKlines(symbol: string, interval: KlineInterval, handler: KlineHandler): void;
   resubscribeStream?(symbol: string, interval: string): void;
   getConnectionInfoList(): WebSocketConnectionInfo[];
+  awaitConnectionsReady?(): Promise<void>;
   close(): void;
 }

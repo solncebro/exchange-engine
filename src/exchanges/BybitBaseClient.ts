@@ -146,15 +146,28 @@ abstract class BybitBaseClient extends BaseExchangeClient {
   }
 
   protected buildBybitOrderParams(args: CreateOrderWebSocketArgs): Record<string, unknown> {
-    const isMarket = args.type === OrderTypeEnum.Market;
+    const isSpot = this.category === 'spot';
+    const isLinear = this.category === 'linear';
+
+    const isLimitLike =
+      args.type === OrderTypeEnum.Limit ||
+      args.type === OrderTypeEnum.StopLimit ||
+      args.type === OrderTypeEnum.TakeProfitLimit;
+
+    const bybitOrderType = isLimitLike ? 'Limit' : 'Market';
 
     const orderParams: Record<string, unknown> = {
       category: this.category,
       symbol: args.symbol,
-      orderType: isMarket ? 'Market' : 'Limit',
+      orderType: bybitOrderType,
       side: args.side === OrderSideEnum.Buy ? 'Buy' : 'Sell',
-      qty: String(this.amountToPrecision(args.symbol, args.amount)),
     };
+
+    if (isSpot && args.quoteOrderQty !== undefined && args.quoteOrderQty > 0) {
+      orderParams.qty = String(args.quoteOrderQty);
+    } else {
+      orderParams.qty = String(this.amountToPrecision(args.symbol, args.amount));
+    }
 
     if (args.price !== undefined && args.price > 0) {
       orderParams.price = String(this.priceToPrecision(args.symbol, args.price));
@@ -164,12 +177,20 @@ abstract class BybitBaseClient extends BaseExchangeClient {
       orderParams.triggerPrice = String(this.priceToPrecision(args.symbol, args.stopPrice));
     }
 
-    if (args.triggerDirection !== undefined) {
+    if (!isSpot && args.triggerDirection !== undefined) {
       orderParams.triggerDirection = args.triggerDirection;
     }
 
-    if (args.reduceOnly !== undefined) {
+    if (!isSpot && args.triggerBy !== undefined) {
+      orderParams.triggerBy = args.triggerBy;
+    }
+
+    if (!isSpot && args.reduceOnly !== undefined) {
       orderParams.reduceOnly = args.reduceOnly;
+    }
+
+    if (!isSpot && args.closeOnTrigger !== undefined) {
+      orderParams.closeOnTrigger = args.closeOnTrigger;
     }
 
     if (args.timeInForce !== undefined) {
@@ -180,7 +201,15 @@ abstract class BybitBaseClient extends BaseExchangeClient {
       orderParams.orderLinkId = args.clientOrderId;
     }
 
-    if (this.category === 'linear' && args.positionSide !== undefined) {
+    if (isSpot && args.orderFilter !== undefined) {
+      orderParams.orderFilter = args.orderFilter;
+    }
+
+    if (isSpot && args.marketUnit !== undefined) {
+      orderParams.marketUnit = args.marketUnit;
+    }
+
+    if (isLinear && args.positionSide !== undefined) {
       if (args.positionSide === PositionSideEnum.Long) {
         orderParams.positionIdx = 1;
       } else if (args.positionSide === PositionSideEnum.Short) {

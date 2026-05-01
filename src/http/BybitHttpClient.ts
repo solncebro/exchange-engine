@@ -109,6 +109,14 @@ class BybitHttpClient extends BaseHttpClient {
       params.orderId = options.orderId;
     }
 
+    if (options?.settleCoin !== undefined) {
+      params.settleCoin = options.settleCoin;
+    }
+
+    if (options?.baseCoin !== undefined) {
+      params.baseCoin = options.baseCoin;
+    }
+
     return params;
   }
 
@@ -120,11 +128,26 @@ class BybitHttpClient extends BaseHttpClient {
   }
 
   async fetchAllInstrumentsInfo(category: string): Promise<BybitInstrumentInfoRaw[]> {
+    const tradingList = await this.fetchInstrumentsInfoByStatus(category, 'Trading');
+
+    if (category !== 'linear') {
+      return tradingList;
+    }
+
+    const preLaunchList = await this.fetchInstrumentsInfoByStatus(category, 'PreLaunch');
+
+    return [...tradingList, ...preLaunchList];
+  }
+
+  private async fetchInstrumentsInfoByStatus(
+    category: string,
+    status: string,
+  ): Promise<BybitInstrumentInfoRaw[]> {
     const allInstrumentList: BybitInstrumentInfoRaw[] = [];
     let cursor: string | undefined;
 
     do {
-      const params: Record<string, string | number | boolean> = { category, limit: 1000 };
+      const params: Record<string, string | number | boolean> = { category, limit: 1000, status };
 
       if (cursor) {
         params.cursor = cursor;

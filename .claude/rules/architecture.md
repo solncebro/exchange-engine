@@ -31,7 +31,7 @@ Exchange (фабрика)
 │   └── bybitNormalizer.ts — raw Bybit → унифицированные типы
 │
 ├── WebSocket (src/ws/)
-│   ├── BinanceFuturesPublicStream — klines + тикеры (combined stream)
+│   ├── BinanceFuturesPublicStream — klines + тикеры (market/ws + SUBSCRIBE)
 │   ├── BinanceSpotPublicStream — klines + тикеры (динамические подписки)
 │   ├── BinanceUserDataStream — listenKey user data
 │   ├── BybitPublicStream — klines + тикеры (topic-based), 1s klines через TradeToKlineAggregator

@@ -1,5 +1,7 @@
 export { ExchangeError } from './errors/ExchangeError';
 export { Exchange } from './exchanges/Exchange';
+export { formatWebSocketConnectionsReport } from './utils/formatWebSocketConnectionsReport';
+export type { FormatWebSocketConnectionsReportArgs } from './utils/formatWebSocketConnectionsReport';
 
 export type {
   ExchangeClient,
@@ -24,6 +26,9 @@ export {
   TradeSymbolTypeEnum,
   TimeInForceEnum,
   WorkingTypeEnum,
+  TriggerByEnum,
+  OrderFilterEnum,
+  MarketUnitEnum,
   MarketTypeEnum,
   WebSocketConnectionTypeEnum,
 } from './types/common';

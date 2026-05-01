@@ -571,10 +571,31 @@ describe('normalizeBinanceOrder', () => {
   });
 
   it('lowercases unknown order type as fallback', () => {
+    const raw = { ...BINANCE_RAW_ORDER_RESPONSE, type: 'CUSTOM_UNKNOWN' };
+    const result = normalizeBinanceOrder(raw);
+
+    expect(result.type).toBe('custom_unknown');
+  });
+
+  it('maps Binance Spot STOP_LOSS to OrderTypeEnum.StopMarket', () => {
     const raw = { ...BINANCE_RAW_ORDER_RESPONSE, type: 'STOP_LOSS' };
     const result = normalizeBinanceOrder(raw);
 
-    expect(result.type).toBe('stop_loss');
+    expect(result.type).toBe('stopMarket');
+  });
+
+  it('maps Binance Spot STOP_LOSS_LIMIT to OrderTypeEnum.StopLimit', () => {
+    const raw = { ...BINANCE_RAW_ORDER_RESPONSE, type: 'STOP_LOSS_LIMIT' };
+    const result = normalizeBinanceOrder(raw);
+
+    expect(result.type).toBe('stopLimit');
+  });
+
+  it('maps Binance Spot TAKE_PROFIT_LIMIT to OrderTypeEnum.TakeProfitLimit', () => {
+    const raw = { ...BINANCE_RAW_ORDER_RESPONSE, type: 'TAKE_PROFIT_LIMIT' };
+    const result = normalizeBinanceOrder(raw);
+
+    expect(result.type).toBe('takeProfitLimit');
   });
 });
 

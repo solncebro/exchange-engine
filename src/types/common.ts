@@ -12,7 +12,9 @@ export enum OrderTypeEnum {
   Market = 'market',
   Limit = 'limit',
   StopMarket = 'stopMarket',
+  StopLimit = 'stopLimit',
   TakeProfitMarket = 'takeProfitMarket',
+  TakeProfitLimit = 'takeProfitLimit',
   Stop = 'stop',
   TakeProfit = 'takeProfit',
   TrailingStop = 'trailingStop',
@@ -265,6 +267,23 @@ export enum WorkingTypeEnum {
   ContractPrice = 'contractPrice',
 }
 
+export enum TriggerByEnum {
+  MarkPrice = 'MarkPrice',
+  LastPrice = 'LastPrice',
+  IndexPrice = 'IndexPrice',
+}
+
+export enum OrderFilterEnum {
+  Order = 'Order',
+  TpslOrder = 'tpslOrder',
+  StopOrder = 'StopOrder',
+}
+
+export enum MarketUnitEnum {
+  BaseCoin = 'baseCoin',
+  QuoteCoin = 'quoteCoin',
+}
+
 export enum MarketTypeEnum {
   Futures = 'futures',
   Spot = 'spot',
@@ -284,6 +303,8 @@ export interface WebSocketConnectionInfo {
   isConnected: boolean;
   type: WebSocketConnectionTypeEnum;
   subscriptionList: string[];
+  messageCount?: number;
+  lastMessageTimestamp?: number;
 }
 
 export interface OrderBookLevel {

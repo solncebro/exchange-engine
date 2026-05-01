@@ -4,11 +4,17 @@ Universal TypeScript client library for cryptocurrency trading on Binance and By
 
 ## Latest Release
 
-Current version: `0.12.1`
+Current version: `0.13.0`
 
-- Fixed Binance hedge-mode order params: `reduceOnly` is omitted when `positionSide` is provided.
-- Fixed Bybit linear hedge-mode order params: `positionSide` is correctly mapped to `positionIdx`.
-- Added regression tests for Binance Futures, Bybit Linear, and Bybit Spot order parameter mapping.
+- New `OrderTypeEnum` values: `StopLimit`, `TakeProfitLimit` for atomic STOP_LOSS_LIMIT / TAKE_PROFIT_LIMIT on Binance Spot and Bybit Spot.
+- New enums: `TriggerByEnum` (`MarkPrice` | `LastPrice` | `IndexPrice`), `OrderFilterEnum` (`Order` | `tpslOrder` | `StopOrder`), `MarketUnitEnum` (`baseCoin` | `quoteCoin`).
+- `CreateOrderWebSocketArgs` extended with `triggerBy`, `closeOnTrigger`, `orderFilter`, `marketUnit`, `trailingDelta`, `quoteOrderQty`.
+- Spot/futures order param mappings split: separate `BINANCE_FUTURES_ORDER_TYPE_REVERSE` / `BINANCE_SPOT_ORDER_TYPE_REVERSE`. On spot, `closePosition`/`workingType`/`positionSide`/`reduceOnly` and Bybit `triggerDirection`/`triggerBy`/`closeOnTrigger` are no longer set.
+- `BybitLinear.fetchPositionMode()` implemented via `GET /v5/position/list?category=linear&settleCoin=USDT` (Hedge if any positionIdx ∈ {1,2}; OneWay if all 0; `undefined` if no positions).
+- BREAKING: `ExchangeClient.fetchPositionMode()` now returns `Promise<PositionModeEnum | undefined>`.
+- `awaitWebSocketConnectionsReady()` on `ExchangeClient`; Binance Futures public stream uses `/market/ws` with batched `SUBSCRIBE`, stale reconnect, and optional `messageCount` / `lastMessageTimestamp` on `WebSocketConnectionInfo`.
+- New utility `formatWebSocketConnectionsReport`.
+- Bybit instruments with `status === 'PreLaunch'` are normalized as active (`isActive: true`).
 
 Full release notes: [CHANGELOG.md](./CHANGELOG.md)
 

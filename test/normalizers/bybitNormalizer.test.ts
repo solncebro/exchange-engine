@@ -93,6 +93,20 @@ describe('normalizeBybitTradeSymbols', () => {
     expect(result.get('BTCUSDT')!.isActive).toBe(false);
   });
 
+  it('sets isActive=true for PreLaunch status', () => {
+    const rawList = [{ ...BYBIT_RAW_INSTRUMENT_LIST[0], status: 'PreLaunch' }];
+    const result = normalizeBybitTradeSymbols(rawList);
+
+    expect(result.get('BTCUSDT')!.isActive).toBe(true);
+  });
+
+  it('sets isActive=false for Settling status', () => {
+    const rawList = [{ ...BYBIT_RAW_INSTRUMENT_LIST[0], status: 'Settling' }];
+    const result = normalizeBybitTradeSymbols(rawList);
+
+    expect(result.get('BTCUSDT')!.isActive).toBe(false);
+  });
+
   it('parses contractSize', () => {
     const result = normalizeBybitTradeSymbols(BYBIT_RAW_INSTRUMENT_LIST);
 

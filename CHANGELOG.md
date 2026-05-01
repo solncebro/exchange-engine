@@ -5,6 +5,90 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0] - 2026-04-30
+
+Сводный релиз, объединяющий все локальные эксперименты после 0.12.1: WebSocket-отчёт, Bybit Linear position-mode detection, и spot/futures order-params матрицу для нового `PositionManager` API в trade-engine.
+
+### Added
+
+- `OrderTypeEnum` расширен: `StopLimit`, `TakeProfitLimit` — для атомарных STOP_LOSS_LIMIT / TAKE_PROFIT_LIMIT на Binance Spot и Bybit Spot.
+- `TriggerByEnum` (`MarkPrice` | `LastPrice` | `IndexPrice`) — для conditional/stop ордеров на Bybit Linear.
+- `OrderFilterEnum` (`Order` | `tpslOrder` | `StopOrder`) — спецификация Bybit Spot conditional/TPSL ордеров.
+- `MarketUnitEnum` (`baseCoin` | `quoteCoin`) — выбор единицы количества для Market ордеров на Bybit Spot.
+- `CreateOrderWebSocketArgs` дополнен полями: `triggerBy`, `closeOnTrigger`, `orderFilter`, `marketUnit`, `trailingDelta`, `quoteOrderQty`. Все опциональные, обратно-совместимы.
+- `BINANCE_FUTURES_ORDER_TYPE_REVERSE` и `BINANCE_SPOT_ORDER_TYPE_REVERSE` — раздельные mapping таблицы. На spot `OrderTypeEnum.StopMarket → 'STOP_LOSS'`, `StopLimit → 'STOP_LOSS_LIMIT'`, `TakeProfitMarket → 'TAKE_PROFIT'`, `TakeProfitLimit → 'TAKE_PROFIT_LIMIT'`. На futures сохранён прежний `STOP_MARKET`/`TAKE_PROFIT_MARKET` контракт.
+- `BINANCE_ORDER_TYPE` mapping расширен значениями `STOP_LOSS`, `STOP_LOSS_LIMIT`, `TAKE_PROFIT_LIMIT` для парсинга входящих spot-ордеров.
+- `BybitLinear.fetchPositionMode()` — реализация через `GET /v5/position/list?category=linear&settleCoin=USDT`. Логика: Hedge если есть позиция с `positionIdx ∈ {1, 2}`; OneWay если все `positionIdx === 0`; `undefined` если позиций нет (Bybit V5 не даёт API для чтения mode без позиций).
+- `SymbolLimitFilterArgs`: опциональные `settleCoin?: string`, `baseCoin?: string` для Bybit V5 position-list endpoint.
+- `BybitHttpClient.buildCategoryParams()` поддерживает `settleCoin`/`baseCoin` в query-параметрах.
+- `formatWebSocketConnectionsReport` — публичная утилита для plain-text отчёта о WebSocket-соединениях (`exchangeClient.getWebSocketConnectionInfoList()` → human-readable summary).
+- `ExchangeClient.awaitWebSocketConnectionsReady()` — ожидание готовности публичных WS после подписок (Binance Futures: после SUBSCRIBE-батчей; у стримов без `awaitConnectionsReady` — немедленный resolve).
+- `PublicStreamLike.awaitConnectionsReady?()` — опциональный хук на уровне публичного стрима.
+- `WebSocketConnectionInfo.messageCount?` / `lastMessageTimestamp?` — per-connection диагностика (заполняет Binance Futures public).
+
+### Changed (BREAKING)
+
+- `ExchangeClient.fetchPositionMode()` теперь возвращает `Promise<PositionModeEnum | undefined>`. Раньше — `Promise<PositionModeEnum>`. Реализации без надёжного API-способа определить режим без открытых позиций (Bybit Linear) возвращают `undefined`.
+
+### Changed
+
+- `BinanceFuturesPublicStream`: endpoint `wss://fstream.binance.com/market/ws` (и demo-аналог); подписка через JSON `SUBSCRIBE` батчами после `onOpen`; группировка соединений — отдельное на `!miniTicker@arr` / `!markPrice@arr@1s` и по одному на каждый kline interval; stale-watcher с пересозданием «зависших» соединений; настраиваемые `pauseBetweenConnectionsMs`, `staleThresholdMs`, `staleCheckIntervalMs`, `subscribeBatchSize`, `pauseBetweenSubscribeBatchesMs`.
+- `normalizeBybitTradeSymbols`: инструменты со `status === 'PreLaunch'` получают `isActive: true` (наряду с `Trading`).
+- `BinanceBaseClient.buildBinanceOrderParams()` различает spot и futures по `marketLabel`. На spot НЕ выставляются `closePosition`, `workingType`, `positionSide`, `reduceOnly`. Поддерживаются `quoteOrderQty` (USDT-сумма для Market Buy на spot) и `trailingDelta` (STOP_LOSS/TAKE_PROFIT trailing). `timeInForce` ставится для всех Limit-like типов (`Limit`, `StopLimit`, `TakeProfitLimit`).
+- `BybitBaseClient.buildBybitOrderParams()` различает spot и linear. На spot НЕ выставляются `triggerDirection`, `triggerBy`, `reduceOnly`, `closeOnTrigger` (валидны только linear/inverse). Добавлены ветки `orderFilter` и `marketUnit` (только spot). Поддерживается `quoteOrderQty` для Market Buy на spot.
+- `BybitSpot.createOrderWebSocket()` форсирует `marketUnit='baseCoin'` только если поле НЕ задано явно через `args.marketUnit` И не используется `quoteOrderQty`. Default остаётся `baseCoin` для backward-compat.
+
+### Notes
+
+- `BINANCE_ORDER_TYPE_REVERSE` оставлен как алиас `BINANCE_FUTURES_ORDER_TYPE_REVERSE` для обратной совместимости с внешними импортами.
+
+## [0.13.0-prev] - 2026-04-27 (history note)
+
+Раньше существовали отдельные локальные релизы 0.13.0 (2026-04-27, formatWebSocketConnectionsReport), 0.14.0 (2026-04-29, BybitLinear.fetchPositionMode + BREAKING) и uncommitted 0.15.0. Они объединены в выпускной 0.13.0 от 2026-04-30 выше. Историческая запись (полные технические подробности WebSocket-отчёта) сохранена ниже для справки.
+
+### Added
+
+#### `formatWebSocketConnectionsReport` — заготовка отчёта о WebSocket-соединениях
+
+Новая публичная утилита (`src/utils/formatWebSocketConnectionsReport.ts`), доступная через `import { formatWebSocketConnectionsReport } from '@solncebro/exchange-engine'`. Принимает `WebSocketConnectionInfo[]` (полученный через `exchangeClient.getWebSocketConnectionInfoList()`), возвращает многострочную plain-text строку с компактным форматом:
+
+```
+🌐 WebSocket Connections
+now: 2026-04-27 14:02:30
+total: 54 | source: Binance Futures Public WebSocket
+
+✅ symbols-001 | 40 streams | 2481 msgs | 0s ago
+   1000BONKUSDT, 1000FLOKIUSDT, 1000LUNCUSDT, ...
+```
+
+Опции:
+- `formatTimestamp?: (epochMs: number) => string` — кастомный форматтер времени (default: ISO-подобный)
+- `nowTimestamp?: number` — переопределение текущего времени для тестов (default: `Date.now()`)
+- `headerLine?: string` — кастомная шапка (default: `🌐 WebSocket Connections`)
+
+Без зависимостей от Telegram/dayjs — приложение само эскейпит markdown и форматирует timestamp в нужном для своей домены формате.
+
+#### Публичный API ExchangeClient
+
+- `ExchangeClient.awaitWebSocketConnectionsReady(): Promise<void>` — позволяет дождаться полной готовности всех WS-соединений (handshake + SUBSCRIBE батчи) после вызовов `subscribeKlines`/`subscribeAllTickers`/`subscribeMarkPrices`. Используется для sequential init: подписался → дождался → REST-загрузка.
+- `WebSocketConnectionInfo.messageCount?: number` и `lastMessageTimestamp?: number` — per-connection диагностика (только Binance Futures сейчас).
+- `PublicStreamLike.awaitConnectionsReady?(): Promise<void>` — опциональный метод в интерфейсе stream (Bybit/Spot не реализуют — возвращается `Promise.resolve()` сразу).
+
+### Changed
+
+#### `BinanceFuturesPublicStream` — детали реализации в релизной ветке
+
+Актуальное поведение (группировка по типу стримов и kline interval, endpoint `/market/ws`, SUBSCRIBE-батчи, stale-recreate, `readyPromise`) описано в выпускной секции **[0.13.0] → Changed** выше и в `.claude/rules/websocket-layer.md`. Ранний черновик этой записи описывал другую схему (`symbolsPerConnection`); он не соответствует финальному коду и оставлен только как напоминание о эволюции задачи.
+
+### Added (BinanceFuturesPublicStreamArgs)
+
+- `staleThresholdMs?`, `staleCheckIntervalMs?`, `subscribeBatchSize?`, `pauseBetweenSubscribeBatchesMs?`, `pauseBetweenConnectionsMs?` — см. фактические default-значения в `BinanceFuturesPublicStream.ts`
+
+### Notes
+
+- **Bybit** и **Binance Spot** streams не затронуты этой работой — у них своя архитектура (Bybit использует `MAX_TOPICS_PER_CONNECTION = 200` + heartbeat, Spot single connection).
+- Backward-compatibility: новые методы добавлены к интерфейсам как обязательные (`awaitWebSocketConnectionsReady`) или опциональные (`awaitConnectionsReady?`). Поля `messageCount?`/`lastMessageTimestamp?` опциональны, поэтому non-Futures клиенты возвращают `undefined`.
+
 ## [0.12.1] - 2026-04-24
 
 ### Fixed
@@ -409,6 +493,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Private endpoints (balance, position, orders) require valid credentials
 - WebSocket subscriptions are stateless and can be re-established on reconnect
 
+[0.13.0]: https://github.com/solncebro/exchange-engine/releases/tag/v0.13.0
 [0.12.1]: https://github.com/solncebro/exchange-engine/releases/tag/v0.12.1
 [0.12.0]: https://github.com/solncebro/exchange-engine/releases/tag/v0.12.0
 [0.11.0]: https://github.com/solncebro/exchange-engine/releases/tag/v0.11.0

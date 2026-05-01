@@ -62,7 +62,7 @@ class Exchange {
 | `fetchIncome` | ✅ | ❌ | ✅ | ✅ |
 | `fetchClosedPnl` | ❌ | ❌ | ✅ | ✅ |
 | `fetchPosition` | ✅ | ❌ | ✅ | ❌ |
-| `fetchPositionMode` | ✅ | ❌ | ❌ | ❌ |
+| `fetchPositionMode` | ✅ | ❌ | ✅ | ❌ |
 | `setPositionMode` | ✅ | ❌ | ✅ | ❌ |
 | `setLeverage` | ✅ | ❌ | ✅ | ❌ |
 | `setMarginMode` | ✅ | ❌ | ✅ | ❌ |
@@ -87,6 +87,7 @@ class Exchange {
 | `disconnectUserDataStream` | ✅ | ✅ | ✅ | ✅ |
 | `isUserDataStreamConnected` | ✅ | ✅ | ✅ | ✅ |
 | `getWebSocketConnectionInfoList` | ✅ | ✅ | ✅ | ✅ |
+| `awaitWebSocketConnectionsReady` | ✅ | ✅ | ✅ | ✅ |
 | `close` | ✅ | ✅ | ✅ | ✅ |
 
 > ❌ — метод выбрасывает `Error("Not supported for ... market")` или `Error("Not implemented for ...")`.
@@ -480,17 +481,17 @@ console.log(position.side, position.contracts, position.unrealizedPnl);
 ### `fetchPositionMode()`
 
 ```typescript
-fetchPositionMode(): Promise<PositionModeEnum>
+fetchPositionMode(): Promise<PositionModeEnum | undefined>
 ```
 
-Получает текущий режим позиций (Hedge или OneWay).
+Получает текущий режим позиций (Hedge или OneWay), если его можно определить по API.
 
-**Возврат:** `PositionModeEnum` — `Hedge` или `OneWay`.
+**Возврат:** `PositionModeEnum` (`Hedge` или `OneWay`) или `undefined`, когда режим недоступен без открытых позиций (Bybit Linear V5).
 
 | Биржа | Futures | Spot |
 |---|:---:|:---:|
 | Binance | ✅ | ❌ |
-| Bybit | ❌ | ❌ |
+| Bybit | ✅ | ❌ |
 
 ---
 
@@ -618,12 +619,18 @@ createOrderWebSocket(args: CreateOrderWebSocketArgs): Promise<Order>
 | `args.price` | `number` | нет | Цена (для Limit) |
 | `args.stopPrice` | `number` | нет | Стоп-цена (для StopMarket, TakeProfitMarket) |
 | `args.triggerDirection` | `1 \| 2` | нет | Направление триггера: 1 = рост, 2 = падение |
+| `args.triggerBy` | `TriggerByEnum` | нет | Триггер conditional (Bybit Linear): mark / last / index |
 | `args.closePosition` | `boolean` | нет | Закрыть позицию целиком |
 | `args.workingType` | `WorkingTypeEnum` | нет | Mark price или Contract price |
 | `args.positionSide` | `PositionSideEnum` | нет | Сторона позиции (для Hedge mode) |
 | `args.reduceOnly` | `boolean` | нет | Только уменьшение позиции |
+| `args.closeOnTrigger` | `boolean` | нет | Bybit Linear: закрытие по триггеру |
 | `args.timeInForce` | `TimeInForceEnum` | нет | GTC, IOC, FOK, PostOnly. Для Limit по умолчанию GTC |
 | `args.clientOrderId` | `string` | нет | Пользовательский ID ордера |
+| `args.orderFilter` | `OrderFilterEnum` | нет | Bybit Spot: фильтр conditional / TPSL |
+| `args.marketUnit` | `MarketUnitEnum` | нет | Bybit Spot: единица количества Market-ордера |
+| `args.trailingDelta` | `number` | нет | Binance Spot: trailing для STOP/TAKE_PROFIT |
+| `args.quoteOrderQty` | `number` | нет | Binance / Bybit Spot: сумма в котируемой валюте для Market Buy |
 
 **Возврат:** `Order` — созданный ордер.
 
@@ -978,6 +985,16 @@ isUserDataStreamConnected(): boolean
 
 ---
 
+### `awaitWebSocketConnectionsReady()`
+
+```typescript
+awaitWebSocketConnectionsReady(): Promise<void>
+```
+
+Ожидает готовности публичных WebSocket-подключений после подписок (например, после завершения батчей `SUBSCRIBE` у Binance Futures). У стримов без реализации `awaitConnectionsReady` разрешается сразу.
+
+---
+
 ### `getWebSocketConnectionInfoList()`
 
 ```typescript
@@ -986,7 +1003,7 @@ getWebSocketConnectionInfoList(): WebSocketConnectionInfo[]
 
 Возвращает информацию обо всех активных WebSocket-соединениях (public + trade + userData).
 
-**Возврат:** `WebSocketConnectionInfo[]` — массив с `label`, `url`, `isConnected`, `type`, `subscriptionList`.
+**Возврат:** `WebSocketConnectionInfo[]` — массив с `label`, `url`, `isConnected`, `type`, `subscriptionList`; опционально `messageCount` и `lastMessageTimestamp` (диагностика, в т.ч. Binance Futures public).
 
 ---
 
@@ -1035,10 +1052,41 @@ enum OrderTypeEnum {
   Market = 'market',
   Limit = 'limit',
   StopMarket = 'stopMarket',
+  StopLimit = 'stopLimit',
   TakeProfitMarket = 'takeProfitMarket',
+  TakeProfitLimit = 'takeProfitLimit',
   Stop = 'stop',
   TakeProfit = 'takeProfit',
   TrailingStop = 'trailingStop',
+}
+```
+
+#### `TriggerByEnum`
+
+```typescript
+enum TriggerByEnum {
+  MarkPrice = 'markPrice',
+  LastPrice = 'lastPrice',
+  IndexPrice = 'indexPrice',
+}
+```
+
+#### `OrderFilterEnum`
+
+```typescript
+enum OrderFilterEnum {
+  Order = 'Order',
+  TpslOrder = 'tpslOrder',
+  StopOrder = 'StopOrder',
+}
+```
+
+#### `MarketUnitEnum`
+
+```typescript
+enum MarketUnitEnum {
+  BaseCoin = 'baseCoin',
+  QuoteCoin = 'quoteCoin',
 }
 ```
 
@@ -1493,6 +1541,8 @@ interface WebSocketConnectionInfo {
   isConnected: boolean;
   type: WebSocketConnectionTypeEnum;
   subscriptionList: string[];
+  messageCount?: number;
+  lastMessageTimestamp?: number;
 }
 ```
 
@@ -1610,12 +1660,18 @@ interface CreateOrderWebSocketArgs {
   price?: number;
   stopPrice?: number;
   triggerDirection?: 1 | 2;
+  triggerBy?: TriggerByEnum;
   closePosition?: boolean;
   workingType?: WorkingTypeEnum;
   positionSide?: PositionSideEnum;
   reduceOnly?: boolean;
+  closeOnTrigger?: boolean;
   timeInForce?: TimeInForceEnum;
   clientOrderId?: string;
+  orderFilter?: OrderFilterEnum;
+  marketUnit?: MarketUnitEnum;
+  trailingDelta?: number;
+  quoteOrderQty?: number;
 }
 ```
 

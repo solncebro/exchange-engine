@@ -320,12 +320,6 @@ describe('BybitLinear', () => {
     await expect(client.fetchFundingInfo()).rejects.toThrow('Not implemented for Bybit');
   });
 
-  it('throws "Not implemented" for fetchPositionMode', async () => {
-    const { client } = createClient();
-
-    await expect(client.fetchPositionMode()).rejects.toThrow('Not implemented for Bybit');
-  });
-
   describe('fetchFundingRateHistory', () => {
     it('returns normalized funding rate history', async () => {
       const { client, mockInstance } = createClient();
@@ -778,6 +772,75 @@ describe('BybitLinear', () => {
       );
 
       await expect(client.setPositionMode(PositionModeEnum.Hedge)).rejects.toThrow('Some other error');
+    });
+  });
+
+  describe('fetchPositionMode', () => {
+    it('returns Hedge when any USDT position has positionIdx 1 or 2', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({
+        data: { result: { list: [{ ...BYBIT_RAW_POSITION, positionIdx: 1 }] } },
+      });
+
+      const mode = await client.fetchPositionMode();
+
+      expect(mode).toBe(PositionModeEnum.Hedge);
+    });
+
+    it('returns Hedge when both Long and Short positionIdx are present', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({
+        data: {
+          result: {
+            list: [
+              { ...BYBIT_RAW_POSITION, positionIdx: 1 },
+              { ...BYBIT_RAW_POSITION, positionIdx: 2 },
+            ],
+          },
+        },
+      });
+
+      const mode = await client.fetchPositionMode();
+
+      expect(mode).toBe(PositionModeEnum.Hedge);
+    });
+
+    it('returns OneWay when all USDT positions have positionIdx 0', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({
+        data: { result: { list: [{ ...BYBIT_RAW_POSITION, positionIdx: 0 }] } },
+      });
+
+      const mode = await client.fetchPositionMode();
+
+      expect(mode).toBe(PositionModeEnum.OneWay);
+    });
+
+    it('returns undefined when there are no USDT positions', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({
+        data: { result: { list: [] } },
+      });
+
+      const mode = await client.fetchPositionMode();
+
+      expect(mode).toBeUndefined();
+    });
+
+    it('passes settleCoin=USDT to the position list endpoint', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({
+        data: { result: { list: [] } },
+      });
+
+      await client.fetchPositionMode();
+
+      const lastCall = mockInstance.get.mock.calls[mockInstance.get.mock.calls.length - 1];
+      const requestPath = lastCall[0] as string;
+      const requestParams = (lastCall[1] as { params?: Record<string, unknown> } | undefined)?.params;
+
+      expect(requestPath).toBe('/v5/position/list');
+      expect(requestParams).toMatchObject({ category: 'linear', settleCoin: 'USDT' });
     });
   });
 
