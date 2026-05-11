@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.1] - 2026-05-11
+
+### Changed
+
+- `BybitPublicStream.resubscribeStream()`: вместо повторной отправки `{ op: 'subscribe' }` на уже открытый сокет вызывается пересоздание соединения, которое держит topic (`recreateConnection` с причиной `manual resubscribe of …`). Снижает риск «тихих» сбоев при несовпадении состояния сокета и повторяет паттерн жёсткой переподписки, как у Binance Futures public.
+
+### Added
+
+- Внутренний `recreateConnection(connectionIndex, reason)` у `BybitPublicStream`: закрытие текущего `ReliableWebSocket`, замена на новый через `buildWebSocket`, дедуп повторных recreate в окне `2000ms` (`RECREATE_DEDUP_WINDOW_MS`), перед recreate для топиков `publicTrade.{symbol}` вызывается `tradeAggregator.clearSymbol(symbol)`.
+- Поле `lastRecreateTimestamp` в `BybitConnection` (`BybitPublicStream.types.ts`) для дедупа recreate.
+
 ## [0.13.0] - 2026-04-30
 
 Сводный релиз, объединяющий все локальные эксперименты после 0.12.1: WebSocket-отчёт, Bybit Linear position-mode detection, и spot/futures order-params матрицу для нового `PositionManager` API в trade-engine.
@@ -493,6 +504,7 @@ total: 54 | source: Binance Futures Public WebSocket
 - Private endpoints (balance, position, orders) require valid credentials
 - WebSocket subscriptions are stateless and can be re-established on reconnect
 
+[0.13.1]: https://github.com/solncebro/exchange-engine/releases/tag/v0.13.1
 [0.13.0]: https://github.com/solncebro/exchange-engine/releases/tag/v0.13.0
 [0.12.1]: https://github.com/solncebro/exchange-engine/releases/tag/v0.12.1
 [0.12.0]: https://github.com/solncebro/exchange-engine/releases/tag/v0.12.0

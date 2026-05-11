@@ -83,7 +83,8 @@ Exchange-классы агрегируют через `getWebSocketConnectionInf
 - **Reconnect**: `onReconnectSuccess → resubscribeConnection(index)` — переподписка topics конкретного соединения, `tradeAggregator.clearSymbol()` для trade-подписок
 - **Dynamic topics**: новые подписки добавляются в соединение с наименьшим количеством topics (через `addTopicToConnection`); если все полны — создаётся новое
 - **Heartbeat**: `{ op: 'ping' }` → `{ op: 'pong' }`, интервал 20s
-- **Методы**: `resubscribeStream(symbol, interval)` — принудительная переподписка на конкретный topic (ищет в connectionList)
+- **Методы**: `resubscribeStream(symbol, interval)` — находит соединение с соответствующим kline topic и вызывает `recreateConnection` (полное пересоздание `ReliableWebSocket` с тем же `topicList`), а не отправку лишнего `subscribe` на уже открытый сокет; дедуп recreate в окне 2000ms по `lastRecreateTimestamp` на `BybitConnection`; для топиков `publicTrade.*` перед recreate — `tradeAggregator.clearSymbol`
+- **Внутреннее**: `buildWebSocket(connectionIndex, label)`, `recreateConnection(connectionIndex, reason)`
 
 ## TradeToKlineAggregator (src/ws/TradeToKlineAggregator.ts)
 
@@ -198,6 +199,7 @@ Bybit конвертирует через маппинг `BYBIT_KLINE_INTERVAL`:
 - `topicList: string[]` — все topics в соединении (изначальные + добавленные)
 - `dynamicTopicList: string[]` — только topics, добавленные динамически через `addTopicToConnection()` (не были при создании)
 - `url: string` — URL соединения
+- `lastRecreateTimestamp: number` — время последнего programmatic recreate (дедуп 2000ms)
 
 При reconnect (`onReconnectSuccess`) переподписываются все topics из `topicList` данного соединения.
 

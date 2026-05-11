@@ -13,6 +13,7 @@ import { parseWebSocketMessage } from './parseWebSocketMessage';
 
 const MAX_TOPICS_PER_CONNECTION = 200;
 const MAX_TOPICS_PER_SUBSCRIBE = 10;
+const RECREATE_DEDUP_WINDOW_MS = 2000;
 
 function resolveUnifiedInterval(bybitInterval: string): KlineInterval {
   for (const [unified, bybit] of Object.entries(BYBIT_KLINE_INTERVAL)) {
@@ -167,15 +168,11 @@ class BybitPublicStream {
     const bybitInterval = BYBIT_KLINE_INTERVAL[interval];
     const topic = `kline.${bybitInterval}.${symbol}`;
 
-    for (const connection of this.connectionList) {
-      if (connection.topicList.includes(topic)) {
-        try {
-          connection.webSocket.sendToConnectedSocket({ op: 'subscribe', args: [topic] });
+    for (let index = 0; index < this.connectionList.length; index++) {
+      const connection = this.connectionList[index];
 
-          this.logger.info(`BybitPublicStream: resubscribed topic ${topic}`);
-        } catch {
-          this.logger.warn(`BybitPublicStream: failed to resubscribe ${topic}`);
-        }
+      if (connection.topicList.includes(topic)) {
+        this.recreateConnection(index, `manual resubscribe of ${topic}`);
 
         return;
       }
@@ -244,7 +241,13 @@ class BybitPublicStream {
       ? `${this.label} #${index + 1}`
       : this.label;
     const connectionIndex = this.connectionList.length;
-    const webSocket = new ReliableWebSocket<BybitWebSocketMessage>({
+    const webSocket = this.buildWebSocket(connectionIndex, connectionLabel);
+
+    this.connectionList.push({ webSocket, label: connectionLabel, topicList, dynamicTopicList: [], url: this.url, lastRecreateTimestamp: 0 });
+  }
+
+  private buildWebSocket(connectionIndex: number, connectionLabel: string): ReliableWebSocket<BybitWebSocketMessage> {
+    return new ReliableWebSocket<BybitWebSocketMessage>({
       label: connectionLabel,
       url: this.url,
       logger: this.logger,
@@ -264,8 +267,49 @@ class BybitPublicStream {
         pingInterval: BYBIT_PING_INTERVAL,
       },
     });
+  }
 
-    this.connectionList.push({ webSocket, label: connectionLabel, topicList, dynamicTopicList: [], url: this.url });
+  private recreateConnection(connectionIndex: number, reason: string): void {
+    const connection = this.connectionList[connectionIndex];
+
+    if (!connection) {
+      return;
+    }
+
+    const nowTimestamp = Date.now();
+    const recentRecreateAgeMs = nowTimestamp - connection.lastRecreateTimestamp;
+
+    if (connection.lastRecreateTimestamp > 0 && recentRecreateAgeMs < RECREATE_DEDUP_WINDOW_MS) {
+      this.logger.info(`BybitPublicStream: skip recreate ${connection.label} (recent recreate ${recentRecreateAgeMs}ms ago, reason: ${reason})`);
+
+      return;
+    }
+
+    const topicCount = connection.topicList.length;
+    this.logger.warn(`BybitPublicStream: recreating ${connection.label} (reason: ${reason}, topics: ${topicCount})`);
+
+    if (this.tradeAggregator !== null) {
+      for (const topic of connection.topicList) {
+        if (topic.startsWith('publicTrade.')) {
+          const symbol = topic.slice('publicTrade.'.length);
+          this.tradeAggregator.clearSymbol(symbol);
+        }
+      }
+    }
+
+    try {
+      connection.webSocket.close();
+    } catch (error) {
+      this.logger.warn(`BybitPublicStream: failed to close ${connection.label}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+
+    const newWebSocket = this.buildWebSocket(connectionIndex, connection.label);
+
+    this.connectionList[connectionIndex] = {
+      ...connection,
+      webSocket: newWebSocket,
+      lastRecreateTimestamp: nowTimestamp,
+    };
   }
 
   private resubscribeConnection(connectionIndex: number): void {

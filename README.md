@@ -4,8 +4,9 @@ Universal TypeScript client library for cryptocurrency trading on Binance and By
 
 ## Latest Release
 
-Current version: `0.13.0`
+Current version: `0.13.1`
 
+- **0.13.1:** `BybitPublicStream.resubscribeStream` пересоздаёт WebSocket-соединение с нужным topic (вместо повторного `subscribe` на сокет), с дедупом recreate 2s и сбросом `TradeToKlineAggregator` для `publicTrade.*`.
 - New `OrderTypeEnum` values: `StopLimit`, `TakeProfitLimit` for atomic STOP_LOSS_LIMIT / TAKE_PROFIT_LIMIT on Binance Spot and Bybit Spot.
 - New enums: `TriggerByEnum` (`MarkPrice` | `LastPrice` | `IndexPrice`), `OrderFilterEnum` (`Order` | `tpslOrder` | `StopOrder`), `MarketUnitEnum` (`baseCoin` | `quoteCoin`).
 - `CreateOrderWebSocketArgs` extended with `triggerBy`, `closeOnTrigger`, `orderFilter`, `marketUnit`, `trailingDelta`, `quoteOrderQty`.

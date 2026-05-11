@@ -22,4 +22,5 @@ export interface BybitConnection {
   topicList: string[];
   dynamicTopicList: string[];
   url: string;
+  lastRecreateTimestamp: number;
 }
