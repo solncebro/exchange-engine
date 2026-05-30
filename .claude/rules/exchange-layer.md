@@ -43,7 +43,9 @@ BaseExchangeClient (abstract, implements ExchangeClient)
   modifyOrder(args: ModifyOrderArgs): Promise<Order>
   cancelAllOrders(symbol): Promise<void>
   createBatchOrders(orderList): Promise<Order[]>
-  cancelBatchOrders(symbol, orderIdList): Promise<void>
+  cancelBatchOrders(symbol, orderIdList): Promise<CancelBatchOrdersResult>
+  modifyBatchOrders(orderList: ModifyBatchOrderArgs[]): Promise<ModifyBatchOrdersResult>
+  getOrderRateLimit(): Promise<OrderRateLimit>
 
 Рыночные данные (расширенные):
   fetchOrderBook(symbol, limit?): Promise<OrderBook>
@@ -81,6 +83,10 @@ Precision:
   resubscribeKlines(args): void
   subscribeMarkPrices(handler: MarkPriceHandler): void
   unsubscribeMarkPrices(handler: MarkPriceHandler): void
+  subscribeOrderbook(args: SubscribeOrderbookArgs): void
+  unsubscribeOrderbook(args: SubscribeOrderbookArgs): void
+  subscribePublicTrades(args: SubscribePublicTradesArgs): void
+  unsubscribePublicTrades(args: SubscribePublicTradesArgs): void
 
 WebSocket Registry:
   getWebSocketConnectionInfoList(): WebSocketConnectionInfo[]
@@ -101,7 +107,8 @@ WebSocket Registry:
 - `watchTickers()` — подписка через `getPublicStream().subscribeAllTickers()` + yield `fetchTickers()`
 - `subscribeKlines()` / `unsubscribeKlines()` — делегирует в publicStream
 - `resubscribeKlines()` — принудительная переподписка на стрим (вызывает `publicStream.resubscribeStream()` если поддерживается)
-- `subscribeMarkPrices()` / `unsubscribeMarkPrices()` — делегирует в `getPublicStream()` (Binance Futures — отдельный mark-price стрим; Bybit — данные из `tickers.*`; Binance Spot — предупреждение в стриме, без подписки)
+- `subscribeMarkPrices()` / `unsubscribeMarkPrices()` — делегирует в `getPublicStream()`, прокидывая `Array.from(this.tradeSymbols.keys())` как `symbolList` (Binance Futures — агрегатный `!markPrice@arr@1s`, symbolList игнорируется; Bybit — per-symbol `tickers.{symbol}` по каждому символу из symbolList, агрегатного топика нет; Binance Spot — предупреждение в стриме, без подписки)
+- `subscribeOrderbook()` / `subscribePublicTrades()` — делегирует в `getPublicStream()`, если метод реализован (Bybit). Если `PublicStreamLike.subscribeOrderbook`/`subscribePublicTrades` равен `undefined` (Binance) — `subscribe*` бросает `Not supported for ${marketLabel} market`, `unsubscribe*` — no-op
 - `awaitWebSocketConnectionsReady()` — `publicStream.awaitConnectionsReady?.() ?? Promise.resolve()` (Binance Futures public ждёт SUBSCRIBE-батчи; остальные стримы без метода — немедленный resolve)
 - `amountToPrecision()` / `priceToPrecision()` — lookup в tradeSymbols + precision utils, возвращает `number`, fallback на исходное значение
 - `getMinOrderQty()` / `getMinNotional()` — lookup в tradeSymbols, fallback 0
@@ -135,7 +142,7 @@ Binance public streams создаются до `super()`, поэтому выз�
 - `fetchOrderHistory()`, `fetchFundingRateHistory()`, `fetchFundingInfo()`, `fetchPositionMode()`
 - `fetchPosition()`, `setLeverage()`, `setMarginMode()`
 - `cancelOrder()`, `getOrder()`, `fetchOpenOrders()`, `fetchOrderBook()`, `fetchTrades()`
-- `modifyOrder()`, `cancelAllOrders()`, `createBatchOrders()`, `cancelBatchOrders()`
+- `modifyOrder()`, `cancelAllOrders()`, `createBatchOrders()`, `cancelBatchOrders()`, `modifyBatchOrders()`, `getOrderRateLimit()`
 - `fetchMarkPrice()`, `fetchOpenInterest()`, `fetchFeeRate()`, `fetchIncome()`, `fetchClosedPnl()`
 - `setPositionMode()`, `connectUserDataStream()`, `disconnectUserDataStream()`
 
@@ -184,11 +191,12 @@ Binance public streams создаются до `super()`, поэтому выз�
 ### BinanceFutures
 - `marketLabel = 'futures'`, `klineLimit = 499`
 - Реализует все фьючерсные методы (position, leverage, funding, marginMode)
-- Реализует дополнительные методы (8):
+- Реализует дополнительные методы (9):
   - `modifyOrder(args)` → `httpClient.modifyOrder()` → `normalizeBinanceOrder()`
   - `cancelAllOrders(symbol)` → `httpClient.cancelAllOrders()`
-  - `createBatchOrders(orderList)` → `httpClient.createBatchOrders()` → `map(normalizeBinanceOrder)`
-  - `cancelBatchOrders(symbol, orderIdList)` → `httpClient.cancelBatchOrders()`
+  - `createBatchOrders(orderList)` → chunking по `BINANCE_FUTURES_CREATE_BATCH_CHUNK_SIZE` (5) через `chunkList` → последовательные вызовы `httpClient.createBatchOrders()` → `normalizeBinanceOrder()` per item. Per-order ошибки в ответе (элементы с `code < 0`) пропускаются с `logger.warn()` — успешные ордера возвращаются.
+  - `cancelBatchOrders(symbol, orderIdList)` → chunking по `BINANCE_FUTURES_CANCEL_BATCH_CHUNK_SIZE` (10) → последовательные вызовы `httpClient.cancelBatchOrders()`; per-order success/error агрегируется в `CancelBatchOrdersResult`
+  - `modifyBatchOrders(orderList)` → chunking по `BINANCE_FUTURES_MODIFY_BATCH_CHUNK_SIZE` (5) → последовательные вызовы `httpClient.modifyBatchOrders()` → per-order маппинг success/error в `ModifyBatchOrdersResult`. Каждый ордер требует `side` (обязательно для Binance PUT `/fapi/v1/batchOrders`); `clientOrderId` (если задан) маппится в `origClientOrderId`.
   - `fetchMarkPrice(symbol?)` → `httpClient.fetchMarkPrice()` → `normalizeBinanceMarkPriceList()`
   - `fetchOpenInterest(symbol)` → `httpClient.fetchOpenInterest()` → `normalizeBinanceOpenInterest()`
   - `fetchFeeRate(symbol?)` → `httpClient.fetchCommissionRate()` → `normalizeBinanceCommissionRate()`
@@ -208,6 +216,8 @@ Binance public streams создаются до `super()`, поэтому выз�
 
 `category` — `protected readonly` поле (доступно подклассам для передачи в HTTP-вызовы).
 
+`batchChunkSize` — `protected abstract readonly` поле: максимальный размер чанка для batch-операций. `BybitLinear` = `BYBIT_LINEAR_BATCH_CHUNK_SIZE` (20), `BybitSpot` = `BYBIT_SPOT_BATCH_CHUNK_SIZE` (10). Используется во всех трёх batch-методах (`createBatchOrders`, `modifyBatchOrders`, `cancelBatchOrders`) через `chunkList()`.
+
 Реализует все `protected fetchAndNormalize*()` методы через `BybitHttpClient` + `bybitNormalizer`.
 
 Реализует `createOrderWebSocket()` через `BybitTradeStream` с fallback на REST:
@@ -226,7 +236,7 @@ Binance public streams создаются до `super()`, поэтому выз�
 
 Реализует `isUserDataStreamConnected()` — `privateStream !== null && privateStream.isConnected()`.
 
-Реализует методы работы с ордерами и рыночными данными (13 методов):
+Реализует методы работы с ордерами и рыночными данными (14 методов):
 - `cancelOrder(symbol, orderId)` → `httpClient.cancelOrder()` → возвращает минимальный Order со status='canceled'
 - `getOrder(symbol, orderId)` → сначала `httpClient.getOpenOrders()` (realtime), fallback на `httpClient.getOrderHistory()` → `normalizeBybitOrder()`
 - `fetchOpenOrders(symbol?)` → `httpClient.getOpenOrders()` → `map(normalizeBybitOrder)`
@@ -236,10 +246,30 @@ Binance public streams создаются до `super()`, поэтому выз�
 - `fetchFeeRate(symbol?)` → `httpClient.fetchFeeRate()` → `normalizeBybitFeeRateList()`
 - `modifyOrder(args)` → `httpClient.amendOrder()` → `getOrder()` для получения обновлённого ордера
 - `cancelAllOrders(symbol)` → `httpClient.cancelAllOrders(category, symbol)`
-- `createBatchOrders(orderList)` → `httpClient.createBatchOrders()` → `map(buildBybitOrderFromCreateResponse)`
-- `cancelBatchOrders(symbol, orderIdList)` → `httpClient.cancelBatchOrders()`
+- `createBatchOrders(orderList)` → chunking по `batchChunkSize` через `chunkList`. WS-routing: если `tradeStream !== null && tradeStream.isConnected()` → `tradeStream.createBatchOrders(category, originalArgsChunk, requestPayloadChunk)`; иначе `httpClient.createBatchOrders(category, request)` → `map(buildBybitOrderFromCreateResponse)`.
+- `cancelBatchOrders(symbol, orderIdList)` → chunking по `batchChunkSize`. WS-routing: если активен tradeStream → `tradeStream.cancelBatchOrders(category, originalOrderIdChunk, requestPayloadChunk)`; иначе `httpClient.cancelBatchOrders()` → per-order маппинг через `retExtInfo.list`. Результат — `CancelBatchOrdersResult`.
+- `modifyBatchOrders(orderList)` → chunking по `batchChunkSize`. WS-routing: если активен tradeStream → `tradeStream.modifyBatchOrders(category, originalOrderIdChunk, requestPayloadChunk)`; иначе `httpClient.amendBatchOrders(category, request)` → per-order маппинг через `retExtInfo.list` в `ModifyBatchOrdersResult`. `clientOrderId` маппится в `orderLinkId`.
 - `fetchIncome(options?)` → `httpClient.fetchTransactionLog()` → `normalizeBybitIncomeList()`
 - `fetchClosedPnl(symbol?, options?)` → `httpClient.getClosedPnl()` → `normalizeBybitClosedPnlList()`
+
+**WS-routing для batch-операций**: при наличии активного `tradeStream` (`tradeStream !== null && tradeStream.isConnected()`) все три batch-метода (`createBatchOrders`, `modifyBatchOrders`, `cancelBatchOrders`) отправляются через WebSocket Trade Stream (`order.create-batch`, `order.amend-batch`, `order.cancel-batch`); иначе fallback на REST. В demo mode (`tradeStream === null`) — всегда REST. Chunking применяется на уровне `BybitBaseClient` снаружи WS/REST-вызова — каждый чанк отправляется отдельным запросом, результаты конкатенируются.
+
+## getOrderRateLimit (per-UID write rate-limit)
+
+Возвращает документированный или измеренный лимит RPS для order endpoints (create/cancel/modify, в т.ч. batch).
+
+```typescript
+interface OrderRateLimit {
+  writeRequestsPerSecond: number;
+  source: OrderRateLimitSource;  // 'binance-exchange-info' | 'bybit-documented' | 'fallback'
+}
+```
+
+- **Binance Futures/Spot** (`BinanceBaseClient.getOrderRateLimit`): делает `httpClient.fetchExchangeInfo()` → `parseBinanceOrderRateLimit(raw)` (`src/normalizers/binanceNormalizer.ts:349`). Функция фильтрует `raw.rateLimits[]` по `rateLimitType === 'ORDERS'`, конвертирует все интервалы в RPS (`limit / (intervalNum * secondsInInterval)`), возвращает наиболее строгий лимит через `Math.min(...)` с `source: 'binance-exchange-info'`. Если `rateLimits` отсутствует/пуст — `{ writeRequestsPerSecond: BINANCE_ORDER_RATE_LIMIT_FALLBACK_RPS, source: 'fallback' }` (константа = 15 RPS, `src/normalizers/binanceNormalizer.ts:331`). Поддерживаемые интервалы: `SECOND` / `MINUTE` / `HOUR` / `DAY`.
+- **Bybit Linear/Spot** (`BybitBaseClient.getOrderRateLimit`): возвращает hardcoded `{ writeRequestsPerSecond: 20, source: 'bybit-documented' }`. Bybit не отдаёт rate-limits через GET endpoint — только через headers на actual order calls — поэтому значение нельзя обнаружить без выполнения order-операции. Берётся как документированная константа (источник: https://bybit-exchange.github.io/docs/v5/rate-limit для `/v5/order/create`, `/v5/order/cancel`, `/v5/order/create-batch`, `/v5/order/cancel-batch`).
+- **Default**: в `BaseExchangeClient.getOrderRateLimit` — throw `Not supported for ${marketLabel} market`, но переопределяется во всех четырёх реальных классах.
+
+Raw-тип: `BinanceRateLimitRaw { rateLimitType, interval, intervalNum, limit }` в `binanceNormalizer.ts`. `BinanceExchangeInfoRaw` имеет опциональное `rateLimits?: BinanceRateLimitRaw[]`.
 
 Реализует `getWebSocketConnectionInfoList()` — агрегирует `publicStream.getConnectionInfoList()` + optional `tradeStream.getConnectionInfo()` + optional `privateStream.getConnectionInfo()`.
 
@@ -247,6 +277,7 @@ Binance public streams создаются до `super()`, поэтому выз�
 
 ### BybitLinear
 - `marketLabel = 'linear'`
+- `batchChunkSize = BYBIT_LINEAR_BATCH_CHUNK_SIZE` (20) — лимит Bybit V5 на linear/inverse/option batch
 - Наследует `BybitBaseClient`
 - Реализует фьючерсные методы (position, leverage)
 - `setMarginMode()` — no-op (Bybit Unified Account управляет margin mode на уровне аккаунта, не символа)
@@ -262,6 +293,7 @@ Binance public streams создаются до `super()`, поэтому выз�
 
 ### BybitSpot
 - `marketLabel = 'spot'`
+- `batchChunkSize = BYBIT_SPOT_BATCH_CHUNK_SIZE` (10) — лимит Bybit V5 на spot batch
 - Наследует `BybitBaseClient`
 - Для market ордеров устанавливает `marketUnit = 'baseCoin'` по умолчанию (только если не задан явно через `args.marketUnit` И не используется `quoteOrderQty`)
 - Фьючерсные методы наследуют default throw из `BaseExchangeClient`
@@ -315,3 +347,28 @@ ExchangeLogger поддерживает overloaded signatures:
 - `price?: number` — новая цена
 - `amount?: number` — новый объём
 - `triggerPrice?: number` — новая триггер-цена
+
+## ModifyBatchOrderArgs
+
+- `symbol: string` — символ
+- `orderId: string` — ID ордера для модификации
+- `side: OrderSideEnum` — обязательно (`Buy` / `Sell`); требуется для Binance Futures PUT `/fapi/v1/batchOrders` (биржа не выводит side по `origOrderId`)
+- `clientOrderId?: string` — для Bybit маппится в `orderLinkId`, для Binance — в `origClientOrderId`
+- `price?: number` — новая цена
+- `amount?: number` — новый объём
+- `triggerPrice?: number` — новая триггер-цена
+
+## SubscribeOrderbookArgs
+
+- `symbol: string` — торговый символ (`BTCUSDT`)
+- `depth: number` — глубина orderbook (Bybit: `1` / `50` / `200` / `500` / `1000` для linear, `1` / `50` / `200` для spot)
+- `handler: OrderBookHandler` — `(symbol, update: OrderBookUpdate) => void`
+
+Поддерживается только Bybit (linear и spot). Для Binance вызов `subscribeOrderbook` бросает `Not supported for ${marketLabel} market`.
+
+## SubscribePublicTradesArgs
+
+- `symbol: string` — торговый символ
+- `handler: PublicTradeHandler` — `(symbol, tradeList: PublicTrade[]) => void`
+
+Поддерживается только Bybit. Сосуществует с `subscribeKlines(symbol, '1s', ...)` (`TradeToKlineAggregator`) на одном topic `publicTrade.{symbol}` — оба consumer'а получают сообщения независимо.

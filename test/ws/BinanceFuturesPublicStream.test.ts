@@ -93,7 +93,7 @@ describe('BinanceFuturesPublicStream', () => {
       const stream = createStreamForTest({ url, mockLogger });
       const handler = jest.fn();
 
-      stream.subscribeAllTickers(handler);
+      stream.subscribeAllTickers(handler, []);
 
       await flushAsync();
 
@@ -111,7 +111,7 @@ describe('BinanceFuturesPublicStream', () => {
       const stream = createStreamForTest({ url, mockLogger });
       const handler = jest.fn();
 
-      stream.subscribeAllTickers(handler);
+      stream.subscribeAllTickers(handler, []);
       await flushAsync();
 
       capturedOnMessage!({ data: [MOCK_TICKER_RAW] });
@@ -173,7 +173,7 @@ describe('BinanceFuturesPublicStream', () => {
       const stream = createStreamForTest({ url, mockLogger });
       const handler = jest.fn();
 
-      stream.subscribeAllTickers(jest.fn());
+      stream.subscribeAllTickers(jest.fn(), []);
       await flushAsync();
 
       stream.subscribeKlines('BTCUSDT', '1m', handler);
@@ -192,7 +192,7 @@ describe('BinanceFuturesPublicStream', () => {
     it('ignores message without data', async () => {
       const stream = createStreamForTest({ url, mockLogger });
       const handler = jest.fn();
-      stream.subscribeAllTickers(handler);
+      stream.subscribeAllTickers(handler, []);
       await flushAsync();
 
       capturedOnMessage!({});
@@ -205,7 +205,7 @@ describe('BinanceFuturesPublicStream', () => {
       const handler = jest.fn().mockImplementation(() => {
         throw new Error('handler boom');
       });
-      stream.subscribeAllTickers(handler);
+      stream.subscribeAllTickers(handler, []);
       await flushAsync();
 
       capturedOnMessage!({ data: [MOCK_TICKER_RAW] });
@@ -231,7 +231,7 @@ describe('BinanceFuturesPublicStream', () => {
   describe('close', () => {
     it('closes all connections', async () => {
       const stream = createStreamForTest({ url, mockLogger });
-      stream.subscribeAllTickers(jest.fn());
+      stream.subscribeAllTickers(jest.fn(), []);
       await flushAsync();
 
       stream.close();
@@ -289,7 +289,7 @@ describe('BinanceFuturesPublicStream', () => {
       const stream = createStreamForTest({ url, mockLogger });
       const handler = jest.fn();
 
-      stream.subscribeMarkPrices(handler);
+      stream.subscribeMarkPrices(handler, []);
       // @ts-expect-error — private access for test
       expect(stream.markPriceHandlerSet.size).toBe(1);
 
@@ -301,7 +301,7 @@ describe('BinanceFuturesPublicStream', () => {
     it('dispatches normalized MarkPriceUpdate list when markPrice payload arrives', async () => {
       const stream = createStreamForTest({ url, mockLogger });
       const received: MarkPriceUpdate[][] = [];
-      stream.subscribeMarkPrices((list) => received.push(list));
+      stream.subscribeMarkPrices((list) => received.push(list), []);
       await flushAsync();
 
       const rawMarkPrice: BinanceMarkPriceWebSocketRaw = {
@@ -329,7 +329,7 @@ describe('BinanceFuturesPublicStream', () => {
 
     it('includes !markPrice@arr@1s stream name when mark price handler is registered', () => {
       const stream = createStreamForTest({ url, mockLogger });
-      stream.subscribeMarkPrices(jest.fn());
+      stream.subscribeMarkPrices(jest.fn(), []);
 
       // @ts-expect-error — read private method for test
       const streamNameList = stream.buildNonKlineStreamList();

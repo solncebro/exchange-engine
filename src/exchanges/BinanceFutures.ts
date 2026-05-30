@@ -1,7 +1,16 @@
-import type { ExchangeArgs, FetchPageWithLimitArgs, ModifyOrderArgs, CreateOrderWebSocketArgs } from '../types/exchange';
+import type {
+  CancelBatchOrdersResult,
+  CreateOrderWebSocketArgs,
+  ExchangeArgs,
+  FetchPageWithLimitArgs,
+  ModifyBatchOrderArgs,
+  ModifyBatchOrdersResult,
+  ModifyOrderArgs,
+} from '../types/exchange';
 import type { Position, Order, FundingRateHistory, FundingInfo, AccountBalances, MarkPrice, OpenInterest, FeeRate, Income } from '../types/common';
 import { MarginModeEnum, PositionModeEnum } from '../types/common';
 import { BinanceFuturesHttpClient } from '../http/BinanceFuturesHttpClient';
+import type { BinanceOrderResponseRaw } from '../normalizers/binanceNormalizer';
 import {
   normalizeBinancePosition,
   normalizeBinanceOrder,
@@ -23,10 +32,15 @@ import {
   BINANCE_FUTURES_WEBSOCKET_STREAM_URL,
   BINANCE_FUTURES_WEBSOCKET_MARKET_URL,
   BINANCE_DEMO_FUTURES_WEBSOCKET_MARKET_URL,
+  BINANCE_FUTURES_CANCEL_BATCH_CHUNK_SIZE,
+  BINANCE_FUTURES_CREATE_BATCH_CHUNK_SIZE,
+  BINANCE_FUTURES_MODIFY_BATCH_CHUNK_SIZE,
 } from '../constants/binance';
+import { BINANCE_ORDER_SIDE_REVERSE } from '../constants/mappings';
+import { chunkList as chunkListUtil } from '../utils/chunkList';
 import { BinanceBaseClient } from './BinanceBaseClient';
 import { BaseExchangeClient } from './BaseExchangeClient';
-import type { AxiosLikeError, BinanceModifyOrderParams } from './BinanceFutures.types';
+import type { AxiosLikeError, BinanceModifyBatchOrderParams, BinanceModifyOrderParams } from './BinanceFutures.types';
 
 const BINANCE_POSITION_MODE_NOOP_ERROR_CODE = -4059;
 const BINANCE_MARGIN_MODE_NOOP_ERROR_CODE = -4046;
@@ -134,6 +148,94 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
     return normalizeBinancePosition(position);
   }
 
+  async fetchPositionSnapshot(symbol: string, positionIdx?: number): Promise<Position | null> {
+    if (positionIdx !== undefined && positionIdx !== 0 && positionIdx !== 1 && positionIdx !== 2) {
+      throw new Error(
+        `fetchPositionSnapshot received invalid positionIdx=${positionIdx} for ${symbol}. ` +
+        `Allowed: undefined (oneWay), 0 (oneWay slot), 1 (hedge LONG), 2 (hedge SHORT).`,
+      );
+    }
+
+    this.logger.debug(`Fetching position snapshot for ${symbol} (positionIdx=${positionIdx ?? 'any'})`);
+    const rawPositionList = await this.httpClient.fetchPositionRisk(symbol);
+    const filteredList = rawPositionList.filter((p) => p.symbol === symbol);
+
+    if (filteredList.length === 0) {
+      return null;
+    }
+
+    if (positionIdx === undefined || positionIdx === 0) {
+      const hedgeEntry = filteredList.find((p) => p.positionSide === 'LONG' || p.positionSide === 'SHORT');
+
+      if (hedgeEntry !== undefined) {
+        throw new Error(
+          `fetchPositionSnapshot called without positionIdx but symbol ${symbol} is in hedge mode ` +
+          `(response contains LONG/SHORT positionSide entries). Caller MUST pass positionIdx explicitly in hedge mode.`,
+        );
+      }
+
+      const both = filteredList.find((p) => p.positionSide === 'BOTH');
+
+      if (both === undefined) {
+        return null;
+      }
+
+      return normalizeBinancePosition(both);
+    }
+
+    const targetSide = positionIdx === 1 ? 'LONG' : 'SHORT';
+    const matched = filteredList.find((p) => p.positionSide === targetSide);
+
+    if (!matched) {
+      return null;
+    }
+
+    const normalized = normalizeBinancePosition(matched);
+
+    return { ...normalized, positionIdx };
+  }
+
+  async fetchPositionList(symbol: string): Promise<Position[]> {
+    this.logger.debug(`Fetching position list for ${symbol}`);
+    const rawPositionList = await this.httpClient.fetchPositionRisk(symbol);
+    const filteredList = rawPositionList.filter((p) => p.symbol === symbol);
+
+    return filteredList.map((raw) => {
+      const normalized = normalizeBinancePosition(raw);
+
+      if (raw.positionSide === 'LONG') {
+        return { ...normalized, positionIdx: 1 };
+      }
+
+      if (raw.positionSide === 'SHORT') {
+        return { ...normalized, positionIdx: 2 };
+      }
+
+      return normalized;
+    });
+  }
+
+  async fetchAllPositions(): Promise<Position[]> {
+    this.logger.debug('[Binance] Fetching all positions');
+    const rawPositionList = await this.httpClient.fetchPositionRisk(undefined);
+
+    return rawPositionList
+      .filter((raw) => Math.abs(parseFloat(raw.positionAmt)) > 0)
+      .map((raw) => {
+        const normalized = normalizeBinancePosition(raw);
+
+        if (raw.positionSide === 'LONG') {
+          return { ...normalized, positionIdx: 1 };
+        }
+
+        if (raw.positionSide === 'SHORT') {
+          return { ...normalized, positionIdx: 2 };
+        }
+
+        return normalized;
+      });
+  }
+
   async setLeverage(leverage: number, symbol: string): Promise<void> {
     this.logger.info(`Setting leverage to ${leverage}x for ${symbol}`);
     await this.httpClient.setLeverage(symbol, leverage);
@@ -186,16 +288,134 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
   }
 
   async createBatchOrders(orderList: CreateOrderWebSocketArgs[]): Promise<Order[]> {
-    this.logger.debug(`[Binance] Creating batch of ${orderList.length} orders`);
-    const paramsList = orderList.map((args) => this.buildBinanceOrderParams(args));
-    const rawList = await this.httpClient.createBatchOrders(paramsList);
+    if (orderList.length === 0) {
+      return [];
+    }
 
-    return rawList.map(normalizeBinanceOrder);
+    this.logger.debug(`[Binance] Creating batch of ${orderList.length} orders`);
+    const chunkedOrderList = chunkListUtil(orderList, BINANCE_FUTURES_CREATE_BATCH_CHUNK_SIZE);
+    const aggregatedOrderList: Order[] = [];
+
+    for (const chunk of chunkedOrderList) {
+      const paramsList = chunk.map((args) => this.buildBinanceOrderParams(args));
+      const rawList = await this.httpClient.createBatchOrders(paramsList);
+
+      rawList.forEach((rawItem, indexInChunk) => {
+        if (this.isBinanceBatchErrorItem(rawItem)) {
+          const requestedSymbol = chunk[indexInChunk].symbol;
+          this.logger.warn(
+            { code: rawItem.code, msg: rawItem.msg, symbol: requestedSymbol },
+            '[Binance] createBatchOrders: per-order error skipped',
+          );
+
+          return;
+        }
+
+        aggregatedOrderList.push(normalizeBinanceOrder(rawItem as unknown as BinanceOrderResponseRaw));
+      });
+    }
+
+    return aggregatedOrderList;
   }
 
-  async cancelBatchOrders(symbol: string, orderIdList: string[]): Promise<void> {
+  async cancelBatchOrders(symbol: string, orderIdList: string[]): Promise<CancelBatchOrdersResult> {
     this.logger.debug(`[Binance] Cancelling batch of ${orderIdList.length} orders for ${symbol}`);
-    await this.httpClient.cancelBatchOrders(symbol, orderIdList);
+
+    if (orderIdList.length === 0) {
+      return [];
+    }
+
+    const aggregatedResultList: CancelBatchOrdersResult = [];
+
+    for (let chunkStart = 0; chunkStart < orderIdList.length; chunkStart += BINANCE_FUTURES_CANCEL_BATCH_CHUNK_SIZE) {
+      const chunk = orderIdList.slice(chunkStart, chunkStart + BINANCE_FUTURES_CANCEL_BATCH_CHUNK_SIZE);
+      const rawList = await this.httpClient.cancelBatchOrders(symbol, chunk);
+
+      chunk.forEach((requestedOrderId, indexInChunk) => {
+        const rawItem = rawList[indexInChunk];
+        const code = typeof rawItem?.['code'] === 'number' ? (rawItem['code'] as number) : null;
+        const msg = typeof rawItem?.['msg'] === 'string' ? (rawItem['msg'] as string) : null;
+        const status = typeof rawItem?.['status'] === 'string' ? (rawItem['status'] as string) : null;
+        const isSuccess = status === 'CANCELED' || (code === null && status !== null);
+
+        aggregatedResultList.push({
+          orderId: requestedOrderId,
+          isSuccess,
+          errorCode: isSuccess ? null : code,
+          errorText: isSuccess ? null : (msg ?? 'Unknown error'),
+        });
+      });
+    }
+
+    return aggregatedResultList;
+  }
+
+  async modifyBatchOrders(orderList: ModifyBatchOrderArgs[]): Promise<ModifyBatchOrdersResult> {
+    if (orderList.length === 0) {
+      return [];
+    }
+
+    this.logger.debug(`[Binance] Modifying batch of ${orderList.length} orders`);
+    const chunkedList = chunkListUtil(orderList, BINANCE_FUTURES_MODIFY_BATCH_CHUNK_SIZE);
+    const aggregatedResultList: ModifyBatchOrdersResult = [];
+
+    for (const chunk of chunkedList) {
+      const paramsList = chunk.map((args) => this.buildBinanceModifyBatchOrderParams(args));
+      const rawList = await this.httpClient.modifyBatchOrders(
+        paramsList as unknown as Array<Record<string, unknown>>,
+      );
+
+      chunk.forEach((requestedOrder, indexInChunk) => {
+        const rawItem = rawList[indexInChunk];
+        const code = typeof rawItem?.['code'] === 'number' ? (rawItem['code'] as number) : null;
+        const msg = typeof rawItem?.['msg'] === 'string' ? (rawItem['msg'] as string) : null;
+        const isSuccess = code === null;
+
+        aggregatedResultList.push({
+          orderId: requestedOrder.orderId,
+          isSuccess,
+          errorCode: isSuccess ? null : code,
+          errorText: isSuccess ? null : (msg ?? 'Unknown error'),
+        });
+      });
+    }
+
+    return aggregatedResultList;
+  }
+
+  private buildBinanceModifyBatchOrderParams(args: ModifyBatchOrderArgs): BinanceModifyBatchOrderParams {
+    const params: BinanceModifyBatchOrderParams = {
+      symbol: args.symbol,
+      orderId: args.orderId,
+      side: BINANCE_ORDER_SIDE_REVERSE[args.side],
+    };
+
+    if (args.clientOrderId !== undefined) {
+      params.origClientOrderId = args.clientOrderId;
+    }
+
+    if (args.price !== undefined) {
+      params.price = String(this.priceToPrecision(args.symbol, args.price));
+    }
+
+    if (args.amount !== undefined) {
+      params.quantity = String(this.amountToPrecision(args.symbol, args.amount));
+    }
+
+    if (args.triggerPrice !== undefined) {
+      params.stopPrice = String(this.priceToPrecision(args.symbol, args.triggerPrice));
+    }
+
+    return params;
+  }
+
+  private isBinanceBatchErrorItem(rawItem: unknown): rawItem is { code: number; msg?: string } {
+    return (
+      typeof rawItem === 'object' &&
+      rawItem !== null &&
+      typeof (rawItem as { code?: unknown }).code === 'number' &&
+      (rawItem as { code: number }).code < 0
+    );
   }
 
   async fetchMarkPrice(symbol?: string): Promise<MarkPrice[]> {

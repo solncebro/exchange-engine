@@ -19,6 +19,7 @@ import {
   BINANCE_RAW_OPEN_INTEREST,
   BINANCE_RAW_COMMISSION_RATE,
   BINANCE_RAW_INCOME_LIST,
+  BINANCE_RAW_MODIFY_BATCH_RESPONSE_MIXED,
 } from '../fixtures/binanceRaw';
 import { MarginModeEnum, OrderSideEnum, OrderTypeEnum, PositionModeEnum, PositionSideEnum, TimeInForceEnum, TradeSymbolTypeEnum, WorkingTypeEnum } from '../../src/types/common';
 import { BinanceFuturesPublicStream } from '../../src/ws/BinanceFuturesPublicStream';
@@ -79,6 +80,135 @@ describe('BinanceFutures', () => {
       mockInstance.get.mockResolvedValue({ data: [] });
 
       await expect(client.fetchPosition('BTCUSDT')).rejects.toThrow('Position not found for BTCUSDT');
+    });
+  });
+
+  describe('fetchPositionSnapshot', () => {
+    it('returns null when response is empty', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: [] });
+
+      const result = await client.fetchPositionSnapshot('BTCUSDT', 1);
+
+      expect(result).toBeNull();
+    });
+
+    it('returns BOTH-side entry when positionIdx is undefined (oneWay)', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({
+        data: [{ ...BINANCE_RAW_POSITION_RISK, positionSide: 'BOTH' }],
+      });
+
+      const result = await client.fetchPositionSnapshot('BTCUSDT');
+
+      expect(result).not.toBeNull();
+      expect(result?.side).toBe(PositionSideEnum.Both);
+    });
+
+    it('maps positionIdx=1 to positionSide=LONG and returns matched entry', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({
+        data: [
+          { ...BINANCE_RAW_POSITION_RISK, positionSide: 'LONG', positionAmt: '0.5' },
+          { ...BINANCE_RAW_POSITION_RISK, positionSide: 'SHORT', positionAmt: '0' },
+        ],
+      });
+
+      const result = await client.fetchPositionSnapshot('BTCUSDT', 1);
+
+      expect(result?.side).toBe(PositionSideEnum.Long);
+      expect(result?.contracts).toBe(0.5);
+      expect(result?.positionIdx).toBe(1);
+    });
+
+    it('maps positionIdx=2 to positionSide=SHORT', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({
+        data: [
+          { ...BINANCE_RAW_POSITION_RISK, positionSide: 'LONG', positionAmt: '0' },
+          { ...BINANCE_RAW_POSITION_RISK, positionSide: 'SHORT', positionAmt: '0.3' },
+        ],
+      });
+
+      const result = await client.fetchPositionSnapshot('BTCUSDT', 2);
+
+      expect(result?.side).toBe(PositionSideEnum.Short);
+      expect(result?.contracts).toBe(0.3);
+      expect(result?.positionIdx).toBe(2);
+    });
+
+    it('returns null when target positionSide is not present', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({
+        data: [{ ...BINANCE_RAW_POSITION_RISK, positionSide: 'LONG' }],
+      });
+
+      const result = await client.fetchPositionSnapshot('BTCUSDT', 2);
+
+      expect(result).toBeNull();
+    });
+
+    it('throws on invalid positionIdx values (defensive)', async () => {
+      const { client } = createClient();
+
+      await expect(client.fetchPositionSnapshot('BTCUSDT', 99)).rejects.toThrow(
+        /invalid positionIdx=99/,
+      );
+      await expect(client.fetchPositionSnapshot('BTCUSDT', -1)).rejects.toThrow(
+        /invalid positionIdx=-1/,
+      );
+    });
+
+    it('throws when positionIdx is undefined but response contains LONG/SHORT entries (hedge mode)', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({
+        data: [
+          { ...BINANCE_RAW_POSITION_RISK, positionSide: 'LONG', positionAmt: '0.5' },
+          { ...BINANCE_RAW_POSITION_RISK, positionSide: 'SHORT', positionAmt: '0' },
+        ],
+      });
+
+      await expect(client.fetchPositionSnapshot('BTCUSDT')).rejects.toThrow(
+        /is in hedge mode/,
+      );
+    });
+
+    it('returns null when positionIdx is undefined and only BOTH entry is present (oneWay closed)', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({
+        data: [{ ...BINANCE_RAW_POSITION_RISK, positionSide: 'OTHER', positionAmt: '0' }],
+      });
+
+      const result = await client.fetchPositionSnapshot('BTCUSDT');
+
+      expect(result).toBeNull();
+    });
+  });
+
+  describe('fetchPositionList', () => {
+    it('returns empty array when response is empty', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: [] });
+
+      const result = await client.fetchPositionList('BTCUSDT');
+
+      expect(result).toEqual([]);
+    });
+
+    it('returns all entries with mapped positionIdx (hedge mode)', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({
+        data: [
+          { ...BINANCE_RAW_POSITION_RISK, positionSide: 'LONG' },
+          { ...BINANCE_RAW_POSITION_RISK, positionSide: 'SHORT' },
+        ],
+      });
+
+      const result = await client.fetchPositionList('BTCUSDT');
+
+      expect(result).toHaveLength(2);
+      expect(result[0].positionIdx).toBe(1);
+      expect(result[1].positionIdx).toBe(2);
     });
   });
 
@@ -850,11 +980,278 @@ describe('BinanceFutures', () => {
   });
 
   describe('cancelBatchOrders', () => {
-    it('completes without error', async () => {
+    it('returns empty array on empty input without calling httpClient', async () => {
       const { client, mockInstance } = createClient();
-      mockInstance.delete.mockResolvedValue({ data: {} });
 
-      await expect(client.cancelBatchOrders('BTCUSDT', ['order-1', 'order-2'])).resolves.toBeUndefined();
+      const result = await client.cancelBatchOrders('BTCUSDT', []);
+
+      expect(result).toEqual([]);
+      expect(mockInstance.delete).not.toHaveBeenCalled();
+    });
+
+    it('maps all-success batch with status=CANCELED', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.delete.mockResolvedValue({
+        data: [
+          { orderId: 1, status: 'CANCELED', clientOrderId: 'a' },
+          { orderId: 2, status: 'CANCELED', clientOrderId: 'b' },
+        ],
+      });
+
+      const result = await client.cancelBatchOrders('BTCUSDT', ['order-1', 'order-2']);
+
+      expect(result).toEqual([
+        { orderId: 'order-1', isSuccess: true, errorCode: null, errorText: null },
+        { orderId: 'order-2', isSuccess: true, errorCode: null, errorText: null },
+      ]);
+    });
+
+    it('maps all-failure batch with code -2011 Unknown order', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.delete.mockResolvedValue({
+        data: [
+          { code: -2011, msg: 'Unknown order sent.' },
+          { code: -2011, msg: 'Unknown order sent.' },
+        ],
+      });
+
+      const result = await client.cancelBatchOrders('BTCUSDT', ['order-1', 'order-2']);
+
+      expect(result).toEqual([
+        { orderId: 'order-1', isSuccess: false, errorCode: -2011, errorText: 'Unknown order sent.' },
+        { orderId: 'order-2', isSuccess: false, errorCode: -2011, errorText: 'Unknown order sent.' },
+      ]);
+    });
+
+    it('maps mixed success/failure (10 success + 2 fail) across two chunks', async () => {
+      const { client, mockInstance } = createClient();
+      const orderIdList = Array.from({ length: 12 }, (_, index) => `order-${index + 1}`);
+      const firstChunkData = Array.from({ length: 10 }, (_, index) => ({
+        orderId: index + 1,
+        status: 'CANCELED',
+      }));
+      const secondChunkData = [
+        { code: -2011, msg: 'Unknown order sent.' },
+        { code: -1003, msg: 'Too many requests; current limit is 1200 request weight per 1 MINUTE.' },
+      ];
+
+      mockInstance.delete
+        .mockResolvedValueOnce({ data: firstChunkData })
+        .mockResolvedValueOnce({ data: secondChunkData });
+
+      const result = await client.cancelBatchOrders('BTCUSDT', orderIdList);
+
+      expect(mockInstance.delete).toHaveBeenCalledTimes(2);
+      expect(result).toHaveLength(12);
+      expect(result.slice(0, 10).every((entry) => entry.isSuccess)).toBe(true);
+      expect(result[10]).toEqual({
+        orderId: 'order-11',
+        isSuccess: false,
+        errorCode: -2011,
+        errorText: 'Unknown order sent.',
+      });
+      expect(result[11]).toEqual({
+        orderId: 'order-12',
+        isSuccess: false,
+        errorCode: -1003,
+        errorText: 'Too many requests; current limit is 1200 request weight per 1 MINUTE.',
+      });
+    });
+
+    it('chunks 25 orderIds into 3 HTTP calls of size 10/10/5', async () => {
+      const { client, mockInstance } = createClient();
+      const orderIdList = Array.from({ length: 25 }, (_, index) => `order-${index + 1}`);
+
+      mockInstance.delete.mockImplementation(async (_url: string, options: any) => {
+        const requestList = JSON.parse(options.params.orderIdList) as string[];
+        const data = requestList.map((_orderId, index) => ({ orderId: index + 1, status: 'CANCELED' }));
+
+        return { data };
+      });
+
+      const result = await client.cancelBatchOrders('BTCUSDT', orderIdList);
+
+      expect(result).toHaveLength(25);
+      expect(result.every((entry) => entry.isSuccess)).toBe(true);
+      expect(mockInstance.delete).toHaveBeenCalledTimes(3);
+
+      const firstCallParams = JSON.parse(mockInstance.delete.mock.calls[0][1].params.orderIdList);
+      const secondCallParams = JSON.parse(mockInstance.delete.mock.calls[1][1].params.orderIdList);
+      const thirdCallParams = JSON.parse(mockInstance.delete.mock.calls[2][1].params.orderIdList);
+
+      expect(firstCallParams).toHaveLength(10);
+      expect(firstCallParams[0]).toBe('order-1');
+      expect(firstCallParams[9]).toBe('order-10');
+      expect(secondCallParams).toHaveLength(10);
+      expect(secondCallParams[0]).toBe('order-11');
+      expect(secondCallParams[9]).toBe('order-20');
+      expect(thirdCallParams).toHaveLength(5);
+      expect(thirdCallParams[0]).toBe('order-21');
+      expect(thirdCallParams[4]).toBe('order-25');
+    });
+
+    it('falls back to "Unknown error" when response item is missing fields', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.delete.mockResolvedValue({ data: [{}] });
+
+      const result = await client.cancelBatchOrders('BTCUSDT', ['order-1']);
+
+      expect(result).toEqual([
+        { orderId: 'order-1', isSuccess: false, errorCode: null, errorText: 'Unknown error' },
+      ]);
+    });
+  });
+
+  describe('modifyBatchOrders', () => {
+    it('returns empty array for empty input without HTTP call', async () => {
+      const { client, mockInstance } = createClient();
+
+      const result = await client.modifyBatchOrders([]);
+
+      expect(result).toEqual([]);
+      expect(mockInstance.put).not.toHaveBeenCalled();
+    });
+
+    it('maps Binance per-order response to ModifyOrderItemResult', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: BINANCE_RAW_EXCHANGE_INFO });
+      await client.loadTradeSymbols();
+
+      mockInstance.put.mockResolvedValue({ data: BINANCE_RAW_MODIFY_BATCH_RESPONSE_MIXED });
+
+      const result = await client.modifyBatchOrders([
+        { symbol: 'BTCUSDT', orderId: '100', side: OrderSideEnum.Buy, price: 30005, amount: 1 },
+        { symbol: 'BTCUSDT', orderId: '101', side: OrderSideEnum.Buy, price: 30100, amount: 1 },
+      ]);
+
+      expect(result).toEqual([
+        { orderId: '100', isSuccess: true, errorCode: null, errorText: null },
+        { orderId: '101', isSuccess: false, errorCode: -2022, errorText: 'ReduceOnly Order is rejected.' },
+      ]);
+    });
+
+    it('chunks input by BINANCE_FUTURES_MODIFY_BATCH_CHUNK_SIZE=5 and concatenates results', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: BINANCE_RAW_EXCHANGE_INFO });
+      await client.loadTradeSymbols();
+
+      mockInstance.put.mockResolvedValueOnce({
+        data: Array.from({ length: 5 }, (_, index) => ({
+          orderId: index + 1,
+          symbol: 'BTCUSDT',
+          status: 'NEW',
+          updateTime: 1700000000000,
+        })),
+      });
+      mockInstance.put.mockResolvedValueOnce({
+        data: [{ orderId: 6, symbol: 'BTCUSDT', status: 'NEW', updateTime: 1700000000000 }],
+      });
+
+      const orderList = Array.from({ length: 6 }, (_, index) => ({
+        symbol: 'BTCUSDT',
+        orderId: String(index + 1),
+        side: OrderSideEnum.Buy,
+        price: 30000,
+      }));
+      const result = await client.modifyBatchOrders(orderList);
+
+      expect(mockInstance.put).toHaveBeenCalledTimes(2);
+      expect(result).toHaveLength(6);
+      expect(result.every((entry) => entry.isSuccess)).toBe(true);
+    });
+
+    it('sends correctly mapped side (BUY/SELL) and precision-adjusted price/quantity', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: BINANCE_RAW_EXCHANGE_INFO });
+      await client.loadTradeSymbols();
+
+      mockInstance.put.mockResolvedValue({
+        data: [{ orderId: 1, symbol: 'BTCUSDT', status: 'NEW' }],
+      });
+
+      await client.modifyBatchOrders([
+        { symbol: 'BTCUSDT', orderId: '1', side: OrderSideEnum.Sell, price: 30000.123456, amount: 0.123456 },
+      ]);
+
+      const [, , options] = mockInstance.put.mock.calls[0];
+      const batchOrders = JSON.parse(options.params.batchOrders);
+
+      expect(batchOrders).toHaveLength(1);
+      expect(batchOrders[0].symbol).toBe('BTCUSDT');
+      expect(batchOrders[0].orderId).toBe('1');
+      expect(batchOrders[0].side).toBe('SELL');
+      expect(batchOrders[0].price).toBe('30000.1');
+      expect(batchOrders[0].quantity).toBe('0.123');
+    });
+  });
+
+  describe('createBatchOrders chunking', () => {
+    it('chunks input by BINANCE_FUTURES_CREATE_BATCH_CHUNK_SIZE=5', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: BINANCE_RAW_EXCHANGE_INFO });
+      await client.loadTradeSymbols();
+
+      mockInstance.post.mockResolvedValueOnce({
+        data: Array.from({ length: 5 }, (_, index) => ({ ...BINANCE_RAW_ORDER_RESPONSE, orderId: index + 1 })),
+      });
+      mockInstance.post.mockResolvedValueOnce({
+        data: [{ ...BINANCE_RAW_ORDER_RESPONSE, orderId: 6 }],
+      });
+
+      const orderList = Array.from({ length: 6 }, () => ({
+        symbol: 'BTCUSDT',
+        type: OrderTypeEnum.Limit,
+        side: OrderSideEnum.Buy,
+        amount: 0.001,
+        price: 30000,
+      }));
+      const result = await client.createBatchOrders(orderList);
+
+      const batchOrdersCallList = mockInstance.post.mock.calls.filter(
+        (call: unknown[]) => call[0] === '/fapi/v1/batchOrders',
+      );
+
+      expect(batchOrdersCallList).toHaveLength(2);
+      expect(result).toHaveLength(6);
+    });
+
+    it('returns empty array on empty input without calling httpClient', async () => {
+      const { client, mockInstance } = createClient();
+
+      const result = await client.createBatchOrders([]);
+
+      expect(result).toEqual([]);
+      expect(mockInstance.post).not.toHaveBeenCalled();
+    });
+
+    it('skips per-order errors with warning and returns only normalized orders', async () => {
+      const logger = createMockLogger();
+      const mockInstance = createMockAxiosInstance();
+      mockedAxios.create.mockReturnValue(mockInstance as any);
+
+      const client = new BinanceFutures({
+        config: { apiKey: 'testKey', secret: 'testSecret', isDemoMode: false },
+        logger,
+      });
+
+      mockInstance.get.mockResolvedValue({ data: BINANCE_RAW_EXCHANGE_INFO });
+      await client.loadTradeSymbols();
+
+      mockInstance.post.mockResolvedValue({
+        data: [
+          BINANCE_RAW_ORDER_RESPONSE,
+          { code: -2022, msg: 'ReduceOnly Order is rejected.' },
+        ],
+      });
+
+      const result = await client.createBatchOrders([
+        { symbol: 'BTCUSDT', type: OrderTypeEnum.Limit, side: OrderSideEnum.Buy, amount: 0.001, price: 30000 },
+        { symbol: 'BTCUSDT', type: OrderTypeEnum.Limit, side: OrderSideEnum.Buy, amount: 0.001, price: 30000, reduceOnly: true },
+      ]);
+
+      expect(result).toHaveLength(1);
+      expect(result[0].id).toBe(String(BINANCE_RAW_ORDER_RESPONSE.orderId));
+      expect(logger.warn).toHaveBeenCalled();
     });
   });
 
@@ -910,6 +1307,58 @@ describe('BinanceFutures', () => {
       const publicStreamInstance = MockedPublicStream.mock.instances[0];
 
       expect(publicStreamInstance.close).toHaveBeenCalled();
+    });
+  });
+
+  describe('getOrderRateLimit', () => {
+    it('parses ORDERS limit from exchangeInfo (300 / 10s → 30 RPS)', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({
+        data: {
+          symbols: [],
+          rateLimits: [
+            { rateLimitType: 'REQUEST_WEIGHT', interval: 'MINUTE', intervalNum: 1, limit: 2400 },
+            { rateLimitType: 'ORDERS', interval: 'SECOND', intervalNum: 10, limit: 300 },
+          ],
+        },
+      });
+
+      const result = await client.getOrderRateLimit();
+
+      expect(result).toEqual({ writeRequestsPerSecond: 30, source: 'binance-exchange-info' });
+    });
+
+    it('falls back to 15 RPS when ORDERS limit absent', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({
+        data: {
+          symbols: [],
+          rateLimits: [
+            { rateLimitType: 'REQUEST_WEIGHT', interval: 'MINUTE', intervalNum: 1, limit: 2400 },
+          ],
+        },
+      });
+
+      const result = await client.getOrderRateLimit();
+
+      expect(result).toEqual({ writeRequestsPerSecond: 15, source: 'fallback' });
+    });
+
+    it('returns the strictest of multiple ORDERS limits (300/10s vs 1200/min → 20 RPS)', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({
+        data: {
+          symbols: [],
+          rateLimits: [
+            { rateLimitType: 'ORDERS', interval: 'SECOND', intervalNum: 10, limit: 300 },
+            { rateLimitType: 'ORDERS', interval: 'MINUTE', intervalNum: 1, limit: 1200 },
+          ],
+        },
+      });
+
+      const result = await client.getOrderRateLimit();
+
+      expect(result).toEqual({ writeRequestsPerSecond: 20, source: 'binance-exchange-info' });
     });
   });
 });

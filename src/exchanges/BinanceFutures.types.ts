@@ -13,4 +13,15 @@ interface BinanceModifyOrderParams {
   [key: string]: unknown;
 }
 
-export type { AxiosLikeError, BinanceModifyOrderParams };
+interface BinanceModifyBatchOrderParams {
+  symbol: string;
+  orderId?: number | string;
+  origClientOrderId?: string;
+  side: string;
+  quantity?: string;
+  price?: string;
+  stopPrice?: string;
+  priceMatch?: string;
+}
+
+export type { AxiosLikeError, BinanceModifyOrderParams, BinanceModifyBatchOrderParams };

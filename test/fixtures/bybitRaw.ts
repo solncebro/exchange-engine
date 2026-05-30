@@ -6,6 +6,7 @@ import type {
   BybitOrderResponseRaw,
   BybitWalletBalanceRaw,
   BybitOrderBookRaw,
+  BybitPublicTradeDataRaw,
   BybitPublicTradeRaw,
   BybitOpenInterestRaw,
   BybitFeeRateRaw,
@@ -155,6 +156,20 @@ export const BYBIT_RAW_PUBLIC_TRADE_LIST: BybitPublicTradeRaw[] = [
   { execId: 'exec-2', symbol: 'BTCUSDT', price: '65001.00', size: '0.200', side: 'Sell', time: '1700000001000', isBlockTrade: false },
 ];
 
+export const BYBIT_RAW_PUBLIC_TRADE_STREAM_LIST: BybitPublicTradeDataRaw[] = [
+  { T: 1700000000000, s: 'BTCUSDT', p: '65000.50', v: '0.100', S: 'Buy', i: 'stream-1', BT: false, L: 'PlusTick' },
+  { T: 1700000001000, s: 'BTCUSDT', p: '65001.00', v: '0.200', S: 'Sell', i: 'stream-2', BT: false },
+];
+
+export const BYBIT_RAW_ORDER_BOOK_STREAM: BybitOrderBookRaw = {
+  s: 'BTCUSDT',
+  a: [['65001.00', '0.800'], ['65002.00', '1.200']],
+  b: [['65000.00', '1.500'], ['64999.00', '2.300']],
+  ts: 1700000000000,
+  u: 999999,
+  seq: 7961638724,
+};
+
 export const BYBIT_RAW_MARK_PRICE_TICKER_LIST: BybitTickerRaw[] = [
   { symbol: 'BTCUSDT', lastPrice: '65432.10', prevPrice24h: '63900.00', highPrice24h: '66000.00', lowPrice24h: '63500.00', price24hPcnt: '0.0235', volume24h: '12345.67', turnover24h: '805000000.00', markPrice: '65450.50', indexPrice: '65440.20', fundingRate: '0.0001', nextFundingTime: '1700028800000', time: 1700000000000 },
   { symbol: 'ETHUSDT', lastPrice: '3456.78', prevPrice24h: '3498.78', highPrice24h: '3550.00', lowPrice24h: '3400.00', price24hPcnt: '-0.0120', volume24h: '98765.43', turnover24h: '340000000.00', markPrice: '3458.30', indexPrice: '3457.10', fundingRate: '-0.00005', nextFundingTime: '1700028800000', time: 1700000000000 },
@@ -183,3 +198,58 @@ export const BYBIT_RAW_TRANSACTION_LOG_LIST: BybitTransactionLogRaw[] = [
   { symbol: 'BTCUSDT', type: 'TRADE', qty: '0.100', cashFlow: '-6500.00', currency: 'USDT', transactionTime: '1700000000000', tradeId: 'trade-1', orderId: 'order-1' },
   { symbol: 'ETHUSDT', type: 'FUNDING', qty: '0', cashFlow: '0.50', currency: 'USDT', transactionTime: '1700000001000', tradeId: '', orderId: '' },
 ];
+
+export const BYBIT_RAW_AMEND_BATCH_RESPONSE = {
+  retCode: 0,
+  retMsg: 'OK',
+  result: {
+    list: [
+      { category: 'linear', symbol: 'BTCUSDT', orderId: '1', orderLinkId: '' },
+      { category: 'linear', symbol: 'BTCUSDT', orderId: '2', orderLinkId: '' },
+    ],
+  },
+  retExtInfo: { list: [{ code: 0, msg: 'OK' }, { code: 110001, msg: 'Order does not exist' }] },
+  time: 1700000000000,
+};
+
+export const BYBIT_WS_RAW_CREATE_BATCH_RESPONSE = {
+  op: 'order.create-batch',
+  reqId: 'placeholder',
+  retCode: 0,
+  retMsg: 'OK',
+  data: {
+    list: [
+      { category: 'linear', symbol: 'BTCUSDT', orderId: 'o-1', orderLinkId: '' },
+      { category: 'linear', symbol: 'BTCUSDT', orderId: 'o-2', orderLinkId: '' },
+    ],
+  },
+  retExtInfo: { list: [{ code: 0, msg: 'OK' }, { code: 0, msg: 'OK' }] },
+};
+
+export const BYBIT_WS_RAW_AMEND_BATCH_RESPONSE = {
+  op: 'order.amend-batch',
+  reqId: 'placeholder',
+  retCode: 0,
+  retMsg: 'OK',
+  data: {
+    list: [
+      { category: 'linear', symbol: 'BTCUSDT', orderId: '1', orderLinkId: '' },
+      { category: 'linear', symbol: 'BTCUSDT', orderId: '2', orderLinkId: '' },
+    ],
+  },
+  retExtInfo: { list: [{ code: 0, msg: 'OK' }, { code: 110001, msg: 'Order does not exist' }] },
+};
+
+export const BYBIT_WS_RAW_CANCEL_BATCH_RESPONSE = {
+  op: 'order.cancel-batch',
+  reqId: 'placeholder',
+  retCode: 0,
+  retMsg: 'OK',
+  data: {
+    list: [
+      { category: 'linear', symbol: 'BTCUSDT', orderId: 'o-1', orderLinkId: '' },
+      { category: 'linear', symbol: 'BTCUSDT', orderId: 'o-2', orderLinkId: '' },
+    ],
+  },
+  retExtInfo: { list: [{ code: 0, msg: 'OK' }, { code: 110001, msg: 'Order does not exist' }] },
+};

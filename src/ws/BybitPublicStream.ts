@@ -1,10 +1,10 @@
 import { ReliableWebSocket, WebSocketStatus } from '@solncebro/websocket-engine';
 
-import type { ExchangeLogger, KlineInterval, MarkPriceHandler, MarkPriceUpdate, TickerBySymbol, WebSocketConnectionInfo } from '../types/common';
+import type { ExchangeLogger, KlineInterval, MarkPriceHandler, MarkPriceUpdate, OrderBookHandler, OrderBookUpdateType, PublicTradeHandler, TickerBySymbol, WebSocketConnectionInfo } from '../types/common';
 import { WebSocketConnectionTypeEnum } from '../types/common';
 import type { KlineHandler } from '../types/exchange';
-import { normalizeBybitKlineWebSocketMessage, normalizeBybitTickers } from '../normalizers/bybitNormalizer';
-import type { BybitPublicTradeDataRaw, BybitTickerRaw, BybitWebSocketKlineRaw } from '../normalizers/bybitNormalizer';
+import { normalizeBybitKlineWebSocketMessage, normalizeBybitOrderBookUpdate, normalizeBybitPublicTradeFromStream, normalizeBybitTickers } from '../normalizers/bybitNormalizer';
+import type { BybitOrderBookRaw, BybitPublicTradeDataRaw, BybitTickerRaw, BybitWebSocketKlineRaw } from '../normalizers/bybitNormalizer';
 import { BYBIT_KLINE_INTERVAL } from '../constants/bybit';
 import { BYBIT_HEARTBEAT_CONFIG, BYBIT_PING_INTERVAL } from './bybitWebSocketUtils';
 import type { BybitConnection, BybitPublicStreamArgs, BybitWebSocketMessage } from './BybitPublicStream.types';
@@ -34,9 +34,12 @@ class BybitPublicStream {
   private readonly tickerHandlerSet: Set<(tickers: TickerBySymbol) => void> = new Set();
   private readonly markPriceHandlerSet: Set<MarkPriceHandler> = new Set();
   private readonly klineHandlerByKey: Map<string, Set<KlineHandler>> = new Map();
+  private readonly orderBookHandlerByTopic: Map<string, Set<OrderBookHandler>> = new Map();
+  private readonly publicTradeHandlerBySymbol: Map<string, Set<PublicTradeHandler>> = new Map();
   private readonly activeSubscriptionSet: Set<string> = new Set();
   private tradeAggregator: TradeToKlineAggregator | null = null;
   private readonly tradeSubscribedSymbolSet: Set<string> = new Set();
+  private readonly tickerSubscribedSymbolSet: Set<string> = new Set();
   private isConnectScheduled = false;
 
   constructor(args: BybitPublicStreamArgs) {
@@ -46,36 +49,59 @@ class BybitPublicStream {
     this.label = args.label;
   }
 
-  subscribeAllTickers(handler: (tickers: TickerBySymbol) => void): void {
+  subscribeAllTickers(handler: (tickers: TickerBySymbol) => void, symbolList: string[]): void {
     this.tickerHandlerSet.add(handler);
-    const topic = this.resolveTickerTopic();
-    this.activeSubscriptionSet.add(topic);
-    this.scheduleConnect();
+    this.subscribeTickerSymbols(symbolList);
   }
 
   unsubscribeAllTickers(handler: (tickers: TickerBySymbol) => void): void {
     this.tickerHandlerSet.delete(handler);
-
-    if (this.tickerHandlerSet.size === 0 && this.markPriceHandlerSet.size === 0) {
-      const topic = this.resolveTickerTopic();
-      this.activeSubscriptionSet.delete(topic);
-    }
+    this.releaseTickerSymbolsIfUnused();
   }
 
-  subscribeMarkPrices(handler: MarkPriceHandler): void {
+  subscribeMarkPrices(handler: MarkPriceHandler, symbolList: string[]): void {
     this.markPriceHandlerSet.add(handler);
-    const topic = this.resolveTickerTopic();
-    this.activeSubscriptionSet.add(topic);
-    this.scheduleConnect();
+    this.subscribeTickerSymbols(symbolList);
   }
 
   unsubscribeMarkPrices(handler: MarkPriceHandler): void {
     this.markPriceHandlerSet.delete(handler);
+    this.releaseTickerSymbolsIfUnused();
+  }
 
-    if (this.markPriceHandlerSet.size === 0 && this.tickerHandlerSet.size === 0) {
-      const topic = this.resolveTickerTopic();
-      this.activeSubscriptionSet.delete(topic);
+  // Bybit V5 has no aggregate ticker topic — tickers are per-symbol (tickers.{symbol}).
+  // The same tickers.{symbol} topic feeds both ticker and mark-price consumers, so a
+  // symbol stays subscribed while either handler set is non-empty.
+  private subscribeTickerSymbols(symbolList: string[]): void {
+    for (const symbol of symbolList) {
+      if (this.tickerSubscribedSymbolSet.has(symbol)) {
+        continue;
+      }
+
+      this.tickerSubscribedSymbolSet.add(symbol);
+      const topic = `tickers.${symbol}`;
+      this.activeSubscriptionSet.add(topic);
+
+      if (this.connectionList.length > 0) {
+        this.addTopicToConnection(topic);
+      } else {
+        this.scheduleConnect();
+      }
     }
+  }
+
+  private releaseTickerSymbolsIfUnused(): void {
+    if (this.markPriceHandlerSet.size > 0 || this.tickerHandlerSet.size > 0) {
+      return;
+    }
+
+    for (const symbol of this.tickerSubscribedSymbolSet) {
+      const topic = `tickers.${symbol}`;
+      this.activeSubscriptionSet.delete(topic);
+      this.removeTopicFromConnection(topic);
+    }
+
+    this.tickerSubscribedSymbolSet.clear();
   }
 
   subscribeKlines(symbol: string, interval: KlineInterval, handler: KlineHandler): void {
@@ -138,8 +164,6 @@ class BybitPublicStream {
       this.klineHandlerByKey.delete(key);
 
       if (interval === '1s') {
-        const topic = `publicTrade.${symbol}`;
-        this.activeSubscriptionSet.delete(topic);
         this.tradeSubscribedSymbolSet.delete(symbol);
 
         if (this.tradeAggregator !== null) {
@@ -151,7 +175,12 @@ class BybitPublicStream {
           }
         }
 
-        this.removeTopicFromConnection(topic);
+        if (!this.hasPublicTradeConsumer(symbol)) {
+          const topic = `publicTrade.${symbol}`;
+          this.activeSubscriptionSet.delete(topic);
+
+          this.removeTopicFromConnection(topic);
+        }
 
         return;
       }
@@ -164,6 +193,97 @@ class BybitPublicStream {
     }
   }
 
+  subscribeOrderbook(symbol: string, depth: number, handler: OrderBookHandler): void {
+    const topic = `orderbook.${depth}.${symbol}`;
+    const handlerSet = this.orderBookHandlerByTopic.get(topic) ?? new Set<OrderBookHandler>();
+    handlerSet.add(handler);
+    this.orderBookHandlerByTopic.set(topic, handlerSet);
+
+    const isAlreadySubscribed = this.activeSubscriptionSet.has(topic);
+    this.activeSubscriptionSet.add(topic);
+
+    if (isAlreadySubscribed) {
+      return;
+    }
+
+    if (this.connectionList.length > 0) {
+      this.addTopicToConnection(topic);
+    } else {
+      this.scheduleConnect();
+    }
+  }
+
+  unsubscribeOrderbook(symbol: string, depth: number, handler: OrderBookHandler): void {
+    const topic = `orderbook.${depth}.${symbol}`;
+    const handlerSet = this.orderBookHandlerByTopic.get(topic);
+
+    if (handlerSet === undefined) {
+      return;
+    }
+
+    handlerSet.delete(handler);
+
+    if (handlerSet.size > 0) {
+      return;
+    }
+
+    this.orderBookHandlerByTopic.delete(topic);
+    this.activeSubscriptionSet.delete(topic);
+
+    this.removeTopicFromConnection(topic);
+  }
+
+  subscribePublicTrades(symbol: string, handler: PublicTradeHandler): void {
+    const handlerSet = this.publicTradeHandlerBySymbol.get(symbol) ?? new Set<PublicTradeHandler>();
+    handlerSet.add(handler);
+    this.publicTradeHandlerBySymbol.set(symbol, handlerSet);
+
+    const topic = `publicTrade.${symbol}`;
+    const isAlreadySubscribed = this.activeSubscriptionSet.has(topic);
+    this.activeSubscriptionSet.add(topic);
+
+    if (isAlreadySubscribed) {
+      return;
+    }
+
+    if (this.connectionList.length > 0) {
+      this.addTopicToConnection(topic);
+    } else {
+      this.scheduleConnect();
+    }
+  }
+
+  unsubscribePublicTrades(symbol: string, handler: PublicTradeHandler): void {
+    const handlerSet = this.publicTradeHandlerBySymbol.get(symbol);
+
+    if (handlerSet === undefined) {
+      return;
+    }
+
+    handlerSet.delete(handler);
+
+    if (handlerSet.size > 0) {
+      return;
+    }
+
+    this.publicTradeHandlerBySymbol.delete(symbol);
+
+    if (this.tradeSubscribedSymbolSet.has(symbol)) {
+      return;
+    }
+
+    const topic = `publicTrade.${symbol}`;
+    this.activeSubscriptionSet.delete(topic);
+
+    this.removeTopicFromConnection(topic);
+  }
+
+  private hasPublicTradeConsumer(symbol: string): boolean {
+    const handlerSet = this.publicTradeHandlerBySymbol.get(symbol);
+
+    return handlerSet !== undefined && handlerSet.size > 0;
+  }
+
   resubscribeStream(symbol: string, interval: string): void {
     const bybitInterval = BYBIT_KLINE_INTERVAL[interval];
     const topic = `kline.${bybitInterval}.${symbol}`;
@@ -171,11 +291,27 @@ class BybitPublicStream {
     for (let index = 0; index < this.connectionList.length; index++) {
       const connection = this.connectionList[index];
 
-      if (connection.topicList.includes(topic)) {
-        this.recreateConnection(index, `manual resubscribe of ${topic}`);
+      if (!connection.topicList.includes(topic)) {
+        continue;
+      }
+
+      if (connection.webSocket.getStatus() !== WebSocketStatus.CONNECTED) {
+        this.recreateConnection(index, `manual resubscribe of ${topic} (ws disconnected)`);
 
         return;
       }
+
+      try {
+        connection.webSocket.sendToConnectedSocket({ op: 'unsubscribe', args: [topic] });
+        connection.webSocket.sendToConnectedSocket({ op: 'subscribe', args: [topic] });
+        this.logger.info(`BybitPublicStream: light resubscribe ${topic} on ${connection.label}`);
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        this.logger.warn(`BybitPublicStream: light resubscribe failed for ${topic} on ${connection.label}, falling back to recreate (${errorMessage})`);
+        this.recreateConnection(index, `manual resubscribe of ${topic} (light failed)`);
+      }
+
+      return;
     }
 
     this.logger.warn(`BybitPublicStream: topic ${topic} not found in any connection`);
@@ -399,6 +535,18 @@ class BybitPublicStream {
         continue;
       }
 
+      if (topic.startsWith('orderbook.')) {
+        const partList = topic.split('.');
+
+        if (partList.length >= 3) {
+          const depth = partList[1];
+          const symbol = partList.slice(2).join('.');
+          result.push(`Orderbook ${symbol} depth=${depth}`);
+        }
+
+        continue;
+      }
+
       if (topic.startsWith('kline.')) {
         const partList = topic.split('.');
 
@@ -423,20 +571,32 @@ class BybitPublicStream {
       return;
     }
 
-    if (!message.topic || !Array.isArray(message.data)) {
+    if (!message.topic) {
       return;
     }
 
     const topic = message.topic;
 
     try {
-      if (topic.startsWith('tickers.')) {
-        const rawTickerList = message.data as BybitTickerRaw[];
-        const tickerBySymbol = normalizeBybitTickers(rawTickerList);
-
-        for (const handler of this.tickerHandlerSet) {
-          handler(tickerBySymbol);
+      if (topic.startsWith('orderbook.')) {
+        if (message.data !== undefined && !Array.isArray(message.data)) {
+          this.handleOrderBookMessage(topic, message);
         }
+
+        return;
+      }
+
+      // Bybit V5 has no aggregate ticker topic — per-symbol tickers.{symbol} deliver
+      // `data` as a single object (not an array), so this must run before the array
+      // guard below and coerce the object into a one-element list.
+      if (topic.startsWith('tickers.')) {
+        if (message.data === undefined) {
+          return;
+        }
+
+        const rawTickerList = (
+          Array.isArray(message.data) ? message.data : [message.data]
+        ) as BybitTickerRaw[];
 
         if (this.markPriceHandlerSet.size > 0) {
           const markPriceList = this.extractMarkPriceUpdates(rawTickerList, message.ts);
@@ -448,6 +608,18 @@ class BybitPublicStream {
           }
         }
 
+        if (this.tickerHandlerSet.size > 0) {
+          const tickerBySymbol = normalizeBybitTickers(rawTickerList);
+
+          for (const handler of this.tickerHandlerSet) {
+            handler(tickerBySymbol);
+          }
+        }
+
+        return;
+      }
+
+      if (!Array.isArray(message.data)) {
         return;
       }
 
@@ -466,13 +638,60 @@ class BybitPublicStream {
   }
 
   private handleTradeMessage(dataList: BybitPublicTradeDataRaw[]): void {
-    if (this.tradeAggregator === null) {
+    if (dataList.length === 0) {
       return;
     }
 
-    for (const tradeData of dataList) {
-      this.tradeAggregator.processTrade(tradeData);
+    const symbol = dataList[0].s;
+    const customHandlerSet = this.publicTradeHandlerBySymbol.get(symbol);
+
+    if (customHandlerSet !== undefined && customHandlerSet.size > 0) {
+      const tradeList = normalizeBybitPublicTradeFromStream(dataList);
+
+      for (const handler of customHandlerSet) {
+        handler(symbol, tradeList);
+      }
     }
+
+    if (this.tradeAggregator !== null) {
+      for (const tradeData of dataList) {
+        this.tradeAggregator.processTrade(tradeData);
+      }
+    }
+  }
+
+  private handleOrderBookMessage(topic: string, message: BybitWebSocketMessage): void {
+    const handlerSet = this.orderBookHandlerByTopic.get(topic);
+
+    if (handlerSet === undefined || handlerSet.size === 0) {
+      return;
+    }
+
+    const dataRaw = message.data as BybitOrderBookRaw;
+    const rawType = typeof message.type === 'string' ? message.type : 'delta';
+    const updateType: OrderBookUpdateType = rawType === 'snapshot' ? 'snapshot' : 'delta';
+    const symbol = dataRaw.s ?? this.extractSymbolFromOrderbookTopic(topic);
+
+    if (symbol === '') {
+      return;
+    }
+
+    const receivedTimestamp = Date.now();
+    const update = normalizeBybitOrderBookUpdate(dataRaw, symbol, updateType, receivedTimestamp);
+
+    for (const handler of handlerSet) {
+      handler(symbol, update);
+    }
+  }
+
+  private extractSymbolFromOrderbookTopic(topic: string): string {
+    const partList = topic.split('.');
+
+    if (partList.length < 3) {
+      return '';
+    }
+
+    return partList.slice(2).join('.');
   }
 
   private handleKlineMessage(topic: string, dataList: BybitWebSocketKlineRaw[]): void {
@@ -516,10 +735,6 @@ class BybitPublicStream {
     }
 
     this.logger.info(`BybitPublicStream: subscribed ${sentCount} topics for ${label}`);
-  }
-
-  private resolveTickerTopic(): string {
-    return this.url.includes('linear') ? 'tickers.linear' : 'tickers.spot';
   }
 
   private extractMarkPriceUpdates(

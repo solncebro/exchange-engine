@@ -16,6 +16,7 @@ import {
   normalizeBinanceOpenInterest,
   normalizeBinanceCommissionRate,
   normalizeBinanceIncomeList,
+  parseBinanceOrderRateLimit,
 } from '../../src/normalizers/binanceNormalizer';
 import { TradeSymbolTypeEnum, PositionSideEnum, MarginModeEnum } from '../../src/types/common';
 import {
@@ -383,6 +384,42 @@ describe('normalizeBinancePosition', () => {
     expect(result.liquidationPrice).toBe(60000);
   });
 
+  it('returns positive contracts for negative positionAmt (Binance hedge SHORT convention)', () => {
+    const raw = { ...BINANCE_RAW_POSITION_RISK, positionSide: 'SHORT', positionAmt: '-10.5' };
+    const result = normalizeBinancePosition(raw);
+
+    expect(result.contracts).toBe(10.5);
+    expect(result.side).toBe(PositionSideEnum.Short);
+  });
+
+  it('returns positive contracts for negative positionAmt with small decimals', () => {
+    const raw = { ...BINANCE_RAW_POSITION_RISK, positionAmt: '-0.001' };
+    const result = normalizeBinancePosition(raw);
+
+    expect(result.contracts).toBe(0.001);
+  });
+
+  it('returns 0 for NaN contracts when raw positionAmt is invalid (defensive)', () => {
+    const raw = { ...BINANCE_RAW_POSITION_RISK, positionAmt: 'abc' };
+    const result = normalizeBinancePosition(raw);
+
+    expect(result.contracts).toBe(0);
+  });
+
+  it('returns 0 for empty string positionAmt', () => {
+    const raw = { ...BINANCE_RAW_POSITION_RISK, positionAmt: '' };
+    const result = normalizeBinancePosition(raw);
+
+    expect(result.contracts).toBe(0);
+  });
+
+  it('returns 0 for Infinity positionAmt', () => {
+    const raw = { ...BINANCE_RAW_POSITION_RISK, positionAmt: 'Infinity' };
+    const result = normalizeBinancePosition(raw);
+
+    expect(result.contracts).toBe(0);
+  });
+
   it('returns 0 for NaN liquidationPrice', () => {
     const raw = { ...BINANCE_RAW_POSITION_RISK, liquidationPrice: '' };
     const result = normalizeBinancePosition(raw);
@@ -394,6 +431,47 @@ describe('normalizeBinancePosition', () => {
     const result = normalizeBinancePosition(BINANCE_RAW_POSITION_RISK);
 
     expect(result.info).toBe(BINANCE_RAW_POSITION_RISK);
+  });
+
+  it('resolves direction=long when positionSide=LONG', () => {
+    const result = normalizeBinancePosition(BINANCE_RAW_POSITION_RISK);
+
+    expect(result.direction).toBe('long');
+  });
+
+  it('resolves direction=short when positionSide=SHORT', () => {
+    const raw = { ...BINANCE_RAW_POSITION_RISK, positionSide: 'SHORT' };
+    const result = normalizeBinancePosition(raw);
+
+    expect(result.direction).toBe('short');
+  });
+
+  it('resolves direction=long when positionSide=BOTH and positionAmt > 0 (oneWay long)', () => {
+    const raw = { ...BINANCE_RAW_POSITION_RISK, positionSide: 'BOTH', positionAmt: '0.5' };
+    const result = normalizeBinancePosition(raw);
+
+    expect(result.direction).toBe('long');
+  });
+
+  it('resolves direction=short when positionSide=BOTH and positionAmt < 0 (oneWay short)', () => {
+    const raw = { ...BINANCE_RAW_POSITION_RISK, positionSide: 'BOTH', positionAmt: '-0.5' };
+    const result = normalizeBinancePosition(raw);
+
+    expect(result.direction).toBe('short');
+  });
+
+  it('returns direction=null when positionSide=BOTH and positionAmt=0 (empty slot)', () => {
+    const raw = { ...BINANCE_RAW_POSITION_RISK, positionSide: 'BOTH', positionAmt: '0' };
+    const result = normalizeBinancePosition(raw);
+
+    expect(result.direction).toBeNull();
+  });
+
+  it('returns direction=null when positionAmt is non-finite', () => {
+    const raw = { ...BINANCE_RAW_POSITION_RISK, positionSide: 'BOTH', positionAmt: 'abc' };
+    const result = normalizeBinancePosition(raw);
+
+    expect(result.direction).toBeNull();
   });
 });
 
@@ -961,5 +1039,73 @@ describe('normalizeBinanceMarkPriceWebSocketList', () => {
       { e: 'markPriceUpdate', E: 1, s: 'X', p: '100', ap: '99', i: '', P: '', r: '', T: 2 },
     ]);
     expect(result[0].indexPrice).toBe(0);
+  });
+});
+
+describe('parseBinanceOrderRateLimit', () => {
+  it('returns binance-exchange-info source when ORDERS limit present (300 / 10s → 30 RPS)', () => {
+    const result = parseBinanceOrderRateLimit({
+      symbols: [],
+      rateLimits: [
+        { rateLimitType: 'REQUEST_WEIGHT', interval: 'MINUTE', intervalNum: 1, limit: 2400 },
+        { rateLimitType: 'ORDERS', interval: 'SECOND', intervalNum: 10, limit: 300 },
+      ],
+    });
+
+    expect(result).toEqual({ writeRequestsPerSecond: 30, source: 'binance-exchange-info' });
+  });
+
+  it('returns fallback 15 RPS when rateLimits absent', () => {
+    const result = parseBinanceOrderRateLimit({ symbols: [] });
+
+    expect(result).toEqual({ writeRequestsPerSecond: 15, source: 'fallback' });
+  });
+
+  it('returns fallback 15 RPS when rateLimits has no ORDERS entry', () => {
+    const result = parseBinanceOrderRateLimit({
+      symbols: [],
+      rateLimits: [
+        { rateLimitType: 'REQUEST_WEIGHT', interval: 'MINUTE', intervalNum: 1, limit: 2400 },
+        { rateLimitType: 'RAW_REQUESTS', interval: 'MINUTE', intervalNum: 5, limit: 61000 },
+      ],
+    });
+
+    expect(result).toEqual({ writeRequestsPerSecond: 15, source: 'fallback' });
+  });
+
+  it('returns the strictest (minimum) of multiple ORDERS limits', () => {
+    // 300 / 10s = 30 RPS; 1200 / 60s = 20 RPS → min = 20
+    const result = parseBinanceOrderRateLimit({
+      symbols: [],
+      rateLimits: [
+        { rateLimitType: 'ORDERS', interval: 'SECOND', intervalNum: 10, limit: 300 },
+        { rateLimitType: 'ORDERS', interval: 'MINUTE', intervalNum: 1, limit: 1200 },
+      ],
+    });
+
+    expect(result).toEqual({ writeRequestsPerSecond: 20, source: 'binance-exchange-info' });
+  });
+
+  it('handles DAY interval correctly', () => {
+    // 8640000 / DAY = 100 RPS
+    const result = parseBinanceOrderRateLimit({
+      symbols: [],
+      rateLimits: [
+        { rateLimitType: 'ORDERS', interval: 'DAY', intervalNum: 1, limit: 8640000 },
+      ],
+    });
+
+    expect(result).toEqual({ writeRequestsPerSecond: 100, source: 'binance-exchange-info' });
+  });
+
+  it('throws on unsupported interval value', () => {
+    expect(() =>
+      parseBinanceOrderRateLimit({
+        symbols: [],
+        rateLimits: [
+          { rateLimitType: 'ORDERS', interval: 'YEAR', intervalNum: 1, limit: 1 },
+        ],
+      }),
+    ).toThrow('Unsupported Binance rate-limit interval: YEAR');
   });
 });

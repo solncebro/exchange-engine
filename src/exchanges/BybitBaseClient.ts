@@ -1,4 +1,12 @@
-import type { CreateOrderWebSocketArgs, FetchPageWithLimitArgs, ModifyOrderArgs } from '../types/exchange';
+import type {
+  CancelBatchOrdersResult,
+  CreateOrderWebSocketArgs,
+  FetchPageWithLimitArgs,
+  ModifyBatchOrderArgs,
+  ModifyBatchOrdersResult,
+  ModifyOrderArgs,
+  OrderRateLimit,
+} from '../types/exchange';
 import type {
   Kline,
   KlineInterval,
@@ -41,6 +49,7 @@ import {
   BYBIT_DEMO_BASE_URL,
   BYBIT_TRADE_WEBSOCKET_URL,
 } from '../constants/bybit';
+import { chunkList as chunkListUtil } from '../utils/chunkList';
 import { BaseExchangeClient } from './BaseExchangeClient';
 import type { BybitBaseClientArgs } from './BybitBaseClient.types';
 
@@ -61,6 +70,7 @@ abstract class BybitBaseClient extends BaseExchangeClient {
   protected readonly httpClient: BybitHttpClient;
 
   protected readonly category: string;
+  protected abstract readonly batchChunkSize: number;
   private readonly secret: string;
   private readonly publicStream: BybitPublicStream;
   private readonly tradeStream: BybitTradeStream | null;
@@ -330,19 +340,151 @@ abstract class BybitBaseClient extends BaseExchangeClient {
   }
 
   async createBatchOrders(orderList: CreateOrderWebSocketArgs[]): Promise<Order[]> {
-    this.logger.debug(`[Bybit] Creating batch of ${orderList.length} orders`);
-    const requestList = orderList.map((args) => this.buildBybitOrderParams(args));
-    const raw = await this.httpClient.createBatchOrders(this.category, requestList);
+    if (orderList.length === 0) {
+      return [];
+    }
 
-    return raw.result.list.map((entry, index) =>
-      buildBybitOrderFromCreateResponse(orderList[index], String(entry['orderId'])),
-    );
+    this.logger.debug(`[Bybit] Creating batch of ${orderList.length} orders`);
+    const chunkedOrderList = chunkListUtil(orderList, this.batchChunkSize);
+    const aggregatedOrderList: Order[] = [];
+
+    for (const chunk of chunkedOrderList) {
+      const requestList = chunk.map((args) => this.buildBybitOrderParams(args));
+
+      if (this.tradeStream !== null && this.tradeStream.isConnected()) {
+        const wsOrderList = await this.tradeStream.createBatchOrders(this.category, chunk, requestList);
+        aggregatedOrderList.push(...wsOrderList);
+      } else {
+        const raw = await this.httpClient.createBatchOrders(this.category, requestList);
+        raw.result.list.forEach((entry, indexInChunk) => {
+          aggregatedOrderList.push(
+            buildBybitOrderFromCreateResponse(chunk[indexInChunk], String(entry['orderId'])),
+          );
+        });
+      }
+    }
+
+    return aggregatedOrderList;
   }
 
-  async cancelBatchOrders(symbol: string, orderIdList: string[]): Promise<void> {
+  async getOrderRateLimit(): Promise<OrderRateLimit> {
+    // Bybit V5 linear createOrder/cancel/amend (incl. batch, counted per item) write
+    // rate-limit is 10 RPS. Bybit does not expose rate-limits via a GET endpoint —
+    // only via headers on actual order calls — so we treat it as a documented constant.
+    // Source: https://bybit-exchange.github.io/docs/v5/rate-limit
+    return {
+      writeRequestsPerSecond: 10,
+      source: 'bybit-documented',
+    };
+  }
+
+  async cancelBatchOrders(symbol: string, orderIdList: string[]): Promise<CancelBatchOrdersResult> {
     this.logger.debug(`[Bybit] Cancelling batch of ${orderIdList.length} orders for ${symbol}`);
-    const requestList = orderIdList.map((orderId) => ({ category: this.category, symbol, orderId }));
-    await this.httpClient.cancelBatchOrders(this.category, requestList);
+
+    if (orderIdList.length === 0) {
+      return [];
+    }
+
+    const chunkedOrderIdList = chunkListUtil(orderIdList, this.batchChunkSize);
+    const aggregatedResultList: CancelBatchOrdersResult = [];
+
+    for (const chunkOrderIdList of chunkedOrderIdList) {
+      const requestList = chunkOrderIdList.map((orderId) => ({ category: this.category, symbol, orderId }));
+
+      if (this.tradeStream !== null && this.tradeStream.isConnected()) {
+        const wsResultList = await this.tradeStream.cancelBatchOrders(this.category, chunkOrderIdList, requestList);
+        aggregatedResultList.push(...wsResultList);
+
+        continue;
+      }
+
+      const raw = await this.httpClient.cancelBatchOrders(this.category, requestList);
+      const extInfoList = raw.retExtInfo?.list ?? [];
+
+      chunkOrderIdList.forEach((orderId, indexInChunk) => {
+        const extInfo = extInfoList[indexInChunk];
+        const hasCode = extInfo !== undefined && typeof extInfo.code === 'number';
+        const code = hasCode ? extInfo.code : null;
+        const msg = extInfo !== undefined && typeof extInfo.msg === 'string' ? extInfo.msg : null;
+        const isSuccess = code === 0;
+
+        aggregatedResultList.push({
+          orderId,
+          isSuccess,
+          errorCode: isSuccess ? null : code,
+          errorText: isSuccess ? null : (msg ?? 'Unknown error'),
+        });
+      });
+    }
+
+    return aggregatedResultList;
+  }
+
+  async modifyBatchOrders(orderList: ModifyBatchOrderArgs[]): Promise<ModifyBatchOrdersResult> {
+    if (orderList.length === 0) {
+      return [];
+    }
+
+    this.logger.debug(`[Bybit] Modifying batch of ${orderList.length} orders`);
+    const chunkedOrderList = chunkListUtil(orderList, this.batchChunkSize);
+    const aggregatedResultList: ModifyBatchOrdersResult = [];
+
+    for (const chunk of chunkedOrderList) {
+      const requestList = chunk.map((args) => this.buildBybitAmendBatchOrderParams(args));
+
+      if (this.tradeStream !== null && this.tradeStream.isConnected()) {
+        const orderIdList = chunk.map((requestedOrder) => requestedOrder.orderId);
+        const wsResultList = await this.tradeStream.modifyBatchOrders(this.category, orderIdList, requestList);
+        aggregatedResultList.push(...wsResultList);
+
+        continue;
+      }
+
+      const raw = await this.httpClient.amendBatchOrders(this.category, requestList);
+      const extInfoList = raw.retExtInfo?.list ?? [];
+
+      chunk.forEach((requestedOrder, indexInChunk) => {
+        const extInfo = extInfoList[indexInChunk];
+        const hasCode = extInfo !== undefined && typeof extInfo.code === 'number';
+        const code = hasCode ? extInfo.code : null;
+        const msg = extInfo !== undefined && typeof extInfo.msg === 'string' ? extInfo.msg : null;
+        const isSuccess = code === 0;
+
+        aggregatedResultList.push({
+          orderId: requestedOrder.orderId,
+          isSuccess,
+          errorCode: isSuccess ? null : code,
+          errorText: isSuccess ? null : (msg ?? 'Unknown error'),
+        });
+      });
+    }
+
+    return aggregatedResultList;
+  }
+
+  private buildBybitAmendBatchOrderParams(args: ModifyBatchOrderArgs): Record<string, unknown> {
+    const params: Record<string, unknown> = {
+      symbol: args.symbol,
+      orderId: args.orderId,
+    };
+
+    if (args.clientOrderId !== undefined) {
+      params.orderLinkId = args.clientOrderId;
+    }
+
+    if (args.price !== undefined) {
+      params.price = String(this.priceToPrecision(args.symbol, args.price));
+    }
+
+    if (args.amount !== undefined) {
+      params.qty = String(this.amountToPrecision(args.symbol, args.amount));
+    }
+
+    if (args.triggerPrice !== undefined) {
+      params.triggerPrice = String(this.priceToPrecision(args.symbol, args.triggerPrice));
+    }
+
+    return params;
   }
 
   async fetchIncome(options?: FetchPageWithLimitArgs): Promise<Income[]> {

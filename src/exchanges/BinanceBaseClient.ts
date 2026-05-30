@@ -1,4 +1,4 @@
-import type { CreateOrderWebSocketArgs, FetchPageWithLimitArgs } from '../types/exchange';
+import type { CreateOrderWebSocketArgs, FetchPageWithLimitArgs, OrderRateLimit } from '../types/exchange';
 import type {
   Kline,
   KlineInterval,
@@ -24,6 +24,7 @@ import {
   normalizeBinanceBalances,
   normalizeBinanceOrderBook,
   normalizeBinancePublicTrades,
+  parseBinanceOrderRateLimit,
 } from '../normalizers/binanceNormalizer';
 import { BINANCE_FUTURES_ORDER_TYPE_REVERSE, BINANCE_SPOT_ORDER_TYPE_REVERSE, BINANCE_WORKING_TYPE } from '../constants/mappings';
 import { BinanceUserDataStream } from '../ws/BinanceUserDataStream';
@@ -81,6 +82,12 @@ abstract class BinanceBaseClient<T extends BinanceBaseHttpClient> extends BaseEx
     );
 
     return normalizeBinanceTradeSymbols(raw);
+  }
+
+  async getOrderRateLimit(): Promise<OrderRateLimit> {
+    const raw = await this.httpClient.fetchExchangeInfo();
+
+    return parseBinanceOrderRateLimit(raw);
   }
 
   protected async fetchAndNormalizeTickers(): Promise<TickerBySymbol> {

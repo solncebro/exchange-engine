@@ -4,11 +4,13 @@ import { MarketUnitEnum, OrderTypeEnum } from '../types/common';
 import {
   BYBIT_PUBLIC_SPOT_WEBSOCKET_URL,
   BYBIT_DEMO_PUBLIC_SPOT_WEBSOCKET_URL,
+  BYBIT_SPOT_BATCH_CHUNK_SIZE,
 } from '../constants/bybit';
 import { BybitBaseClient } from './BybitBaseClient';
 
 class BybitSpot extends BybitBaseClient {
   protected readonly marketLabel = 'spot';
+  protected readonly batchChunkSize = BYBIT_SPOT_BATCH_CHUNK_SIZE;
 
   constructor(args: ExchangeArgs) {
     const isDemoMode = args.config.isDemoMode === true;

@@ -98,6 +98,7 @@ function assertExchangeClient(client: ExchangeClient, label: string): void {
     'cancelAllOrders',
     'createBatchOrders',
     'cancelBatchOrders',
+    'modifyBatchOrders',
     'fetchOrderBook',
     'fetchTrades',
     'fetchMarkPrice',

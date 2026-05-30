@@ -2,6 +2,7 @@ import { WebSocketStatus } from '@solncebro/websocket-engine';
 
 import { BaseTradeStream } from '../../src/ws/BaseTradeStream';
 import type { BaseTradeStreamArgs } from '../../src/ws/BaseTradeStream.types';
+import { PendingRequestKind } from '../../src/ws/BaseTradeStream.types';
 import { createMockLogger } from '../fixtures/mockLogger';
 
 const mockWebSocket = {
@@ -103,6 +104,7 @@ describe('BaseTradeStream', () => {
       const timeout = setTimeout(() => {}, 30000);
 
       (stream as any).pendingRequestByRequestId.set('req-1', {
+        kind: PendingRequestKind.SingleOrder,
         resolve: resolveFn,
         reject: rejectFn,
         timeout,
@@ -182,7 +184,7 @@ describe('BaseTradeStream', () => {
       await jest.advanceTimersByTimeAsync(30000);
 
       expect(rejected).toBeDefined();
-      expect(rejected!.message).toContain('Order creation timeout');
+      expect(rejected!.message).toContain('Request timeout');
     });
 
     it('rejects when WebSocket is not connected', async () => {
@@ -202,6 +204,7 @@ describe('BaseTradeStream', () => {
       const timeout = setTimeout(() => {}, 30000);
 
       (stream as any).pendingRequestByRequestId.set('req-1', {
+        kind: PendingRequestKind.SingleOrder,
         resolve: resolveFn,
         reject: rejectFn,
         timeout,
@@ -211,6 +214,7 @@ describe('BaseTradeStream', () => {
 
       expect(result).not.toBeNull();
       expect(result.resolve).toBe(resolveFn);
+      expect(result.kind).toBe(PendingRequestKind.SingleOrder);
       expect((stream as any).pendingRequestByRequestId.has('req-1')).toBe(false);
     });
 

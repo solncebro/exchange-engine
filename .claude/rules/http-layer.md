@@ -117,8 +117,9 @@ order, openOrders, allOrders, account, listenKey
 - `setPositionMode(dualSidePosition)` → signedPost `/fapi/v1/positionSide/dual`
 - `modifyOrder(params)` → `BinanceOrderResponseRaw` — PUT с ручным signing через `buildBinanceSignedParams`
 - `cancelAllOrders(symbol)` → signedDelete `/fapi/v1/allOpenOrders`
-- `createBatchOrders(orderList)` → `BinanceOrderResponseRaw[]` — signedPost `/fapi/v1/batchOrders`
-- `cancelBatchOrders(symbol, orderIdList)` → signedDelete `/fapi/v1/batchOrders`
+- `createBatchOrders(orderList)` → `BinanceOrderResponseRaw[]` — signedPost `/fapi/v1/batchOrders`. Max 5 ордеров на запрос (chunking — на уровне `BinanceFutures.createBatchOrders`)
+- `cancelBatchOrders(symbol, orderIdList)` → signedDelete `/fapi/v1/batchOrders`. Max 10 ордеров (chunking — на уровне `BinanceFutures.cancelBatchOrders`)
+- `modifyBatchOrders(orderList)` → `Array<Record<string, unknown>>` (смесь успехов и ошибок per-order; элементы с `code < 0` — ошибки) — PUT `/fapi/v1/batchOrders` с ручным signing через `buildBinanceSignedParams` (аналогично `modifyOrder`). Max 5 ордеров (chunking — на уровне `BinanceFutures.modifyBatchOrders`)
 - `fetchCommissionRate(symbol?)` → `BinanceCommissionRateRaw` — signedGet `/fapi/v1/commissionRate`
 - `fetchIncome(options?)` → `BinanceIncomeRaw[]` — signedGet `/fapi/v1/income`
 - `modifyPositionMargin(symbol, amount, type)` → signedPost `/fapi/v1/positionMargin`
@@ -163,8 +164,9 @@ order, openOrders, allOrders, account, listenKey
 - `cancelAllOrders(category, symbol?)` → POST `/v5/order/cancel-all`
 - `getOpenOrders(category, options?)` → `BybitListResponse<BybitOrderResponseRaw>` — GET `/v5/order/realtime`
 - `getOrderHistory(category, options?)` → `BybitListResponse<BybitOrderResponseRaw>` — GET `/v5/order/history`
-- `createBatchOrders(category, requestList)` → POST `/v5/order/create-batch`
-- `cancelBatchOrders(category, requestList)` → POST `/v5/order/cancel-batch`
+- `createBatchOrders(category, requestList)` → POST `/v5/order/create-batch`. Max 20 ордеров (linear/inverse/option), 10 (spot). Chunking — на уровне `BybitBaseClient.createBatchOrders` через `batchChunkSize`.
+- `cancelBatchOrders(category, requestList)` → POST `/v5/order/cancel-batch`. Те же лимиты. Chunking — на уровне `BybitBaseClient.cancelBatchOrders`.
+- `amendBatchOrders(category, requestList)` → `BybitAmendBatchOrdersResponse` — POST `/v5/order/amend-batch`. Max 20 ордеров (linear/inverse/option), 10 (spot). Per-order success/error в `retExtInfo.list[]` (`code === 0` = успех). Chunking — на уровне `BybitBaseClient.modifyBatchOrders`.
 - `getPositionList(category, options?)` → `BybitListResponse<BybitPositionRaw>` — GET `/v5/position/list`
 - `getClosedPnl(category, options?)` → `BybitListResponse<BybitClosedPnlRaw>` — GET `/v5/position/closed-pnl`
 - `fetchFeeRate(category, options?)` → `BybitListResponse<BybitFeeRateRaw>` — GET `/v5/account/fee-rate`
@@ -208,4 +210,4 @@ async fetchSomething(symbol: string, options?: FetchPageWithLimitArgs): Promise<
 Типы вынесены в co-located `.types.ts` файлы:
 - `BaseHttpClient.types.ts` — BaseHttpClientArgs
 - `BinanceBaseHttpClient.types.ts` — BinanceEndpoints, BinanceHttpClientArgs, BinanceErrorResponse, BinanceListenKeyResponse
-- `BybitHttpClient.types.ts` — BybitHttpClientArgs, BybitApiResponse, BybitListResponse, BybitResponse, BybitOrderBookRaw (дублируется из normalizer), FetchBybitKlineArgs, SetBybitLeverageArgs, SwitchBybitIsolatedArgs, SymbolFilterArgs, SymbolLimitFilterArgs, PeriodFilterArgs, CategoryFilterArgs
+- `BybitHttpClient.types.ts` — BybitHttpClientArgs, BybitApiResponse, BybitListResponse, BybitResponse, BybitOrderBookRaw (дублируется из normalizer), FetchBybitKlineArgs, SetBybitLeverageArgs, SwitchBybitIsolatedArgs, SymbolFilterArgs, SymbolLimitFilterArgs, PeriodFilterArgs, CategoryFilterArgs, BybitAmendBatchOrderRaw, BybitAmendBatchOrderExtInfo, BybitAmendBatchOrdersResponse (структура аналогична `BybitCancelBatchOrdersResponse`: `result.list[]` — основные данные с `orderId`/`orderLinkId`, `retExtInfo.list[]` — per-order success/error через `{ code, msg }`)

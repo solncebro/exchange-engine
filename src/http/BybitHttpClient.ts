@@ -18,7 +18,9 @@ import { applyTimeRangeOptions } from '../utils/httpParams';
 import { BaseHttpClient } from './BaseHttpClient';
 
 import type {
+  BybitAmendBatchOrdersResponse,
   BybitApiResponse,
+  BybitCancelBatchOrdersResponse,
   BybitCancelOrderResult,
   BybitHttpClientArgs,
   BybitListResponse,
@@ -286,8 +288,15 @@ class BybitHttpClient extends BaseHttpClient {
   async cancelBatchOrders(
     category: string,
     requestList: Array<Record<string, unknown>>,
-  ): Promise<BybitListResponse<Record<string, unknown>>> {
+  ): Promise<BybitCancelBatchOrdersResponse> {
     return this.authenticatedPost('/v5/order/cancel-batch', { category, request: requestList });
+  }
+
+  async amendBatchOrders(
+    category: string,
+    requestList: Array<Record<string, unknown>>,
+  ): Promise<BybitAmendBatchOrdersResponse> {
+    return this.authenticatedPost('/v5/order/amend-batch', { category, request: requestList });
   }
 
   async getPositionList(

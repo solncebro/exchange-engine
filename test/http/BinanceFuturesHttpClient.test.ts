@@ -168,6 +168,25 @@ describe('BinanceFuturesHttpClient', () => {
     });
   });
 
+  describe('modifyBatchOrders', () => {
+    it('sends PUT to /fapi/v1/batchOrders with JSON-stringified batchOrders and signed params', async () => {
+      mockInstance.put.mockResolvedValue({ data: [{ orderId: 1, symbol: 'BTCUSDT', status: 'NEW' }] });
+
+      const orderList = [
+        { symbol: 'BTCUSDT', orderId: '1', side: 'BUY', price: '30000', quantity: '0.1' },
+      ];
+      await client.modifyBatchOrders(orderList);
+
+      const [url, , options] = mockInstance.put.mock.calls[0];
+
+      expect(url).toBe('/fapi/v1/batchOrders');
+      expect(options.params.batchOrders).toBe(JSON.stringify(orderList));
+      expect(options.params.signature).toBeDefined();
+      expect(options.params.timestamp).toBeDefined();
+      expect(options.headers['X-MBX-APIKEY']).toBe('testKey');
+    });
+  });
+
   describe('fetchIncome', () => {
     it('calls signedGet /fapi/v1/income', async () => {
       await client.fetchIncome();

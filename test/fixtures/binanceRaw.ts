@@ -216,3 +216,21 @@ export const BINANCE_RAW_INCOME_LIST: BinanceIncomeRaw[] = [
   { symbol: 'BTCUSDT', incomeType: 'REALIZED_PNL', income: '15.50', asset: 'USDT', time: 1700000000000, info: '', tranId: 123456, tradeId: '789' },
   { symbol: 'ETHUSDT', incomeType: 'FUNDING_FEE', income: '-0.05', asset: 'USDT', time: 1700000001000, info: '', tranId: 123457, tradeId: '790' },
 ];
+
+export const BINANCE_RAW_MODIFY_BATCH_RESPONSE_MIXED: Array<Record<string, unknown>> = [
+  {
+    orderId: 100,
+    symbol: 'BTCUSDT',
+    status: 'NEW',
+    clientOrderId: 'cli-1',
+    price: '30005',
+    origQty: '1',
+    executedQty: '0',
+    side: 'BUY',
+    positionSide: 'LONG',
+    timeInForce: 'GTC',
+    type: 'LIMIT',
+    updateTime: 1700000000000,
+  },
+  { code: -2022, msg: 'ReduceOnly Order is rejected.' },
+];

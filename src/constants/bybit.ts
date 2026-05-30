@@ -13,6 +13,9 @@ export const BYBIT_DEMO_PUBLIC_SPOT_WEBSOCKET_URL = 'wss://stream-demo.bybit.com
 export const BYBIT_RECV_WINDOW = 7000;
 export const BYBIT_REQUEST_TIMEOUT = 30000;
 
+export const BYBIT_LINEAR_BATCH_CHUNK_SIZE = 20;
+export const BYBIT_SPOT_BATCH_CHUNK_SIZE = 10;
+
 export const BYBIT_KLINE_INTERVAL: Record<string, string> = {
   '1m': '1',
   '3m': '3',

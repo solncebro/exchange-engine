@@ -65,6 +65,44 @@ export interface BybitListResponse<T> {
   result: BybitListResult<T>;
 }
 
+export interface BybitCancelBatchOrderRaw {
+  category?: string;
+  symbol?: string;
+  orderId?: string;
+  orderLinkId?: string;
+}
+
+export interface BybitCancelBatchOrderExtInfo {
+  code: number;
+  msg: string;
+}
+
+export interface BybitCancelBatchOrdersResponse {
+  result: BybitListResult<BybitCancelBatchOrderRaw>;
+  retExtInfo: {
+    list: BybitCancelBatchOrderExtInfo[];
+  };
+}
+
+export interface BybitAmendBatchOrderRaw {
+  category?: string;
+  symbol?: string;
+  orderId?: string;
+  orderLinkId?: string;
+}
+
+export interface BybitAmendBatchOrderExtInfo {
+  code: number;
+  msg: string;
+}
+
+export interface BybitAmendBatchOrdersResponse {
+  result: BybitListResult<BybitAmendBatchOrderRaw>;
+  retExtInfo: {
+    list: BybitAmendBatchOrderExtInfo[];
+  };
+}
+
 export interface BybitResponse<T> {
   result: T;
 }

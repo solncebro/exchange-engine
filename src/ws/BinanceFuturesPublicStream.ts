@@ -97,22 +97,42 @@ class BinanceFuturesPublicStream {
     this.tradeSymbols = tradeSymbols;
   }
 
-  subscribeAllTickers(handler: (tickers: TickerBySymbol) => void): void {
+  // Binance uses aggregate streams (!miniTicker@arr / !markPrice@arr@1s), so the symbol
+  // list is accepted for interface parity with Bybit but not used here.
+  subscribeAllTickers(handler: (tickers: TickerBySymbol) => void, _symbolList: string[]): void {
     this.tickerHandlerSet.add(handler);
-    this.scheduleConnect();
+
+    if (this.connectionList.length > 0) {
+      this.addNonKlineStream('!miniTicker@arr');
+    } else {
+      this.scheduleConnect();
+    }
   }
 
   unsubscribeAllTickers(handler: (tickers: TickerBySymbol) => void): void {
     this.tickerHandlerSet.delete(handler);
+
+    if (this.tickerHandlerSet.size === 0) {
+      this.removeStreamFromConnection('!miniTicker@arr');
+    }
   }
 
-  subscribeMarkPrices(handler: MarkPriceHandler): void {
+  subscribeMarkPrices(handler: MarkPriceHandler, _symbolList: string[]): void {
     this.markPriceHandlerSet.add(handler);
-    this.scheduleConnect();
+
+    if (this.connectionList.length > 0) {
+      this.addNonKlineStream('!markPrice@arr@1s');
+    } else {
+      this.scheduleConnect();
+    }
   }
 
   unsubscribeMarkPrices(handler: MarkPriceHandler): void {
     this.markPriceHandlerSet.delete(handler);
+
+    if (this.markPriceHandlerSet.size === 0) {
+      this.removeStreamFromConnection('!markPrice@arr@1s');
+    }
   }
 
   subscribeKlines(symbol: string, interval: KlineInterval, handler: KlineHandler): void {
@@ -154,11 +174,35 @@ class BinanceFuturesPublicStream {
     for (let index = 0; index < this.connectionList.length; index++) {
       const connection = this.connectionList[index];
 
-      if (connection.streamList.includes(stream)) {
-        this.recreateConnection(index, `manual resubscribe of ${stream}`);
+      if (!connection.streamList.includes(stream)) {
+        continue;
+      }
+
+      if (connection.webSocket.getStatus() !== WebSocketStatus.CONNECTED) {
+        this.recreateConnection(index, `manual resubscribe of ${stream} (ws disconnected)`);
 
         return;
       }
+
+      try {
+        connection.webSocket.sendToConnectedSocket({
+          method: 'UNSUBSCRIBE',
+          params: [stream],
+          id: this.subscriptionIdCounter++,
+        });
+        connection.webSocket.sendToConnectedSocket({
+          method: 'SUBSCRIBE',
+          params: [stream],
+          id: this.subscriptionIdCounter++,
+        });
+        this.logger.info(`BinanceFuturesPublicStream: light resubscribe ${stream} on ${connection.label}`);
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        this.logger.warn(`BinanceFuturesPublicStream: light resubscribe failed for ${stream} on ${connection.label}, falling back to recreate (${errorMessage})`);
+        this.recreateConnection(index, `manual resubscribe of ${stream} (light failed)`);
+      }
+
+      return;
     }
 
     this.logger.warn(`BinanceFuturesPublicStream: stream ${stream} not found in any connection`);
@@ -587,6 +631,28 @@ class BinanceFuturesPublicStream {
     }
 
     return symbolSet.size;
+  }
+
+  private addNonKlineStream(stream: string): void {
+    const targetConnection = this.connectionList.find(
+      (connection) => connection.groupKey === NON_KLINE_GROUP_KEY,
+    );
+
+    if (!targetConnection) {
+      this.createConnection({
+        streamList: [stream],
+        groupKey: NON_KLINE_GROUP_KEY,
+      });
+
+      return;
+    }
+
+    if (targetConnection.streamList.includes(stream)) {
+      return;
+    }
+
+    targetConnection.streamList.push(stream);
+    this.sendDynamicSubscribe(targetConnection, stream);
   }
 
   private addStreamToIntervalGroup(interval: KlineInterval, stream: string): void {

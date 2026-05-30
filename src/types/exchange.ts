@@ -12,7 +12,9 @@ import type {
   FundingInfo,
   WebSocketConnectionInfo,
   OrderBook,
+  OrderBookHandler,
   PublicTrade,
+  PublicTradeHandler,
   MarkPrice,
   MarkPriceHandler,
   OpenInterest,
@@ -76,6 +78,17 @@ export interface SubscribeKlinesArgs {
   handler: KlineHandler;
 }
 
+export interface SubscribeOrderbookArgs {
+  symbol: string;
+  depth: number;
+  handler: OrderBookHandler;
+}
+
+export interface SubscribePublicTradesArgs {
+  symbol: string;
+  handler: PublicTradeHandler;
+}
+
 export interface FetchAllKlinesOptions {
   chunkSize?: number;
   pauseBetweenChunksMs?: number;
@@ -91,9 +104,44 @@ export interface ModifyOrderArgs {
   triggerPrice?: number;
 }
 
+export interface ModifyBatchOrderArgs {
+  symbol: string;
+  orderId: string;
+  side: OrderSideEnum;
+  clientOrderId?: string;
+  price?: number;
+  amount?: number;
+  triggerPrice?: number;
+}
+
 export interface ResubscribeKlinesArgs {
   symbol: string;
   interval: string;
+}
+
+export interface CancelOrderItemResult {
+  orderId: string;
+  isSuccess: boolean;
+  errorCode: number | null;
+  errorText: string | null;
+}
+
+export type CancelBatchOrdersResult = CancelOrderItemResult[];
+
+export interface ModifyOrderItemResult {
+  orderId: string;
+  isSuccess: boolean;
+  errorCode: number | null;
+  errorText: string | null;
+}
+
+export type ModifyBatchOrdersResult = ModifyOrderItemResult[];
+
+export type OrderRateLimitSource = 'binance-exchange-info' | 'bybit-documented' | 'fallback';
+
+export interface OrderRateLimit {
+  writeRequestsPerSecond: number;
+  source: OrderRateLimitSource;
 }
 
 export interface ExchangeClient {
@@ -107,6 +155,9 @@ export interface ExchangeClient {
   fetchBalances(): Promise<AccountBalances>;
   fetchFundingRateHistory(symbol: string, options?: FetchPageWithLimitArgs): Promise<FundingRateHistory[]>;
   fetchPosition(symbol: string): Promise<Position>;
+  fetchPositionSnapshot(symbol: string, positionIdx?: number): Promise<Position | null>;
+  fetchPositionList(symbol: string): Promise<Position[]>;
+  fetchAllPositions(): Promise<Position[]>;
   setLeverage(leverage: number, symbol: string): Promise<void>;
   setMarginMode(marginMode: MarginModeEnum, symbol: string): Promise<void>;
   amountToPrecision(symbol: string, amount: number): number;
@@ -128,7 +179,9 @@ export interface ExchangeClient {
   modifyOrder(args: ModifyOrderArgs): Promise<Order>;
   cancelAllOrders(symbol: string): Promise<void>;
   createBatchOrders(orderList: CreateOrderWebSocketArgs[]): Promise<Order[]>;
-  cancelBatchOrders(symbol: string, orderIdList: string[]): Promise<void>;
+  cancelBatchOrders(symbol: string, orderIdList: string[]): Promise<CancelBatchOrdersResult>;
+  modifyBatchOrders(orderList: ModifyBatchOrderArgs[]): Promise<ModifyBatchOrdersResult>;
+  getOrderRateLimit(): Promise<OrderRateLimit>;
 
   fetchOrderBook(symbol: string, limit?: number): Promise<OrderBook>;
   fetchTrades(symbol: string, limit?: number): Promise<PublicTrade[]>;
@@ -147,6 +200,10 @@ export interface ExchangeClient {
   resubscribeKlines(args: ResubscribeKlinesArgs): void;
   subscribeMarkPrices(handler: MarkPriceHandler): void;
   unsubscribeMarkPrices(handler: MarkPriceHandler): void;
+  subscribeOrderbook(args: SubscribeOrderbookArgs): void;
+  unsubscribeOrderbook(args: SubscribeOrderbookArgs): void;
+  subscribePublicTrades(args: SubscribePublicTradesArgs): void;
+  unsubscribePublicTrades(args: SubscribePublicTradesArgs): void;
   awaitWebSocketConnectionsReady(): Promise<void>;
 
   connectUserDataStream(handler: UserDataStreamHandlerArgs): Promise<void>;

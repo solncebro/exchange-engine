@@ -3,6 +3,7 @@ import { ReliableWebSocket, WebSocketStatus } from '@solncebro/websocket-engine'
 import type { ExchangeLogger, Order, WebSocketConnectionInfo } from '../types/common';
 import { WebSocketConnectionTypeEnum } from '../types/common';
 import type { BaseTradeStreamArgs, PendingRequest } from './BaseTradeStream.types';
+import { PendingRequestKind } from './BaseTradeStream.types';
 
 const ORDER_TIMEOUT_MS = 30000;
 
@@ -97,6 +98,40 @@ abstract class BaseTradeStream<TMessage> {
     return pending;
   }
 
+  protected async ensureConnectedHook(): Promise<void> {
+    return this.ensureConnected();
+  }
+
+  protected generateReqId(): string {
+    return `req_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  }
+
+  protected sendRequest<TResult>(request: unknown, requestId: string, kind: PendingRequestKind): Promise<TResult> {
+    return new Promise<TResult>((resolve, reject) => {
+      if (this.webSocket === null || !this.isConnected()) {
+        reject(new Error(`${this.label}: WebSocket is not connected`));
+
+        return;
+      }
+
+      const timeout = setTimeout(() => {
+        this.pendingRequestByRequestId.delete(requestId);
+        this.logger.error({ requestId, kind, timeoutMs: ORDER_TIMEOUT_MS }, `${this.label}: Request timeout`);
+        reject(new Error(`${this.label}: Request timeout after ${ORDER_TIMEOUT_MS}ms`));
+      }, ORDER_TIMEOUT_MS);
+
+      this.pendingRequestByRequestId.set(requestId, {
+        kind,
+        resolve: resolve as (data: unknown) => void,
+        reject,
+        timeout,
+      });
+
+      this.logger.info({ requestId, kind, request }, `${this.label}: Sending request`);
+      this.webSocket.sendToConnectedSocket(request);
+    });
+  }
+
   private async ensureConnected(): Promise<void> {
     if (this.webSocket !== null) {
       return;
@@ -116,24 +151,7 @@ abstract class BaseTradeStream<TMessage> {
   }
 
   private sendOrderRequest(request: unknown, requestId: string): Promise<Order> {
-    return new Promise<Order>((resolve, reject) => {
-      if (this.webSocket === null || !this.isConnected()) {
-        reject(new Error(`${this.label}: WebSocket is not connected`));
-
-        return;
-      }
-
-      const timeout = setTimeout(() => {
-        this.pendingRequestByRequestId.delete(requestId);
-        this.logger.error({ requestId, timeoutMs: ORDER_TIMEOUT_MS }, `${this.label}: Order creation timeout`);
-        reject(new Error(`${this.label}: Order creation timeout after ${ORDER_TIMEOUT_MS}ms`));
-      }, ORDER_TIMEOUT_MS);
-
-      this.pendingRequestByRequestId.set(requestId, { resolve, reject, timeout });
-
-      this.logger.info({ requestId, request }, `${this.label}: Sending order request`);
-      this.webSocket.sendToConnectedSocket(request);
-    });
+    return this.sendRequest<Order>(request, requestId, PendingRequestKind.SingleOrder);
   }
 }
 

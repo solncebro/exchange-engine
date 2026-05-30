@@ -13,16 +13,24 @@ subscribeMarkPrices(handler: MarkPriceHandler): void
 unsubscribeMarkPrices(handler: MarkPriceHandler): void
 subscribeKlines(symbol, interval, handler): void
 unsubscribeKlines(symbol, interval, handler): void
+subscribeOrderbook?(symbol, depth, handler: OrderBookHandler): void  // опциональный, реализован у Bybit
+unsubscribeOrderbook?(symbol, depth, handler: OrderBookHandler): void
+subscribePublicTrades?(symbol, handler: PublicTradeHandler): void  // опциональный, реализован у Bybit
+unsubscribePublicTrades?(symbol, handler: PublicTradeHandler): void
 resubscribeStream?(symbol, interval): void  // опциональный, для принудительной переподписки
 getConnectionInfoList(): WebSocketConnectionInfo[]
 awaitConnectionsReady?(): Promise<void>
 close(): void
 ```
 
+Optional методы `subscribe*Orderbook` / `subscribe*PublicTrades` объявлены опциональными, поэтому Binance public streams без реализации продолжают удовлетворять контракту. На уровне `BaseExchangeClient` отсутствие optional-метода → `subscribe*` бросает `Not supported for ${marketLabel} market`, `unsubscribe*` — no-op.
+
 ## Хранение хендлеров
 
 - **Тикеры**: `Set<Handler>` — все хендлеры получают одни и те же данные
 - **Klines**: `Map<"SYMBOL_INTERVAL", Set<Handler>>` — группировка по стриму
+- **Orderbook** (Bybit): `Map<"orderbook.{depth}.{symbol}", Set<OrderBookHandler>>` — ключ совпадает с topic
+- **PublicTrade** (Bybit, custom subscribers): `Map<symbol, Set<PublicTradeHandler>>` — отдельно от `TradeToKlineAggregator`. Topic `publicTrade.{symbol}` снимается только когда у символа нет ни одного custom subscriber'а И не активен 1s kline aggregator (`tradeSubscribedSymbolSet`)
 
 ## WebSocket Connection Registry
 
@@ -75,16 +83,22 @@ Exchange-классы агрегируют через `getWebSocketConnectionInf
 - **Лимит**: 200 topics на соединение (`MAX_TOPICS_PER_CONNECTION`), 10 topics на SUBSCRIBE сообщение (`MAX_TOPICS_PER_SUBSCRIBE`)
 - **Kline topic**: `kline.{bybitInterval}.{symbol}` (интервал конвертируется через `BYBIT_KLINE_INTERVAL`)
 - **1s kline**: через `TradeToKlineAggregator` — подписка на `publicTrade.{symbol}`, агрегация трейдов в 1-секундные свечи
-- **Тикер topic**: `tickers.linear` или `tickers.spot` (определяется по URL)
-- **Mark/index**: не отдельный topic — при `subscribeMarkPrices` остаётся подписка на `tickers.*`; из каждого сообщения извлекаются элементы с валидным `markPrice` → `MarkPriceUpdate[]`
+- **Тикер topic**: per-symbol `tickers.{symbol}` — у Bybit V5 нет агрегатного ticker-топика (`tickers.linear`/`tickers.spot` отвечают `handler not found`). `subscribeAllTickers(handler, symbolList)` и `subscribeMarkPrices(handler, symbolList)` принимают `symbolList` и подписывают `tickers.{symbol}` для каждого символа через `subscribeTickerSymbols`. Один `tickers.{symbol}` обслуживает обоих consumer'ов (ticker + mark price): ref-count в `releaseTickerSymbolsIfUnused` снимает топики только когда пусты ОБА — `markPriceHandlerSet` И `tickerHandlerSet`. Подписанные символы хранятся в `tickerSubscribedSymbolSet`
+- **Mark/index**: не отдельный topic — переиспользует `tickers.{symbol}`; в `handleMessage` ветка `tickers.` идёт ДО guard'а `!Array.isArray(message.data)` и coerce'ит объект в одноэлементный список (per-symbol Bybit шлёт `data` объектом, не массивом); из элементов с валидным `markPrice` → `MarkPriceUpdate[]`
+- **Orderbook topic**: `orderbook.{depth}.{symbol}` (`subscribeOrderbook(symbol, depth, handler)`); `handleMessage` обрабатывает orderbook ДО проверки `Array.isArray(message.data)` — Bybit отдаёт `data` как объект, не массив. `type` из сырого сообщения нормализуется в `'snapshot' | 'delta'`. Symbol берётся из `data.s`, fallback — последний сегмент topic. Уровни `bidList`/`askList` сохраняются как пары decimal-строк (`OrderBookRawLevel = [string, string]`) — без `parseFloat`, чтобы не терять точность
+- **PublicTrade topic**: `publicTrade.{symbol}`. Два независимых consumer'а на один topic:
+  1. `TradeToKlineAggregator` (1s klines) — подписка через `subscribeKlines(symbol, '1s', handler)`
+  2. Custom subscribers через `subscribePublicTrades(symbol, handler)` — получают `PublicTrade[]` нормализованный через `normalizeBybitPublicTradeFromStream`
+  Topic снимается только когда отписались оба consumer'а; защита: `unsubscribeKlines('1s')` и `unsubscribePublicTrades` проверяют наличие другого consumer'а перед `removeTopicFromConnection`
 - **Подписка**: батчами по 10 topics через `sendSubscribeInBatches()`: `{ op: 'subscribe', args: [batch] }`
 - **Deferred connection**: `queueMicrotask()` для батчинга подписок (через `scheduleConnect()`)
 - **onOpen**: при открытии соединения подписывает все topics этого соединения через `sendSubscribeInBatches()` с `context.send()`
 - **Reconnect**: `onReconnectSuccess → resubscribeConnection(index)` — переподписка topics конкретного соединения, `tradeAggregator.clearSymbol()` для trade-подписок
 - **Dynamic topics**: новые подписки добавляются в соединение с наименьшим количеством topics (через `addTopicToConnection`); если все полны — создаётся новое
 - **Heartbeat**: `{ op: 'ping' }` → `{ op: 'pong' }`, интервал 20s
-- **Методы**: `resubscribeStream(symbol, interval)` — находит соединение с соответствующим kline topic и вызывает `recreateConnection` (полное пересоздание `ReliableWebSocket` с тем же `topicList`), а не отправку лишнего `subscribe` на уже открытый сокет; дедуп recreate в окне 2000ms по `lastRecreateTimestamp` на `BybitConnection`; для топиков `publicTrade.*` перед recreate — `tradeAggregator.clearSymbol`
-- **Внутреннее**: `buildWebSocket(connectionIndex, label)`, `recreateConnection(connectionIndex, reason)`
+- **subscriptionList отображение**: `Tickers`, `MarkPrices`, `Klines {symbol} {interval}`, `Orderbook {symbol} depth={depth}`, `Trades {symbol}` (для `publicTrade.*`)
+- **Методы**: `resubscribeStream(symbol, interval)` — находит соединение с соответствующим kline topic. Если WS соединения CONNECTED — light-resubscribe: отправляет `{ op: 'unsubscribe', args: [topic] }` + `{ op: 'subscribe', args: [topic] }` на уже открытый сокет (без пересоздания). Если сокет не CONNECTED или `sendToConnectedSocket` бросает — fallback на `recreateConnection` (полное пересоздание `ReliableWebSocket` с тем же `topicList`); дедуп recreate в окне 2000ms по `lastRecreateTimestamp` на `BybitConnection`; для топиков `publicTrade.*` перед recreate — `tradeAggregator.clearSymbol`
+- **Внутреннее**: `buildWebSocket(connectionIndex, label)`, `recreateConnection(connectionIndex, reason)`, `handleOrderBookMessage(topic, message)`, `extractSymbolFromOrderbookTopic(topic)`, `hasPublicTradeConsumer(symbol)`
 
 ## TradeToKlineAggregator (src/ws/TradeToKlineAggregator.ts)
 
@@ -110,17 +124,22 @@ Exchange-классы агрегируют через `getWebSocketConnectionInf
 
 Общая инфраструктура:
 - `connect()` / `disconnect()` / `isConnected()` — управление жизненным циклом
-- `createOrder(orderParams)` → `Promise<Order>` — async request-response
+- `createOrder(orderParams)` → `Promise<Order>` — async request-response (single order)
 - `getConnectionInfo()` → `WebSocketConnectionInfo | null` — info о текущем соединении
 - `ensureConnected()` — lazy connection с dedup промисов
-- `sendOrderRequest(request, requestId)` — timeout 30s, pending requests в `Map<reqId, PendingRequest>`
+- `sendRequest<TResult>(request, requestId, kind: PendingRequestKind): Promise<TResult>` — generic helper для всех request-response типов (single и batch). Timeout 30s, pending requests хранятся в `Map<reqId, PendingRequest>`.
+- `sendOrderRequest(request, requestId): Promise<Order>` — private wrapper над `sendRequest<Order>(..., PendingRequestKind.SingleOrder)` (обратная совместимость для single create)
 - `takePendingRequest(requestId)` — protected метод, возвращает и удаляет pending request из Map
+- `ensureConnectedHook()` — protected helper для подклассов, отправляющих batch-запросы (форсирует lazy connect перед отправкой)
+- `generateReqId()` — protected helper для генерации уникального `requestId` (используется в batch-методах `BybitTradeStream`)
+
+`PendingRequest` теперь kind-tagged: discriminated union по полю `kind: PendingRequestKind`, где `PendingRequestKind` = enum `SingleOrder | CreateBatch | ModifyBatch | CancelBatch`. Поле `resolve: (data: unknown) => void` (раньше `(order: Order) => void`) — подкласс приводит к нужному типу в handler.
 
 `label` передаётся через `BaseTradeStreamArgs` (не абстрактное свойство).
 
 Абстрактные методы (реализуются подклассами):
 - `initConnection()` — создание WebSocket и подключение
-- `buildOrderRequest(orderParams, requestId)` — формирование запроса
+- `buildOrderRequest(orderParams, requestId)` — формирование single-order запроса
 
 ## Binance Trade Stream
 
@@ -135,6 +154,9 @@ Exchange-классы агрегируют через `getWebSocketConnectionInf
 - Response matching по `id` = `requestId`
 - Нормализация ответа через `normalizeBinanceOrder()`
 - Ошибки выбрасываются как `ExchangeError` с полями `code` и `exchange`
+- **Per-response rate-limit snapshot**: `handleMessage` парсит `message.rateLimits[]` через `parseBinanceRateLimitArray`. Функция ищет entry с `rateLimitType === 'ORDERS' && interval === 'SECOND'`. Результат: `{ limit: entry.limit, remaining: max(0, entry.limit - entry.count), resetMs: Date.now() + entry.intervalNum * 1000 }` — присваивается `Order.rateLimit?`. Если `rateLimits` отсутствует, пуст, или нет ORDERS/SECOND entry → snapshot не присваивается.
+- **Batch через WS не поддерживается**: Binance WebSocket API содержит только одиночные `order.place / order.modify / order.cancel` — batch-операции доступны исключительно через REST
+- **handleMessage**: маршрутизирует ответы `order.place` как single-order. Защита: если `pending.kind !== PendingRequestKind.SingleOrder` → reject pending с ошибкой (некорректный kind для Binance)
 
 ## Bybit Trade Stream
 
@@ -143,11 +165,51 @@ Exchange-классы агрегируют через `getWebSocketConnectionInf
 - **URL**: `wss://stream.bybit.com/v5/trade`
 - **Только production** — в demo mode `tradeStream = null`, fallback на REST
 - Аутентификация при каждом open через `authenticateBybitWebSocket()` (`expires = Date.now() + 10000`)
-- Request format: `{ op: 'order.create', args: [...], reqId, header: { X-BAPI-* } }`
+- Single create: request format `{ op: 'order.create', args: [...], reqId, header: { X-BAPI-* } }`
 - Response matching по `reqId` = `requestId`
 - Возвращает минимальный Order (только id + clientOrderId), не полную нормализацию
+- **Per-response rate-limit snapshot**: `handleSingleOrderResponse` парсит `message.header` через `parseBybitHeaderRateLimit` — читает `X-Bapi-Limit` (общий лимит per-UID на эту группу ордеров), `X-Bapi-Limit-Status` (remaining), `X-Bapi-Limit-Reset-Timestamp` (resetMs unix ms). Результат `OrderRateLimitSnapshot` присваивается `Order.rateLimit?`. Если хоть одно поле отсутствует или не parseable как число → snapshot не присваивается (поле остаётся undefined).
 - **Heartbeat**: `{ op: 'ping' }`, интервал 20s
 - Ошибки выбрасываются как `ExchangeError` с полями `code` и `exchange`
+- **handleMessage**: маршрутизирует по `op` сообщения:
+  - `order.create` → handler для `PendingRequestKind.SingleOrder`
+  - `order.create-batch` → handler для `PendingRequestKind.CreateBatch`
+  - `order.amend-batch` → handler для `PendingRequestKind.ModifyBatch`
+  - `order.cancel-batch` → handler для `PendingRequestKind.CancelBatch`
+  - Auth-ответы (`op: 'auth'`) — фильтруются
+- **Auto-cleanup**: после resolve/reject batch-запроса соответствующая запись удаляется из `pendingBatchContextByReqId`. Orphan-сценарии (ответ без pending) — лог warn и игнор.
+
+## Bybit Trade Stream Batch
+
+Bybit V5 WebSocket Trade поддерживает batch-операции (Binance WebSocket API не имеет batch — там только одиночные `order.place / order.modify / order.cancel`).
+
+**Поддерживаемые ops:**
+- `order.create-batch` — создание пачкой
+- `order.amend-batch` — модификация пачкой
+- `order.cancel-batch` — отмена пачкой
+
+**Структура запроса:**
+```
+{
+  op: 'order.create-batch' | 'order.amend-batch' | 'order.cancel-batch',
+  args: [{ category, request: [...] }],  // массив из ОДНОГО элемента с category + массивом ордеров
+  header: { 'X-BAPI-TIMESTAMP': ..., 'X-BAPI-RECV-WINDOW': '7000' },
+  reqId: string,
+}
+```
+
+**Структура ответа:**
+- `data.list[]` — основные данные (orderId, orderLinkId)
+- `retExtInfo.list[]` — per-order success/error (`code === 0` = успех)
+
+**Лимиты:** linear/inverse/option = 20 ордеров на batch, spot = 10. Chunking применяется на уровне `BybitBaseClient` снаружи WS-вызова через `batchChunkSize`.
+
+**Методы (только Bybit):**
+- `BybitTradeStream.createBatchOrders(category, originalArgsList, requestPayloadList): Promise<Order[]>` — `originalArgsList` (`CreateOrderWebSocketArgs[]`) нужен для построения Order через `buildBybitOrderFromCreateResponse` (ответ содержит только `orderId`/`orderLinkId`, остальные поля Order берутся из аргументов)
+- `BybitTradeStream.modifyBatchOrders(category, originalOrderIdList, requestPayloadList): Promise<ModifyBatchOrdersResult>` — `originalOrderIdList` нужен для трасировки `orderId` в результате на случай, если биржа не вернёт его в ответе (per-order error path)
+- `BybitTradeStream.cancelBatchOrders(category, originalOrderIdList, requestPayloadList): Promise<CancelBatchOrdersResult>` — аналогично, `originalOrderIdList` для трасировки
+
+**Хранение pending запросов:** `pendingBatchContextByReqId: Map<string, BybitPendingBatchContext>` (discriminated union по `kind: 'create' | 'modify' | 'cancel'`) — хранит метаданные запроса (`originalArgsList` или `originalOrderIdList`, размер чанка) между отправкой и получением ответа. Очищается при resolve/reject и orphan-сценариях. Защита от kind mismatch: если `kind` входящего сообщения не совпадает с зарегистрированным pending — reject с ошибкой.
 
 ## parseWebSocketMessage<T> (src/ws/parseWebSocketMessage.ts)
 
@@ -206,13 +268,13 @@ Bybit конвертирует через маппинг `BYBIT_KLINE_INTERVAL`:
 ## Type Extraction
 
 Типы вынесены в co-located `.types.ts` файлы:
-- `BaseTradeStream.types.ts` — BaseTradeStreamArgs, PendingRequest
+- `BaseTradeStream.types.ts` — BaseTradeStreamArgs, PendingRequest (kind-tagged), PendingRequestKind (enum: `SingleOrder` | `CreateBatch` | `ModifyBatch` | `CancelBatch`)
 - `BinanceFuturesPublicStream.types.ts` — BinanceFuturesPublicStreamArgs, BinanceCombinedMessage, FuturesConnection
 - `BinanceSpotPublicStream.types.ts` — BinanceSpotPublicStreamArgs, BinanceSpotWebSocketEnvelope
 - `BinanceUserDataStream.types.ts` — BinanceUserDataStreamArgs
-- `BinanceTradeStream.types.ts` — BinanceTradeWebSocketResponse, BinanceWebSocketError
+- `BinanceTradeStream.types.ts` — BinanceTradeWebSocketResponse, BinanceWebSocketError, BinanceWebSocketRateLimitEntry (`{ rateLimitType, interval, intervalNum, limit, count }`)
 - `BybitPublicStream.types.ts` — BybitPublicStreamArgs, BybitWebSocketMessage, BybitConnection
 - `TradeToKlineAggregator.types.ts` — AggregatedKline
 - `BybitPrivateStream.types.ts` — BybitPrivateMessage, BybitPrivateStreamArgs
-- `BybitTradeStream.types.ts` — BybitTradeMessage
+- `BybitTradeStream.types.ts` — BybitTradeMessage, BybitTradeResponseHeader (`{ 'X-Bapi-Limit'?, 'X-Bapi-Limit-Status'?, 'X-Bapi-Limit-Reset-Timestamp'? }`), BybitPendingBatchContext (discriminated union по `kind: 'create' | 'modify' | 'cancel'`, хранит `originalArgsList` / `originalOrderIdList` для трасировки в ответе)
 - `bybitWebSocketUtils.types.ts` — BybitBaseWebSocketMessage, AuthenticateBybitWebSocketArgs

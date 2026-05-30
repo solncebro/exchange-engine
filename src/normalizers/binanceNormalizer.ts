@@ -20,6 +20,7 @@ import type {
   PriceLimitRisk,
 } from '../types/common';
 import { TradeSymbolTypeEnum, PositionSideEnum, MarginModeEnum, TimeInForceEnum } from '../types/common';
+import type { OrderRateLimit } from '../types/exchange';
 import { BINANCE_POSITION_SIDE, BINANCE_ORDER_SIDE, BINANCE_ORDER_TYPE, BINANCE_ORDER_STATUS, BINANCE_TIME_IN_FORCE } from '../constants/mappings';
 import { parseOrderBookLevel } from './normalizerUtils';
 
@@ -183,8 +184,16 @@ interface BinanceSymbolRaw {
   [key: string]: unknown;
 }
 
+export interface BinanceRateLimitRaw {
+  rateLimitType: string;
+  interval: string;
+  intervalNum: number;
+  limit: number;
+}
+
 export interface BinanceExchangeInfoRaw {
   symbols: BinanceSymbolRaw[];
+  rateLimits?: BinanceRateLimitRaw[];
 }
 
 export interface BinanceTicker24hrRaw {
@@ -317,6 +326,46 @@ function buildBinancePriceLimitRisk(filterList: BinanceFilterRaw[]): PriceLimitR
   }
 
   return undefined;
+}
+
+const BINANCE_ORDER_RATE_LIMIT_FALLBACK_RPS = 15;
+
+function intervalToSeconds(interval: string): number {
+  if (interval === 'SECOND') {
+    return 1;
+  }
+  if (interval === 'MINUTE') {
+    return 60;
+  }
+  if (interval === 'HOUR') {
+    return 3600;
+  }
+  if (interval === 'DAY') {
+    return 86400;
+  }
+  throw new Error(`Unsupported Binance rate-limit interval: ${interval}`);
+}
+
+export function parseBinanceOrderRateLimit(raw: BinanceExchangeInfoRaw): OrderRateLimit {
+  const orderLimitList = (raw.rateLimits ?? []).filter((entry) => entry.rateLimitType === 'ORDERS');
+
+  if (orderLimitList.length === 0) {
+    return {
+      writeRequestsPerSecond: BINANCE_ORDER_RATE_LIMIT_FALLBACK_RPS,
+      source: 'fallback',
+    };
+  }
+
+  const perSecondList = orderLimitList.map((entry) => {
+    const secondsInInterval = intervalToSeconds(entry.interval);
+
+    return entry.limit / (entry.intervalNum * secondsInInterval);
+  });
+
+  return {
+    writeRequestsPerSecond: Math.min(...perSecondList),
+    source: 'binance-exchange-info',
+  };
 }
 
 export function normalizeBinanceTradeSymbols(raw: BinanceExchangeInfoRaw): TradeSymbolBySymbol {
@@ -465,15 +514,37 @@ export function normalizeBinanceKlineWebSocketMessage(raw: BinanceWebSocketKline
   };
 }
 
+function resolveBinanceDirection(raw: BinancePositionRiskRaw): 'long' | 'short' | null {
+  if (raw.positionSide === 'LONG') {
+    return 'long';
+  }
+
+  if (raw.positionSide === 'SHORT') {
+    return 'short';
+  }
+
+  const amt = parseFloat(raw.positionAmt);
+
+  if (!Number.isFinite(amt) || amt === 0) {
+    return null;
+  }
+
+  return amt > 0 ? 'long' : 'short';
+}
+
 export function normalizeBinancePosition(raw: BinancePositionRiskRaw): Position {
   const side = BINANCE_POSITION_SIDE[raw.positionSide] ?? PositionSideEnum.Both;
+  const direction = resolveBinanceDirection(raw);
   const marginMode: MarginModeEnum = raw.marginType === 'ISOLATED' ? MarginModeEnum.Isolated : MarginModeEnum.Cross;
   const liquidationPriceRaw = parseFloat(raw.liquidationPrice);
+  const rawContracts = parseFloat(raw.positionAmt);
+  const safeContracts = Number.isFinite(rawContracts) ? Math.abs(rawContracts) : 0;
 
   return {
     symbol: raw.symbol,
     side,
-    contracts: parseFloat(raw.positionAmt),
+    direction,
+    contracts: safeContracts,
     entryPrice: parseFloat(raw.entryPrice),
     markPrice: parseFloat(raw.markPrice),
     unrealizedPnl: parseFloat(raw.unRealizedProfit),

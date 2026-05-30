@@ -8,7 +8,9 @@ import {
   buildBybitOrderFromCreateResponse,
   normalizeBybitBalances,
   normalizeBybitOrderBook,
+  normalizeBybitOrderBookUpdate,
   normalizeBybitPublicTradeList,
+  normalizeBybitPublicTradeFromStream,
   normalizeBybitOpenInterest,
   normalizeBybitFeeRateList,
   normalizeBybitFundingRateHistoryList,
@@ -28,7 +30,9 @@ import {
   BYBIT_RAW_ORDER_RESPONSE,
   BYBIT_RAW_WALLET_BALANCE,
   BYBIT_RAW_ORDER_BOOK,
+  BYBIT_RAW_ORDER_BOOK_STREAM,
   BYBIT_RAW_PUBLIC_TRADE_LIST,
+  BYBIT_RAW_PUBLIC_TRADE_STREAM_LIST,
   BYBIT_RAW_MARK_PRICE_TICKER_LIST,
   BYBIT_RAW_OPEN_INTEREST,
   BYBIT_RAW_FEE_RATE_LIST,
@@ -420,10 +424,65 @@ describe('normalizeBybitPosition', () => {
     expect(result.liquidationPrice).toBe(0);
   });
 
+  it('returns 0 for NaN contracts when raw size is invalid (defensive)', () => {
+    const raw = { ...BYBIT_RAW_POSITION, size: 'abc' };
+    const result = normalizeBybitPosition(raw);
+
+    expect(result.contracts).toBe(0);
+  });
+
+  it('returns 0 for empty string contracts', () => {
+    const raw = { ...BYBIT_RAW_POSITION, size: '' };
+    const result = normalizeBybitPosition(raw);
+
+    expect(result.contracts).toBe(0);
+  });
+
+  it('returns 0 for Infinity contracts', () => {
+    const raw = { ...BYBIT_RAW_POSITION, size: 'Infinity' };
+    const result = normalizeBybitPosition(raw);
+
+    expect(result.contracts).toBe(0);
+  });
+
   it('preserves raw data in info', () => {
     const result = normalizeBybitPosition(BYBIT_RAW_POSITION);
 
     expect(result.info).toBe(BYBIT_RAW_POSITION);
+  });
+
+  it('resolves direction=long when side=Buy (oneWay or hedge)', () => {
+    const result = normalizeBybitPosition(BYBIT_RAW_POSITION);
+
+    expect(result.direction).toBe('long');
+  });
+
+  it('resolves direction=short when side=Sell', () => {
+    const raw = { ...BYBIT_RAW_POSITION, side: 'Sell' };
+    const result = normalizeBybitPosition(raw);
+
+    expect(result.direction).toBe('short');
+  });
+
+  it('falls back to positionIdx when side=None (hedge LONG slot)', () => {
+    const raw = { ...BYBIT_RAW_POSITION, side: 'None', positionIdx: 1 };
+    const result = normalizeBybitPosition(raw);
+
+    expect(result.direction).toBe('long');
+  });
+
+  it('falls back to positionIdx when side=None (hedge SHORT slot)', () => {
+    const raw = { ...BYBIT_RAW_POSITION, side: 'None', positionIdx: 2 };
+    const result = normalizeBybitPosition(raw);
+
+    expect(result.direction).toBe('short');
+  });
+
+  it('returns direction=null when side=None and positionIdx=0 (oneWay empty slot)', () => {
+    const raw = { ...BYBIT_RAW_POSITION, side: 'None', positionIdx: 0 };
+    const result = normalizeBybitPosition(raw);
+
+    expect(result.direction).toBeNull();
   });
 });
 
@@ -748,6 +807,88 @@ describe('normalizeBybitOrderBook', () => {
 
     expect(result.askList).toHaveLength(0);
     expect(result.bidList).toHaveLength(0);
+  });
+});
+
+describe('normalizeBybitOrderBookUpdate', () => {
+  it('preserves bid/ask levels as raw decimal string pairs', () => {
+    const result = normalizeBybitOrderBookUpdate(BYBIT_RAW_ORDER_BOOK_STREAM, 'BTCUSDT', 'snapshot', 1700000000050);
+
+    expect(result.bidList).toEqual([['65000.00', '1.500'], ['64999.00', '2.300']]);
+    expect(result.askList).toEqual([['65001.00', '0.800'], ['65002.00', '1.200']]);
+  });
+
+  it('returns the explicit snapshot updateType', () => {
+    const result = normalizeBybitOrderBookUpdate(BYBIT_RAW_ORDER_BOOK_STREAM, 'BTCUSDT', 'snapshot', 1700000000050);
+
+    expect(result.updateType).toBe('snapshot');
+  });
+
+  it('returns the explicit delta updateType', () => {
+    const result = normalizeBybitOrderBookUpdate(BYBIT_RAW_ORDER_BOOK_STREAM, 'BTCUSDT', 'delta', 1700000000050);
+
+    expect(result.updateType).toBe('delta');
+  });
+
+  it('copies updateId, event and received timestamps', () => {
+    const result = normalizeBybitOrderBookUpdate(BYBIT_RAW_ORDER_BOOK_STREAM, 'BTCUSDT', 'delta', 1700000000050);
+
+    expect(result.updateId).toBe(999999);
+    expect(result.eventTimestamp).toBe(1700000000000);
+    expect(result.receivedTimestamp).toBe(1700000000050);
+  });
+
+  it('returns the symbol passed by caller, not the raw payload value', () => {
+    const result = normalizeBybitOrderBookUpdate({ ...BYBIT_RAW_ORDER_BOOK_STREAM, s: 'OTHERUSDT' }, 'BTCUSDT', 'delta', 0);
+
+    expect(result.symbol).toBe('BTCUSDT');
+  });
+});
+
+describe('normalizeBybitPublicTradeFromStream', () => {
+  it('maps WS payload fields to PublicTrade', () => {
+    const result = normalizeBybitPublicTradeFromStream(BYBIT_RAW_PUBLIC_TRADE_STREAM_LIST);
+
+    expect(result).toHaveLength(2);
+    expect(result[0].id).toBe('stream-1');
+    expect(result[0].symbol).toBe('BTCUSDT');
+    expect(result[0].price).toBe(65000.5);
+    expect(result[0].quantity).toBe(0.1);
+    expect(result[0].timestamp).toBe(1700000000000);
+  });
+
+  it('computes quoteQuantity as price * quantity', () => {
+    const result = normalizeBybitPublicTradeFromStream(BYBIT_RAW_PUBLIC_TRADE_STREAM_LIST);
+
+    expect(result[0].quoteQuantity).toBeCloseTo(6500.05);
+  });
+
+  it('sets isBuyerMaker=true for Sell side', () => {
+    const result = normalizeBybitPublicTradeFromStream(BYBIT_RAW_PUBLIC_TRADE_STREAM_LIST);
+
+    expect(result[0].isBuyerMaker).toBe(false);
+    expect(result[1].isBuyerMaker).toBe(true);
+  });
+
+  it('maps side via BYBIT_ORDER_SIDE table', () => {
+    const result = normalizeBybitPublicTradeFromStream(BYBIT_RAW_PUBLIC_TRADE_STREAM_LIST);
+
+    expect(result[0].side).toBe('buy');
+    expect(result[1].side).toBe('sell');
+  });
+
+  it('defaults missing optional fields gracefully', () => {
+    const result = normalizeBybitPublicTradeFromStream([{ T: 1, s: 'BTCUSDT', p: '1', v: '1' }]);
+
+    expect(result[0].id).toBe('');
+    expect(result[0].isBlockTrade).toBe(false);
+    expect(result[0].side).toBeUndefined();
+  });
+
+  it('returns empty array for empty input', () => {
+    const result = normalizeBybitPublicTradeFromStream([]);
+
+    expect(result).toHaveLength(0);
   });
 });
 

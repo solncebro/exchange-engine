@@ -37,6 +37,11 @@ export const BINANCE_ORDER_SIDE: Record<string, OrderSideEnum> = {
   SELL: OrderSideEnum.Sell,
 };
 
+export const BINANCE_ORDER_SIDE_REVERSE: Record<OrderSideEnum, string> = {
+  [OrderSideEnum.Buy]: 'BUY',
+  [OrderSideEnum.Sell]: 'SELL',
+};
+
 export const BINANCE_ORDER_TYPE: Record<string, OrderTypeEnum> = {
   MARKET: OrderTypeEnum.Market,
   LIMIT: OrderTypeEnum.Limit,

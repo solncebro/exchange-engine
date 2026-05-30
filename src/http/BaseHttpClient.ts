@@ -103,9 +103,8 @@ abstract class BaseHttpClient {
         const axiosError = error as AxiosError;
         this.handleError(axiosError);
 
-
         if (!isRetryable(axiosError) || attempt === MAX_RETRIES) {
-          throw error;
+          throw this.enrichError(axiosError);
         }
 
         const delayMilliseconds = getRetryDelayMilliseconds(axiosError, attempt);

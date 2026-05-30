@@ -192,6 +192,7 @@ export type TradeSymbolBySymbol = Map<string, TradeSymbol>;
 export interface Position {
   symbol: string;
   side: PositionSideEnum;
+  direction: 'long' | 'short' | null;
   contracts: number;
   entryPrice: number;
   markPrice: number;
@@ -199,7 +200,14 @@ export interface Position {
   leverage: number;
   marginMode: MarginModeEnum;
   liquidationPrice: number;
+  positionIdx?: number;
   info: Record<string, unknown>;
+}
+
+export interface OrderRateLimitSnapshot {
+  limit: number;
+  remaining: number;
+  resetMs: number;
 }
 
 export interface Order {
@@ -219,6 +227,7 @@ export interface Order {
   reduceOnly: boolean;
   timestamp: number;
   updatedTimestamp: number;
+  rateLimit?: OrderRateLimitSnapshot;
 }
 
 export interface Balance {
@@ -321,6 +330,22 @@ export interface OrderBook {
   eventTimestamp?: number;
 }
 
+export type OrderBookUpdateType = 'snapshot' | 'delta';
+
+export type OrderBookRawLevel = [string, string];
+
+export interface OrderBookUpdate {
+  symbol: string;
+  updateType: OrderBookUpdateType;
+  bidList: OrderBookRawLevel[];
+  askList: OrderBookRawLevel[];
+  updateId: number;
+  eventTimestamp: number;
+  receivedTimestamp: number;
+}
+
+export type OrderBookHandler = (symbol: string, update: OrderBookUpdate) => void;
+
 export interface PublicTrade {
   id: string;
   symbol: string;
@@ -332,6 +357,8 @@ export interface PublicTrade {
   isBlockTrade?: boolean;
   side?: OrderSideEnum;
 }
+
+export type PublicTradeHandler = (symbol: string, tradeList: PublicTrade[]) => void;
 
 export interface MarkPrice {
   symbol: string;

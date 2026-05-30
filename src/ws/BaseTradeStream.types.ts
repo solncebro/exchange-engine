@@ -1,4 +1,4 @@
-import type { ExchangeLogger, Order } from '../types/common';
+import type { ExchangeLogger } from '../types/common';
 
 export interface BaseTradeStreamArgs {
   url: string;
@@ -9,8 +9,16 @@ export interface BaseTradeStreamArgs {
   onNotify?: (message: string) => void | Promise<void>;
 }
 
+export enum PendingRequestKind {
+  SingleOrder = 'single-order',
+  CreateBatch = 'create-batch',
+  ModifyBatch = 'modify-batch',
+  CancelBatch = 'cancel-batch',
+}
+
 export interface PendingRequest {
-  resolve: (order: Order) => void;
+  kind: PendingRequestKind;
+  resolve: (data: unknown) => void;
   reject: (error: Error) => void;
   timeout: NodeJS.Timeout;
 }

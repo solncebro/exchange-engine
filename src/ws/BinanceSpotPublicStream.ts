@@ -27,7 +27,7 @@ class BinanceSpotPublicStream {
     this.label = args.label;
   }
 
-  subscribeAllTickers(handler: (tickers: TickerBySymbol) => void): void {
+  subscribeAllTickers(handler: (tickers: TickerBySymbol) => void, _symbolList: string[]): void {
     this.tickerHandlerSet.add(handler);
     this.ensureConnected();
   }
@@ -36,7 +36,7 @@ class BinanceSpotPublicStream {
     this.tickerHandlerSet.delete(handler);
   }
 
-  subscribeMarkPrices(_handler: MarkPriceHandler): void {
+  subscribeMarkPrices(_handler: MarkPriceHandler, _symbolList: string[]): void {
     this.logger.warn('BinanceSpotPublicStream: mark price is not available for spot market; subscription ignored');
   }
 

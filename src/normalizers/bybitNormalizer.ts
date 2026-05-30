@@ -9,6 +9,9 @@ import type {
   Balance,
   AccountBalances,
   OrderBook,
+  OrderBookRawLevel,
+  OrderBookUpdate,
+  OrderBookUpdateType,
   PublicTrade,
   MarkPrice,
   OpenInterest,
@@ -116,6 +119,10 @@ export interface BybitPublicTradeDataRaw {
   s: string;
   p: string;
   v: string;
+  S?: string;
+  i?: string;
+  BT?: boolean;
+  L?: string;
 }
 
 export interface BybitWebSocketMessageRaw<T> {
@@ -190,6 +197,8 @@ export interface BybitOrderBookRaw {
   b: string[][];
   ts: number;
   u: number;
+  s?: string;
+  seq?: number;
 }
 
 export interface BybitPublicTradeRaw {
@@ -450,21 +459,45 @@ export function normalizeBybitKlineWebSocketMessage(raw: BybitWebSocketKlineRaw)
   };
 }
 
+function resolveBybitDirection(raw: BybitPositionRaw): 'long' | 'short' | null {
+  if (raw.side === 'Buy') {
+    return 'long';
+  }
+
+  if (raw.side === 'Sell') {
+    return 'short';
+  }
+
+  if (raw.positionIdx === 1) {
+    return 'long';
+  }
+
+  if (raw.positionIdx === 2) {
+    return 'short';
+  }
+
+  return null;
+}
+
 export function normalizeBybitPosition(raw: BybitPositionRaw): Position {
   const side = BYBIT_POSITION_SIDE[raw.side] ?? PositionSideEnum.Both;
+  const direction = resolveBybitDirection(raw);
   const marginMode: MarginModeEnum = raw.tradeMode === 0 ? MarginModeEnum.Cross : MarginModeEnum.Isolated;
   const liquidationPriceRaw = parseFloat(raw.liqPrice);
+  const contractsRaw = parseFloat(raw.size);
 
   return {
     symbol: raw.symbol,
     side,
-    contracts: parseFloat(raw.size),
+    direction,
+    contracts: Number.isFinite(contractsRaw) ? contractsRaw : 0,
     entryPrice: parseFloat(raw.avgPrice),
     markPrice: parseFloat(raw.markPrice),
     unrealizedPnl: parseFloat(raw.unrealisedPnl),
     leverage: parseFloat(raw.leverage),
     marginMode,
     liquidationPrice: isNaN(liquidationPriceRaw) ? 0 : liquidationPriceRaw,
+    positionIdx: raw.positionIdx,
     info: raw,
   };
 }
@@ -639,6 +672,33 @@ export function normalizeBybitOrderBook(raw: BybitOrderBookRaw, symbol: string):
   };
 }
 
+function toOrderBookRawLevelList(rawList: string[][]): OrderBookRawLevel[] {
+  const result: OrderBookRawLevel[] = [];
+
+  for (const level of rawList) {
+    result.push([level[0], level[1]]);
+  }
+
+  return result;
+}
+
+export function normalizeBybitOrderBookUpdate(
+  raw: BybitOrderBookRaw,
+  symbol: string,
+  updateType: OrderBookUpdateType,
+  receivedTimestamp: number,
+): OrderBookUpdate {
+  return {
+    symbol,
+    updateType,
+    bidList: toOrderBookRawLevelList(raw.b),
+    askList: toOrderBookRawLevelList(raw.a),
+    updateId: raw.u,
+    eventTimestamp: raw.ts,
+    receivedTimestamp,
+  };
+}
+
 export function normalizeBybitPublicTradeList(rawList: BybitPublicTradeRaw[]): PublicTrade[] {
   return rawList.map((raw) => {
     const trade: PublicTrade = {
@@ -656,6 +716,33 @@ export function normalizeBybitPublicTradeList(rawList: BybitPublicTradeRaw[]): P
 
     if (mappedSide !== undefined) {
       trade.side = mappedSide;
+    }
+
+    return trade;
+  });
+}
+
+export function normalizeBybitPublicTradeFromStream(rawList: BybitPublicTradeDataRaw[]): PublicTrade[] {
+  return rawList.map((raw) => {
+    const price = parseFloat(raw.p);
+    const quantity = parseFloat(raw.v);
+    const trade: PublicTrade = {
+      id: raw.i ?? '',
+      symbol: raw.s,
+      price,
+      quantity,
+      quoteQuantity: price * quantity,
+      timestamp: raw.T,
+      isBuyerMaker: raw.S === 'Sell',
+      isBlockTrade: raw.BT ?? false,
+    };
+
+    if (raw.S !== undefined) {
+      const mappedSide = BYBIT_ORDER_SIDE[raw.S];
+
+      if (mappedSide !== undefined) {
+        trade.side = mappedSide;
+      }
     }
 
     return trade;

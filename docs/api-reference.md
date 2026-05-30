@@ -77,10 +77,14 @@ class Exchange {
 | `cancelAllOrders` | ✅ | ❌ | ✅ | ✅ |
 | `createBatchOrders` | ✅ | ❌ | ✅ | ✅ |
 | `cancelBatchOrders` | ✅ | ❌ | ✅ | ✅ |
+| `modifyBatchOrders` | ✅ | ❌ | ✅ | ✅ |
+| `getOrderRateLimit` | ✅ | ✅ | ✅ | ✅ |
 | `watchTickers` | ✅ | ✅ | ✅ | ✅ |
 | `subscribeMarkPrices` / `unsubscribeMarkPrices` | ✅ | ⚠️ | ✅ | ✅ |
 | `subscribeKlines` | ✅ | ✅ | ✅ | ✅ |
 | `unsubscribeKlines` | ✅ | ✅ | ✅ | ✅ |
+| `subscribeOrderbook` / `unsubscribeOrderbook` | ❌ | ❌ | ✅ | ✅ |
+| `subscribePublicTrades` / `unsubscribePublicTrades` | ❌ | ❌ | ✅ | ✅ |
 | `connectTradeWebSocket` | ✅ | ✅ | ✅ | ✅ |
 | `isTradeWebSocketConnected` | ✅ | ✅ | ✅ | ✅ |
 | `connectUserDataStream` | ✅ | ✅ | ✅ | ✅ |
@@ -785,13 +789,24 @@ cancelAllOrders(symbol: string): Promise<void>
 createBatchOrders(orderList: CreateOrderWebSocketArgs[]): Promise<Order[]>
 ```
 
-Создает несколько ордеров одним запросом.
+Создает несколько ордеров одним запросом. Поддерживает автоматический chunking: пользователю не нужно беспокоиться о лимитах биржи.
 
 | Параметр | Тип | Обязательный | Описание |
 |---|---|:---:|---|
-| `orderList` | `CreateOrderWebSocketArgs[]` | да | Массив ордеров |
+| `orderList` | `CreateOrderWebSocketArgs[]` | да | Массив ордеров (без ограничения сверху — chunking автоматический) |
 
-**Возврат:** `Order[]` — массив созданных ордеров.
+**Возврат:** `Order[]` — массив созданных ордеров. На Binance per-order ошибки пропускаются с warning'ом в логе (только успешные элементы попадают в результат).
+
+**Лимиты и chunking:**
+
+| Биржа/Рынок | Размер чанка | Транспорт |
+|---|---|---|
+| Binance Futures | 5 (`BINANCE_FUTURES_CREATE_BATCH_CHUNK_SIZE`) | REST `POST /fapi/v1/batchOrders` |
+| Binance Spot | — | `Not supported for spot market` (API не существует) |
+| Bybit Linear | 20 (`BYBIT_LINEAR_BATCH_CHUNK_SIZE`) | WebSocket (`order.create-batch`) если активен tradeStream, иначе REST `POST /v5/order/create-batch` |
+| Bybit Spot | 10 (`BYBIT_SPOT_BATCH_CHUNK_SIZE`) | WebSocket (`order.create-batch`) если активен tradeStream, иначе REST `POST /v5/order/create-batch` |
+
+На Bybit в demo mode tradeStream отсутствует — всегда REST.
 
 | Биржа | Futures | Spot |
 |---|:---:|:---:|
@@ -803,20 +818,135 @@ createBatchOrders(orderList: CreateOrderWebSocketArgs[]): Promise<Order[]>
 ### `cancelBatchOrders()`
 
 ```typescript
-cancelBatchOrders(symbol: string, orderIdList: string[]): Promise<void>
+cancelBatchOrders(symbol: string, orderIdList: string[]): Promise<CancelBatchOrdersResult>
 ```
 
-Отменяет несколько ордеров одним запросом.
+Отменяет несколько ордеров одним запросом с per-order success/error результатом. Поддерживает автоматический chunking.
 
 | Параметр | Тип | Обязательный | Описание |
 |---|---|:---:|---|
 | `symbol` | `string` | да | Торговый символ |
 | `orderIdList` | `string[]` | да | Массив ID ордеров |
 
+**Возврат:** `CancelOrderItemResult[]` — массив, индексы соответствуют порядку входного `orderIdList`. Каждый элемент:
+- `orderId: string`
+- `isSuccess: boolean`
+- `errorCode: number | null`
+- `errorText: string | null`
+
+**Лимиты и chunking:**
+
+| Биржа/Рынок | Размер чанка | Транспорт |
+|---|---|---|
+| Binance Futures | 10 (`BINANCE_FUTURES_CANCEL_BATCH_CHUNK_SIZE`) | REST `DELETE /fapi/v1/batchOrders` |
+| Binance Spot | — | `Not supported for spot market` (API не существует) |
+| Bybit Linear | 20 (`BYBIT_LINEAR_BATCH_CHUNK_SIZE`) | WebSocket (`order.cancel-batch`) если активен tradeStream, иначе REST `POST /v5/order/cancel-batch` |
+| Bybit Spot | 10 (`BYBIT_SPOT_BATCH_CHUNK_SIZE`) | WebSocket (`order.cancel-batch`) если активен tradeStream, иначе REST `POST /v5/order/cancel-batch` |
+
 | Биржа | Futures | Spot |
 |---|:---:|:---:|
 | Binance | ✅ | ❌ |
 | Bybit | ✅ | ✅ |
+
+---
+
+### `modifyBatchOrders()`
+
+```typescript
+modifyBatchOrders(orderList: ModifyBatchOrderArgs[]): Promise<ModifyBatchOrdersResult>
+```
+
+Массовая модификация ордеров с per-order success/error результатом. Поддерживает автоматический chunking.
+
+| Поле | Тип | Обязательный | Описание |
+|---|---|:---:|---|
+| `symbol` | `string` | да | Торговый символ |
+| `orderId` | `string` | да | ID существующего ордера |
+| `side` | `OrderSideEnum` | да (Binance) | `Buy` / `Sell` — обязательно для Binance Futures PUT batch (биржа не выводит side по `origOrderId`) |
+| `clientOrderId` | `string` | нет | На Bybit маппится в `orderLinkId`, на Binance — в `origClientOrderId` |
+| `price` | `number` | нет | Новая цена |
+| `amount` | `number` | нет | Новое количество |
+| `triggerPrice` | `number` | нет | Новая триггер-цена |
+
+**Возврат:** `ModifyOrderItemResult[]` — массив, индексы соответствуют порядку входного `orderList`. Каждый элемент:
+- `orderId: string`
+- `isSuccess: boolean`
+- `errorCode: number | null`
+- `errorText: string | null`
+
+**Лимиты и chunking:**
+
+| Биржа/Рынок | Размер чанка | Транспорт |
+|---|---|---|
+| Binance Futures | 5 (`BINANCE_FUTURES_MODIFY_BATCH_CHUNK_SIZE`) | REST `PUT /fapi/v1/batchOrders` |
+| Binance Spot | — | `Not supported for spot market` (API не существует) |
+| Bybit Linear | 20 (`BYBIT_LINEAR_BATCH_CHUNK_SIZE`) | WebSocket (`order.amend-batch`) если активен tradeStream, иначе REST `POST /v5/order/amend-batch` |
+| Bybit Spot | 10 (`BYBIT_SPOT_BATCH_CHUNK_SIZE`) | WebSocket (`order.amend-batch`) если активен tradeStream, иначе REST `POST /v5/order/amend-batch` |
+
+**Маршрутизация:** На Bybit при подключённом trade stream batch уходит через WebSocket; иначе REST. На Binance — только REST. В demo mode (Bybit `tradeStream === null`) — всегда REST. Chunking автоматический — пользователю не нужно беспокоиться о лимитах биржи.
+
+| Биржа | Futures | Spot |
+|---|:---:|:---:|
+| Binance | ✅ | ❌ |
+| Bybit | ✅ | ✅ |
+
+```typescript
+import { OrderSideEnum } from '@solncebro/exchange-engine';
+
+const result = await exchange.futures.modifyBatchOrders([
+  { symbol: 'BTCUSDT', orderId: '12345', side: OrderSideEnum.Buy, price: 30000 },
+  { symbol: 'ETHUSDT', orderId: '67890', side: OrderSideEnum.Sell, amount: 0.5 },
+]);
+
+for (const item of result) {
+  if (item.isSuccess) {
+    console.log(`Modified ${item.orderId}`);
+  } else {
+    console.error(`Failed ${item.orderId}: ${item.errorCode} ${item.errorText}`);
+  }
+}
+```
+
+---
+
+### `getOrderRateLimit()`
+
+```typescript
+getOrderRateLimit(): Promise<OrderRateLimit>
+
+interface OrderRateLimit {
+  writeRequestsPerSecond: number;
+  source: OrderRateLimitSource;
+}
+
+type OrderRateLimitSource = 'binance-exchange-info' | 'bybit-documented' | 'fallback';
+```
+
+Возвращает per-UID write rate-limit для order endpoints (create/cancel/modify, в т.ч. batch). Используется потребителями для динамической настройки throttling/queueing logic.
+
+**Поведение per биржа/рынок:**
+
+| Биржа/Рынок | Источник | Значение |
+|---|---|---|
+| Binance Futures | `binance-exchange-info` — парсинг из `GET /fapi/v1/exchangeInfo` (`rateLimits[]` с `rateLimitType: 'ORDERS'`, минимум по всем интервалам в RPS) | реальное (зависит от аккаунта/тарифа) |
+| Binance Spot | `binance-exchange-info` — то же из `GET /api/v3/exchangeInfo` | реальное |
+| Bybit Linear | `bybit-documented` — hardcoded (Bybit не отдаёт лимиты через GET) | `20` RPS |
+| Bybit Spot | `bybit-documented` — то же | `20` RPS |
+| Fallback | `fallback` — Binance не вернул `rateLimits[]` или массив `ORDERS`-лимитов пуст | `15` RPS (`BINANCE_ORDER_RATE_LIMIT_FALLBACK_RPS`) |
+
+| Биржа | Futures | Spot |
+|---|:---:|:---:|
+| Binance | ✅ | ✅ |
+| Bybit | ✅ | ✅ |
+
+```typescript
+const limit = await exchange.futures.getOrderRateLimit();
+console.log(`Write RPS: ${limit.writeRequestsPerSecond}, source: ${limit.source}`);
+// → "Write RPS: 300, source: binance-exchange-info"  (пример Binance Futures)
+// → "Write RPS: 20,  source: bybit-documented"      (Bybit)
+```
+
+**Замечание для Bybit:** Bybit не отдаёт rate-limits через GET endpoint — только через response headers на actual order calls. Метод возвращает документированную константу (источник: https://bybit-exchange.github.io/docs/v5/rate-limit). Если нужно более точное измерение — отслеживайте headers после реальных операций.
 
 ---
 
@@ -910,6 +1040,80 @@ unsubscribeKlines(args: SubscribeKlinesArgs): void
 | `args.symbol` | `string` | да | Торговый символ |
 | `args.interval` | `KlineInterval` | да | Интервал свечи |
 | `args.handler` | `KlineHandler` | да | Тот же handler, что был передан в `subscribeKlines` |
+
+---
+
+### `subscribeOrderbook()`
+
+```typescript
+subscribeOrderbook(args: SubscribeOrderbookArgs): void
+```
+
+Подписывается на обновления стакана (Bybit V5 public stream, topic `orderbook.{depth}.{symbol}`). Уровни передаются как сырые пары decimal-строк (`OrderBookRawLevel = [string, string]`), чтобы избежать потери точности при `parseFloat`.
+
+| Параметр | Тип | Обязательный | Описание |
+|---|---|:---:|---|
+| `args.symbol` | `string` | да | Торговый символ |
+| `args.depth` | `number` | да | Глубина стакана (Bybit linear: `1` / `50` / `200` / `500` / `1000`; spot: `1` / `50` / `200`) |
+| `args.handler` | `OrderBookHandler` | да | `(symbol: string, update: OrderBookUpdate) => void` |
+
+| Рынок | Поведение |
+|------|-----------|
+| Binance Futures / Spot | `subscribeOrderbook` бросает `Not supported for ${marketLabel} market` |
+| Bybit Linear / Spot | Подписка на topic `orderbook.{depth}.{symbol}`; в `handler` передаются `snapshot` и `delta` события |
+
+```typescript
+bybitLinear.subscribeOrderbook({
+  symbol: 'BTCUSDT',
+  depth: 50,
+  handler: (symbol, update) => {
+    if (update.updateType === 'snapshot') {
+      // reset local book
+    }
+    // bidList/askList — массив пар [priceString, quantityString]
+  },
+});
+```
+
+---
+
+### `unsubscribeOrderbook()`
+
+```typescript
+unsubscribeOrderbook(args: SubscribeOrderbookArgs): void
+```
+
+Снимает ранее зарегистрированный обработчик стакана. Передать тот же `handler`. На Binance — no-op.
+
+---
+
+### `subscribePublicTrades()`
+
+```typescript
+subscribePublicTrades(args: SubscribePublicTradesArgs): void
+```
+
+Подписывается на поток сырых сделок (Bybit V5 public stream, topic `publicTrade.{symbol}`). Совместим с `subscribeKlines(symbol, '1s', ...)` — оба consumer'а получают сообщения независимо; topic снимается только когда отписались оба.
+
+| Параметр | Тип | Обязательный | Описание |
+|---|---|:---:|---|
+| `args.symbol` | `string` | да | Торговый символ |
+| `args.handler` | `PublicTradeHandler` | да | `(symbol: string, tradeList: PublicTrade[]) => void` |
+
+| Рынок | Поведение |
+|------|-----------|
+| Binance Futures / Spot | `subscribePublicTrades` бросает `Not supported for ${marketLabel} market` |
+| Bybit Linear / Spot | Подписка на topic `publicTrade.{symbol}`; payload нормализуется через `normalizeBybitPublicTradeFromStream` |
+
+---
+
+### `unsubscribePublicTrades()`
+
+```typescript
+unsubscribePublicTrades(args: SubscribePublicTradesArgs): void
+```
+
+Снимает ранее зарегистрированный обработчик публичных сделок. Topic снимается только если у символа не осталось ни одного `publicTrade`-subscriber'а и не активен `subscribeKlines(symbol, '1s', ...)`. На Binance — no-op.
 
 ---
 
@@ -1429,6 +1633,42 @@ interface OrderBookLevel {
 }
 ```
 
+#### `OrderBookRawLevel`
+
+```typescript
+type OrderBookRawLevel = [string, string];
+```
+
+Пара `[price, quantity]` как сырые decimal-строки. Используется в `OrderBookUpdate` для WS-обновлений Bybit, чтобы избежать потери точности при `parseFloat`.
+
+#### `OrderBookUpdateType`
+
+```typescript
+type OrderBookUpdateType = 'snapshot' | 'delta';
+```
+
+#### `OrderBookUpdate`
+
+```typescript
+interface OrderBookUpdate {
+  symbol: string;
+  updateType: OrderBookUpdateType;
+  bidList: OrderBookRawLevel[];
+  askList: OrderBookRawLevel[];
+  updateId: number;
+  eventTimestamp: number;
+  receivedTimestamp: number;
+}
+```
+
+Сообщение Bybit orderbook WS-стрима. `eventTimestamp` — `ts` из payload, `receivedTimestamp` — момент получения сообщения клиентом (`Date.now()`).
+
+#### `OrderBookHandler`
+
+```typescript
+type OrderBookHandler = (symbol: string, update: OrderBookUpdate) => void;
+```
+
 #### `PublicTrade`
 
 ```typescript
@@ -1446,6 +1686,14 @@ interface PublicTrade {
 ```
 
 `isBlockTrade` и `side` заполняются Bybit (`execId`-based трейды).
+
+#### `PublicTradeHandler`
+
+```typescript
+type PublicTradeHandler = (symbol: string, tradeList: PublicTrade[]) => void;
+```
+
+Используется в `subscribePublicTrades` для приёма WS-сделок Bybit V5 public stream.
 
 #### `MarkPrice`
 
@@ -1708,6 +1956,50 @@ interface ModifyOrderArgs {
 }
 ```
 
+#### `ModifyBatchOrderArgs`
+
+```typescript
+interface ModifyBatchOrderArgs {
+  symbol: string;
+  orderId: string;
+  side: OrderSideEnum;
+  clientOrderId?: string;
+  price?: number;
+  amount?: number;
+  triggerPrice?: number;
+}
+```
+
+`side` обязателен (требуется для Binance Futures PUT `/fapi/v1/batchOrders`). `clientOrderId` → Bybit `orderLinkId` / Binance `origClientOrderId`.
+
+#### `CancelOrderItemResult` / `CancelBatchOrdersResult`
+
+```typescript
+interface CancelOrderItemResult {
+  orderId: string;
+  isSuccess: boolean;
+  errorCode: number | null;
+  errorText: string | null;
+}
+
+type CancelBatchOrdersResult = CancelOrderItemResult[];
+```
+
+#### `ModifyOrderItemResult` / `ModifyBatchOrdersResult`
+
+```typescript
+interface ModifyOrderItemResult {
+  orderId: string;
+  isSuccess: boolean;
+  errorCode: number | null;
+  errorText: string | null;
+}
+
+type ModifyBatchOrdersResult = ModifyOrderItemResult[];
+```
+
+Симметрично `CancelOrderItemResult` / `CancelBatchOrdersResult`.
+
 #### `SubscribeKlinesArgs`
 
 ```typescript
@@ -1722,6 +2014,25 @@ interface SubscribeKlinesArgs {
 
 ```typescript
 type KlineHandler = (symbol: string, kline: Kline) => void;
+```
+
+#### `SubscribeOrderbookArgs`
+
+```typescript
+interface SubscribeOrderbookArgs {
+  symbol: string;
+  depth: number;
+  handler: OrderBookHandler;
+}
+```
+
+#### `SubscribePublicTradesArgs`
+
+```typescript
+interface SubscribePublicTradesArgs {
+  symbol: string;
+  handler: PublicTradeHandler;
+}
 ```
 
 ---

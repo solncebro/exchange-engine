@@ -1,4 +1,5 @@
 import { BybitTradeStream } from '../../src/ws/BybitTradeStream';
+import { PendingRequestKind } from '../../src/ws/BaseTradeStream.types';
 import type { BybitTradeMessage } from '../../src/ws/BybitTradeStream.types';
 import { ExchangeError } from '../../src/errors/ExchangeError';
 import { createMockLogger } from '../fixtures/mockLogger';
@@ -38,12 +39,13 @@ describe('BybitTradeStream.handleMessage', () => {
     jest.clearAllMocks();
   });
 
-  function addPendingRequest(requestId: string) {
+  function addPendingRequest(requestId: string, kind: PendingRequestKind = PendingRequestKind.SingleOrder) {
     const resolveFn = jest.fn();
     const rejectFn = jest.fn();
     const timeout = setTimeout(() => {}, 30000);
 
     (stream as any).pendingRequestByRequestId.set(requestId, {
+      kind,
       resolve: resolveFn,
       reject: rejectFn,
       timeout,

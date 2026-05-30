@@ -381,6 +381,30 @@ describe('BybitHttpClient', () => {
     });
   });
 
+  describe('amendBatchOrders', () => {
+    it('sends POST to /v5/order/amend-batch with category and request body', async () => {
+      mockInstance.post.mockResolvedValue({
+        data: {
+          retCode: 0,
+          retMsg: 'OK',
+          result: { list: [{ category: 'linear', symbol: 'BTCUSDT', orderId: '1', orderLinkId: '' }] },
+          retExtInfo: { list: [{ code: 0, msg: 'OK' }] },
+          time: 1700000000000,
+        },
+      });
+
+      const requestList = [{ symbol: 'BTCUSDT', orderId: '1', price: '30000', qty: '0.1' }];
+      const response = await client.amendBatchOrders('linear', requestList);
+
+      const [url, body] = mockInstance.post.mock.calls[0];
+
+      expect(url).toBe('/v5/order/amend-batch');
+      expect(body).toEqual({ category: 'linear', request: requestList });
+      expect(response.result.list).toHaveLength(1);
+      expect(response.retExtInfo.list[0].code).toBe(0);
+    });
+  });
+
   describe('getPositionList', () => {
     it('includes limit when provided', async () => {
       await client.getPositionList('linear', { limit: 50 });

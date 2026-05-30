@@ -122,6 +122,7 @@ Binance (test/fixtures/binanceRaw.ts):
 - `BINANCE_RAW_ORDER_BOOK`, `BINANCE_RAW_PUBLIC_TRADE_LIST`
 - `BINANCE_RAW_MARK_PRICE_LIST`, `BINANCE_RAW_OPEN_INTEREST`
 - `BINANCE_RAW_COMMISSION_RATE`, `BINANCE_RAW_INCOME_LIST`
+- `BINANCE_RAW_MODIFY_BATCH_RESPONSE_MIXED` — смесь success + error per-order для тестов `modifyBatchOrders` (используется в `BinanceFutures.modifyBatchOrders.test.ts`)
 
 Bybit (test/fixtures/bybitRaw.ts):
 - `BYBIT_RAW_INSTRUMENT_LIST`, `BYBIT_RAW_TICKER_LIST`, `BYBIT_RAW_KLINE_LIST`
@@ -131,6 +132,10 @@ Bybit (test/fixtures/bybitRaw.ts):
 - `BYBIT_RAW_MARK_PRICE_TICKER_LIST`, `BYBIT_RAW_OPEN_INTEREST`, `BYBIT_RAW_FEE_RATE_LIST`
 - `BYBIT_RAW_FUNDING_RATE_HISTORY_LIST`, `BYBIT_RAW_CLOSED_PNL_LIST`
 - `BYBIT_RAW_TRANSACTION_LOG_LIST`
+- `BYBIT_RAW_AMEND_BATCH_RESPONSE` — REST ответ `/v5/order/amend-batch` с `result.list[]` (orderId/orderLinkId) и `retExtInfo.list[]` (per-order success/error)
+- `BYBIT_WS_RAW_CREATE_BATCH_RESPONSE` — WS-ответ `order.create-batch`
+- `BYBIT_WS_RAW_AMEND_BATCH_RESPONSE` — WS-ответ `order.amend-batch`
+- `BYBIT_WS_RAW_CANCEL_BATCH_RESPONSE` — WS-ответ `order.cancel-batch`
 
 Типизированы через raw-интерфейсы из нормализаторов:
 ```typescript
@@ -266,6 +271,7 @@ class TestTradeStream extends BaseTradeStream<any> {
 | BinanceTradeStream.initConnection.test.ts | connection creation, buildOrderRequest signing |
 | BybitTradeStream.handleMessage.test.ts | dual format responses, auth filtering |
 | BybitTradeStream.initConnection.test.ts | connection with auth, buildOrderRequest format |
+| BybitTradeStream.batch.test.ts | три WS batch-метода (`createBatchOrders`/`modifyBatchOrders`/`cancelBatchOrders`), top-level errors, timeout, orphan context cleanup, kind mismatch protection |
 | TradeToKlineAggregator.test.ts | processTrade aggregation, forceEmit, clearSymbol, first-trade skip |
 | parseWebSocketMessage.test.ts | JSON parsing, error handling |
 | bybitWebSocketUtils.test.ts | pong detection, HMAC authentication |

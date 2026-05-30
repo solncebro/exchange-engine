@@ -1,12 +1,18 @@
 import type {
+  CancelBatchOrdersResult,
   ExchangeClient,
   ExchangeArgs,
   FetchAllKlinesOptions,
   FetchPageWithLimitArgs,
+  ModifyBatchOrderArgs,
+  ModifyBatchOrdersResult,
   ModifyOrderArgs,
   CreateOrderWebSocketArgs,
+  OrderRateLimit,
   SubscribeKlinesArgs,
   ResubscribeKlinesArgs,
+  SubscribeOrderbookArgs,
+  SubscribePublicTradesArgs,
 } from '../types/exchange';
 import type {
   ExchangeLogger,
@@ -130,7 +136,7 @@ abstract class BaseExchangeClient implements ExchangeClient {
   }
 
   async *watchTickers(): AsyncGenerator<TickerBySymbol> {
-    this.getPublicStream().subscribeAllTickers(() => {});
+    this.getPublicStream().subscribeAllTickers(() => {}, Array.from(this.tradeSymbols.keys()));
 
     yield await this.fetchTickers();
   }
@@ -152,11 +158,51 @@ abstract class BaseExchangeClient implements ExchangeClient {
   }
 
   subscribeMarkPrices(handler: MarkPriceHandler): void {
-    this.getPublicStream().subscribeMarkPrices(handler);
+    this.getPublicStream().subscribeMarkPrices(handler, Array.from(this.tradeSymbols.keys()));
   }
 
   unsubscribeMarkPrices(handler: MarkPriceHandler): void {
     this.getPublicStream().unsubscribeMarkPrices(handler);
+  }
+
+  subscribeOrderbook(args: SubscribeOrderbookArgs): void {
+    const publicStream = this.getPublicStream();
+
+    if (publicStream.subscribeOrderbook === undefined) {
+      throw new Error(`Orderbook subscription not supported for ${this.marketLabel} market`);
+    }
+
+    publicStream.subscribeOrderbook(args.symbol, args.depth, args.handler);
+  }
+
+  unsubscribeOrderbook(args: SubscribeOrderbookArgs): void {
+    const publicStream = this.getPublicStream();
+
+    if (publicStream.unsubscribeOrderbook === undefined) {
+      return;
+    }
+
+    publicStream.unsubscribeOrderbook(args.symbol, args.depth, args.handler);
+  }
+
+  subscribePublicTrades(args: SubscribePublicTradesArgs): void {
+    const publicStream = this.getPublicStream();
+
+    if (publicStream.subscribePublicTrades === undefined) {
+      throw new Error(`Public trade subscription not supported for ${this.marketLabel} market`);
+    }
+
+    publicStream.subscribePublicTrades(args.symbol, args.handler);
+  }
+
+  unsubscribePublicTrades(args: SubscribePublicTradesArgs): void {
+    const publicStream = this.getPublicStream();
+
+    if (publicStream.unsubscribePublicTrades === undefined) {
+      return;
+    }
+
+    publicStream.unsubscribePublicTrades(args.symbol, args.handler);
   }
 
   amountToPrecision(symbol: string, amount: number): number {
@@ -241,6 +287,18 @@ abstract class BaseExchangeClient implements ExchangeClient {
     throw new Error(`Not supported for ${this.marketLabel} market`);
   }
 
+  async fetchPositionSnapshot(_symbol: string, _positionIdx?: number): Promise<Position | null> {
+    throw new Error(`Not supported for ${this.marketLabel} market`);
+  }
+
+  async fetchPositionList(_symbol: string): Promise<Position[]> {
+    throw new Error(`Not supported for ${this.marketLabel} market`);
+  }
+
+  async fetchAllPositions(): Promise<Position[]> {
+    throw new Error(`Not supported for ${this.marketLabel} market`);
+  }
+
   async setLeverage(_leverage: number, _symbol: string): Promise<void> {
     throw new Error(`Not supported for ${this.marketLabel} market`);
   }
@@ -281,7 +339,15 @@ abstract class BaseExchangeClient implements ExchangeClient {
     throw new Error(`Not supported for ${this.marketLabel} market`);
   }
 
-  async cancelBatchOrders(_symbol: string, _orderIdList: string[]): Promise<void> {
+  async cancelBatchOrders(_symbol: string, _orderIdList: string[]): Promise<CancelBatchOrdersResult> {
+    throw new Error(`Not supported for ${this.marketLabel} market`);
+  }
+
+  async modifyBatchOrders(_orderList: ModifyBatchOrderArgs[]): Promise<ModifyBatchOrdersResult> {
+    throw new Error(`Not supported for ${this.marketLabel} market`);
+  }
+
+  async getOrderRateLimit(): Promise<OrderRateLimit> {
     throw new Error(`Not supported for ${this.marketLabel} market`);
   }
 

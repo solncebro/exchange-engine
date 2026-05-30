@@ -108,6 +108,21 @@ class BinanceFuturesHttpClient extends BinanceBaseHttpClient {
     );
   }
 
+  async modifyBatchOrders(
+    orderList: Array<Record<string, unknown>>,
+  ): Promise<Array<Record<string, unknown>>> {
+    const signed = buildBinanceSignedParams({
+      params: { batchOrders: JSON.stringify(orderList) },
+      secret: this.secret,
+    });
+
+    return this.putWithParams<Array<Record<string, unknown>>>(
+      '/fapi/v1/batchOrders',
+      signed as Record<string, string | number | boolean>,
+      this.authHeaders(),
+    );
+  }
+
   async fetchPositionRisk(symbol?: string): Promise<BinancePositionRiskRaw[]> {
     return this.signedGet<BinancePositionRiskRaw[]>('/fapi/v3/positionRisk', this.buildOptionalSymbolParams(symbol));
   }

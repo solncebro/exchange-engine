@@ -94,7 +94,7 @@ REST:
 - `BybitPositionRaw` — `{ symbol, side, size, avgPrice, markPrice, unrealisedPnl, leverage, tradeMode, liqPrice, positionIdx, [key: string]: unknown }`
 - `BybitOrderResponseRaw` — `{ orderId, orderLinkId, symbol, side, orderType, timeInForce, qty, price, avgPrice, triggerPrice, cumExecQty, cumExecValue, orderStatus, reduceOnly, createdTime, updatedTime }`
 - `BybitWalletBalanceRaw` — `{ list: BybitAccountRaw[] }` (BybitAccountRaw — internal: `{ accountType, coin: BybitCoinRaw[] }`)
-- `BybitOrderBookRaw` — `{ a: string[][], b: string[][], ts, u }` (a = asks, b = bids)
+- `BybitOrderBookRaw` — `{ a: string[][], b: string[][], ts, u, s?, seq? }` (a = asks, b = bids; `s` — symbol из WS payload, `seq` — cross-sequence)
 - `BybitPublicTradeRaw` — `{ execId, symbol, price, size, side, time, isBlockTrade }`
 - `BybitOpenInterestRaw` — `{ openInterest, timestamp }` (оба string)
 - `BybitFeeRateRaw` — `{ symbol, makerFeeRate, takerFeeRate }`
@@ -104,7 +104,7 @@ REST:
 
 WebSocket:
 - `BybitWebSocketKlineRaw` — `{ start, end?, interval?, open, high, low, close, volume, turnover, confirm: boolean, timestamp }`
-- `BybitPublicTradeDataRaw` — `{ T: number, s: string, p: string, v: string }`
+- `BybitPublicTradeDataRaw` — `{ T: number, s: string, p: string, v: string, S?: string, i?: string, BT?: boolean, L?: string }` (`S` — side, `i` — trade id, `BT` — block trade flag, `L` — price direction tick)
 - `BybitWebSocketMessageRaw<T>` — `{ topic, type, ts, data: T[] }`
 - `BybitKlineMessageRaw` = `BybitWebSocketMessageRaw<BybitWebSocketKlineRaw>`
 - `BybitTradeMessageRaw` = `BybitWebSocketMessageRaw<BybitPublicTradeDataRaw>`
@@ -147,10 +147,17 @@ WebSocket:
   - На уровне `AccountBalances` возвращает `accountType` (primary account), `totalMarginBalance`, `totalInitialMargin`
 - `normalizeBybitOrderBook(raw, symbol)` → `OrderBook`
   - symbol передаётся отдельно, `a → askList`, `b → bidList`, `ts → timestamp`, `u → updateId`
+- `normalizeBybitOrderBookUpdate(raw, symbol, updateType, receivedTimestamp)` → `OrderBookUpdate`
+  - WS-вариант orderbook (Bybit V5 public stream); сохраняет уровни как сырые пары decimal-строк (`OrderBookRawLevel = [string, string]`) — без `parseFloat`, чтобы избежать потери точности
+  - `bidList`/`askList` строятся через приватный `toOrderBookRawLevelList(rawList)` (`[level[0], level[1]]`)
+  - `updateType` — переданный извне (`'snapshot' | 'delta'`), `receivedTimestamp` — время, когда сообщение получено клиентом
 - `normalizeBybitPublicTradeList(rawList)` → `PublicTrade[]`
   - `execId → id`, `size → quantity`, `quoteQuantity` вычисляется как `price * size`
   - `isBuyerMaker = raw.side === 'Sell'`
   - Пробрасывает `isBlockTrade`; `side` маппится через `BYBIT_ORDER_SIDE` (если side валидный)
+- `normalizeBybitPublicTradeFromStream(rawList)` → `PublicTrade[]`
+  - WS-вариант (`BybitPublicTradeDataRaw[]` с короткими ключами): `i → id` (fallback пустая строка), `s → symbol`, `p → price` (parseFloat), `v → quantity` (parseFloat), `quoteQuantity = price * quantity`, `T → timestamp`, `isBuyerMaker = S === 'Sell'`, `BT → isBlockTrade` (fallback false)
+  - `side` маппится через `BYBIT_ORDER_SIDE[S]`, если значение валидно
 - `normalizeBybitMarkPriceList(rawList)` → `MarkPrice[]`
   - Использует `BybitTickerRaw` (те же данные что tickers), `fundingRate → lastFundingRate`, timestamp fallback `Date.now()`
 - `normalizeBybitOpenInterest(raw)` → `OpenInterest`
@@ -200,7 +207,8 @@ WebSocket:
   - `'bybitRiskParameters'` — `{ priceLimitRatioX, priceLimitRatioY }`
 - `TradingFunding` — `{ fundingIntervalMinutes?, upperFundingRate?, lowerFundingRate? }`
 - `Position` — `{ symbol, side, contracts, entryPrice, markPrice, unrealizedPnl, leverage, marginMode, liquidationPrice, info }`
-- `Order` — `{ id, clientOrderId, symbol, side, type, amount, price, avgPrice, stopPrice, filledAmount, filledQuoteAmount, status, timeInForce, reduceOnly, timestamp, updatedTimestamp }`
+- `Order` — `{ id, clientOrderId, symbol, side, type, amount, price, avgPrice, stopPrice, filledAmount, filledQuoteAmount, status, timeInForce, reduceOnly, timestamp, updatedTimestamp, rateLimit?: OrderRateLimitSnapshot }`. Поле `rateLimit?` опциональное — заполняется только для одиночных order-операций через WebSocket Trade Stream.
+- `OrderRateLimitSnapshot` — `{ limit: number; remaining: number; resetMs: number }`. Per-response runtime snapshot per-UID rate-limit, извлечённый из заголовков ответа на одиночный `createOrder` через WS. Bybit: парсится из `header['X-Bapi-Limit' / 'X-Bapi-Limit-Status' / 'X-Bapi-Limit-Reset-Timestamp']` через `parseBybitHeaderRateLimit`. Binance: из массива `message.rateLimits[]` (поиск entry с `rateLimitType === 'ORDERS' && interval === 'SECOND'`) через `parseBinanceRateLimitArray`, `remaining = limit - count`, `resetMs = Date.now() + intervalNum * 1000`. Отличается от `OrderRateLimit` (см. `getOrderRateLimit()`): тот возвращает статический per-UID лимит из exchange-info, этот — runtime snapshot после конкретной операции.
 - `Balance` — `{ asset, free, locked, total, walletBalance?, availableToWithdraw?, totalOrderInitialMargin?, totalPositionInitialMargin? }` (опциональные поля — Bybit Unified Account)
 - `AccountBalances` — `{ totalWalletBalance, totalAvailableBalance, balanceByAsset, accountType?, totalMarginBalance?, totalInitialMargin? }`
 - `FundingRateHistory` — `{ symbol, fundingRate, fundingTime, markPrice: number | null }`
@@ -208,7 +216,12 @@ WebSocket:
 - `WebSocketConnectionInfo` — `{ label, url, isConnected, type: WebSocketConnectionTypeEnum, subscriptionList: string[] }`
 - `OrderBookLevel` — `{ price, quantity }` (оба number)
 - `OrderBook` — `{ symbol, askList: OrderBookLevel[], bidList: OrderBookLevel[], timestamp, updateId?, eventTimestamp? }` (`updateId` — Binance `lastUpdateId` / Bybit `u`; `eventTimestamp` — Binance `E`)
+- `OrderBookRawLevel` — `[string, string]` — пара `[price, quantity]` как сырые decimal-строки без потери точности (для WS-обновлений orderbook)
+- `OrderBookUpdateType` — `'snapshot' | 'delta'`
+- `OrderBookUpdate` — `{ symbol, updateType: OrderBookUpdateType, bidList: OrderBookRawLevel[], askList: OrderBookRawLevel[], updateId, eventTimestamp, receivedTimestamp }` (WS payload Bybit V5 — отличается от `OrderBook` тем, что уровни хранятся как строки)
+- `OrderBookHandler` — `(symbol: string, update: OrderBookUpdate) => void`
 - `PublicTrade` — `{ id, symbol, price, quantity, quoteQuantity, timestamp, isBuyerMaker, isBlockTrade?, side? }` (`isBlockTrade` и `side` — Bybit)
+- `PublicTradeHandler` — `(symbol: string, tradeList: PublicTrade[]) => void`
 - `MarkPrice` — `{ symbol, markPrice, indexPrice, lastFundingRate, nextFundingTime, timestamp }`
 - `MarkPriceUpdate` — `{ symbol, markPrice, indexPrice, timestamp }` (потоковые обновления mark/index, без funding-полей)
 - `MarkPriceHandler` — `(markPriceList: MarkPriceUpdate[]) => void`
@@ -216,6 +229,11 @@ WebSocket:
 - `FeeRate` — `{ symbol, makerRate, takerRate }`
 - `Income` — `{ symbol, incomeType, income, asset, timestamp, info: Record<string, unknown>, quantity? }`
 - `ClosedPnl` — `{ symbol, orderId, side: OrderSideEnum, quantity, entryPrice, exitPrice, closedPnl, timestamp }`
+- `ModifyBatchOrderArgs` — `{ symbol, orderId, side: OrderSideEnum, clientOrderId?, price?, amount?, triggerPrice? }`. `side` обязателен (требуется для Binance PUT batch); `clientOrderId` → Bybit `orderLinkId` / Binance `origClientOrderId`.
+- `CancelOrderItemResult` — `{ orderId, isSuccess, errorCode: number | null, errorText: string | null }`
+- `CancelBatchOrdersResult = CancelOrderItemResult[]`
+- `ModifyOrderItemResult` — `{ orderId, isSuccess, errorCode: number | null, errorText: string | null }` (симметрично `CancelOrderItemResult`)
+- `ModifyBatchOrdersResult = ModifyOrderItemResult[]`
 
 ### Collection types (Map с "By" naming):
 - `TickerBySymbol = Map<string, Ticker>`
@@ -235,6 +253,7 @@ WebSocket:
 ```
 BINANCE_POSITION_SIDE: { LONG → Long, SHORT → Short, BOTH → Both }
 BINANCE_ORDER_SIDE: { BUY → Buy, SELL → Sell }
+BINANCE_ORDER_SIDE_REVERSE: { Buy → 'BUY', Sell → 'SELL' } (обратный маппинг; используется в build-функциях batch-payload для Binance)
 BINANCE_ORDER_TYPE: { MARKET → Market, LIMIT → Limit, STOP_MARKET → StopMarket, TAKE_PROFIT_MARKET → TakeProfitMarket, STOP → Stop, TAKE_PROFIT → TakeProfit, TRAILING_STOP_MARKET → TrailingStop }
 BINANCE_ORDER_TYPE_REVERSE: { market → 'MARKET', limit → 'LIMIT', stopMarket → 'STOP_MARKET', ... } (обратный маппинг)
 BINANCE_ORDER_STATUS: { NEW → 'open', PARTIALLY_FILLED → 'open', FILLED → 'closed', CANCELED → 'canceled', REJECTED → 'rejected', EXPIRED → 'canceled', EXPIRED_IN_MATCH → 'canceled' }
