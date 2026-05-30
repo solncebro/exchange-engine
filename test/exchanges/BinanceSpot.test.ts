@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { BinanceSpot } from '../../src/exchanges/BinanceSpot';
+import { BinanceSpotUserDataStream } from '../../src/ws/BinanceSpotUserDataStream';
 import { createMockLogger } from '../fixtures/mockLogger';
 import { createMockAxiosInstance } from '../fixtures/mockAxios';
 import {
@@ -12,8 +13,10 @@ import { MarginModeEnum, OrderSideEnum, OrderTypeEnum } from '../../src/types/co
 jest.mock('axios');
 jest.mock('../../src/ws/BinanceSpotPublicStream');
 jest.mock('../../src/ws/BinanceTradeStream');
+jest.mock('../../src/ws/BinanceSpotUserDataStream');
 
 const mockedAxios = axios as jest.Mocked<typeof axios>;
+const MockedSpotUserDataStream = BinanceSpotUserDataStream as jest.MockedClass<typeof BinanceSpotUserDataStream>;
 
 function createClient() {
   const mockInstance = createMockAxiosInstance();
@@ -165,6 +168,67 @@ describe('BinanceSpot', () => {
       expect(url).toBe('/api/v3/allOrders');
       expect(options.params.symbol).toBe('BTCUSDT');
       expect(options.params.signature).toBeDefined();
+    });
+  });
+
+  describe('connectUserDataStream (WebSocket API)', () => {
+    const createHandler = () => ({
+      onOrderUpdate: jest.fn(),
+      onPositionUpdate: jest.fn(),
+      onBalanceUpdate: jest.fn(),
+    });
+
+    it('connects a spot user data stream instead of throwing', async () => {
+      const { client } = createClient();
+
+      await client.connectUserDataStream(createHandler());
+
+      expect(MockedSpotUserDataStream).toHaveBeenCalledTimes(1);
+      expect(MockedSpotUserDataStream.mock.instances[0].connect).toHaveBeenCalled();
+    });
+
+    it('does not connect a second stream on repeated calls', async () => {
+      const { client } = createClient();
+      const handler = createHandler();
+
+      await client.connectUserDataStream(handler);
+      await client.connectUserDataStream(handler);
+
+      expect(MockedSpotUserDataStream).toHaveBeenCalledTimes(1);
+    });
+
+    it('maps executionReport to onOrderUpdate', async () => {
+      const { client } = createClient();
+      const handler = createHandler();
+
+      await client.connectUserDataStream(handler);
+      const onMessage = MockedSpotUserDataStream.mock.calls[0][0].onMessage;
+      onMessage({ e: 'executionReport', s: 'BTCUSDT', i: 99, c: 'cli-1', S: 'SELL', X: 'FILLED', p: '50000', q: '0.5', z: '0.5', Z: '25000', E: 1700000000000 });
+
+      expect(handler.onOrderUpdate).toHaveBeenCalledWith(expect.objectContaining({
+        symbol: 'BTCUSDT',
+        orderId: '99',
+        clientOrderId: 'cli-1',
+        side: OrderSideEnum.Sell,
+        status: 'closed',
+        amount: 0.5,
+        filledAmount: 0.5,
+        avgPrice: 50000,
+      }));
+    });
+
+    it('maps outboundAccountPosition to onBalanceUpdate', async () => {
+      const { client } = createClient();
+      const handler = createHandler();
+
+      await client.connectUserDataStream(handler);
+      const onMessage = MockedSpotUserDataStream.mock.calls[0][0].onMessage;
+      onMessage({ e: 'outboundAccountPosition', E: 1700000000000, B: [{ a: 'USDT', f: '100.5', l: '0.5' }] });
+
+      expect(handler.onBalanceUpdate).toHaveBeenCalledWith({
+        balanceList: [{ asset: 'USDT', free: 100.5, locked: 0.5 }],
+        timestamp: 1700000000000,
+      });
     });
   });
 });

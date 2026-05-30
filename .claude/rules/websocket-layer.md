@@ -110,13 +110,21 @@ Exchange-классы агрегируют через `getWebSocketConnectionInf
 - Эмитит kline с `isClosed: true` при переходе на следующую секунду
 - Не эмитит kline с `volume <= 0` — гард в `emitKline` (защищает и rollover, и `forceEmitPendingKlineList`: вырожденный placeholder с нулевым OHLC после first-trade-skip на close НЕ эмитится)
 
-## Binance User Data Stream
+## Binance User Data Stream — два разных механизма (Futures vs Spot)
 
-- **URL**: `${baseWebSocketUrl}/{listenKey}`, где `baseWebSocketUrl` передаётся в конструкторе. Для **Binance Futures** — `wss://fstream.binance.com/private/ws` (prod) / `wss://fstream.binancefuture.com/ws` (demo). **Binance Spot UDS через listenKey удалён биржей 2026-02-20** → `BinanceSpot.connectUserDataStream` бросает ошибку о необходимости миграции на WS API; реально этим классом пользуется только Binance Futures
-- listenKey получается внешне (REST API), передаётся в конструкторе
-- Все сообщения передаются в `onMessage` хендлер без фильтрации
-- **listenKey refresh** НЕ управляется этим классом — ответственность вызывающего (каждые 30 мин)
-- `isConnected()` / `getConnectionInfo().isConnected` — через `webSocket.getStatus() === WebSocketStatus.CONNECTED`; `getConnectionInfo()` возвращает null если сокет не создан
+**Futures — `BinanceUserDataStream` (listenKey):**
+- **URL**: `${baseWebSocketUrl}/{listenKey}` — `wss://fstream.binance.com/private/ws` (prod) / `wss://fstream.binancefuture.com/ws` (demo). listenKey получается через REST, передаётся в конструкторе; refresh — ответственность вызывающего (каждые 30 мин)
+- Все сообщения передаются в `onMessage` без фильтрации; события `ORDER_TRADE_UPDATE` / `ACCOUNT_UPDATE` маппит `BinanceBaseClient.handleUserDataMessage`
+
+**Spot — `BinanceSpotUserDataStream` (WebSocket API):** listenKey REST `/api/v3/userDataStream` удалён биржей 2026-02-20, поэтому спот переведён на WS API.
+- **URL**: `ws-api/v3` (та же константа, что и спотовый trade-stream: `wss://ws-api.binance.com:443/ws-api/v3` prod / demo testnet)
+- На `onOpen` (и на `onReconnectSuccess`) шлёт подписанный `{ id, method: 'userDataStream.subscribe', params }`, где `params = buildBinanceWebSocketSignedParams({ apiKey })` — **HMAC-SHA256, без Ed25519/session.logon**. Хранит `subscriptionId` из ответа `{ status: 200, result: { subscriptionId } }`
+- `handleMessage`: ответ subscribe/unsubscribe (по `id`) не форвардит; event-фрейм (`message.event ?? message`) → `onMessage`
+- `close()` → `userDataStream.unsubscribe` с `subscriptionId`, затем закрытие сокета. listenKey-keepalive таймер не нужен
+- Маппинг событий (`BinanceSpot.handleSpotUserDataMessage`): `executionReport → onOrderUpdate` (avgPrice = `Z`/`z`), `outboundAccountPosition → onBalanceUpdate` (`B[]` → `BalanceUpdateEvent.balanceList`). `onPositionUpdate` к споту не применяется
+- ⚠️ Требует live-проверки на testnet: формат event-фрейма (голый vs `{event:...}`), поведение подписки при долгой сессии
+
+**Общее:** `isConnected()` / `getConnectionInfo().isConnected` — через `webSocket.getStatus() === WebSocketStatus.CONNECTED`; `getConnectionInfo()` → null если сокет не создан. `BinanceSpot` переопределяет `connectUserDataStream` / `disconnectUserDataStream` / `isUserDataStreamConnected` / `getWebSocketConnectionInfoList` и хранит spot-UDS в отдельном поле `spotUserDataStream` (защита от двойного connect — `spotUserDataStreamConnecting`)
 
 ## BaseTradeStream<T> (src/ws/BaseTradeStream.ts)
 
@@ -272,6 +280,7 @@ Bybit конвертирует через маппинг `BYBIT_KLINE_INTERVAL`:
 - `BinanceFuturesPublicStream.types.ts` — BinanceFuturesPublicStreamArgs, BinanceCombinedMessage, FuturesConnection
 - `BinanceSpotPublicStream.types.ts` — BinanceSpotPublicStreamArgs, BinanceSpotWebSocketEnvelope
 - `BinanceUserDataStream.types.ts` — BinanceUserDataStreamArgs
+- `BinanceSpotUserDataStream.types.ts` — BinanceSpotUserDataStreamArgs, BinanceSpotUserDataStreamMessage, BinanceSpotUserDataSubscribeResult
 - `BinanceTradeStream.types.ts` — BinanceTradeWebSocketResponse, BinanceWebSocketError, BinanceWebSocketRateLimitEntry (`{ rateLimitType, interval, intervalNum, limit, count }`)
 - `BybitPublicStream.types.ts` — BybitPublicStreamArgs, BybitWebSocketMessage, BybitConnection
 - `TradeToKlineAggregator.types.ts` — AggregatedKline

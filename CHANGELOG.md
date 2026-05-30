@@ -5,9 +5,9 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] — Reliability & API-compliance audit
+## [0.14.0] - 2026-05-30 — Reliability & API-compliance audit
 
-Комплексный аудит надёжности и соответствия текущему API Binance/Bybit. Кодовые находки подтверждены `файл:строка`; API-находки сверены с официальными доками бирж.
+Комплексный аудит надёжности и соответствия текущему API Binance/Bybit. Кодовые находки подтверждены `файл:строка`; API-находки сверены с официальными доками бирж. Включает базовый объём 0.14.0 (см. history note ниже).
 
 ### Fixed — Critical
 
@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed — High
 
-- **Binance Spot user-data stream** (listenKey REST `/api/v3/userDataStream` удалён биржей 2026-02-20): `BinanceSpot.connectUserDataStream` теперь бросает явную ошибку о необходимости миграции вместо тихого вызова удалённого эндпоинта. Полная перестройка на WS API (`userDataStream.subscribe` + `session.logon`) — отдельная задача.
+- **Binance Spot user-data stream перестроен на WebSocket API** (listenKey REST `/api/v3/userDataStream` удалён биржей 2026-02-20). Новый класс `BinanceSpotUserDataStream` подписывается через `userDataStream.subscribe` на `ws-api/v3` (подпись HMAC-SHA256 — Ed25519/`session.logon` НЕ требуются, сверено по `binance-spot-api-docs/web-socket-api.md`), переподписывается на reconnect, шлёт `userDataStream.unsubscribe` на close. События маппятся: `executionReport → onOrderUpdate`, `outboundAccountPosition → onBalanceUpdate`. Добавлены тип `BalanceUpdateEvent` и опциональный `UserDataStreamHandlerArgs.onBalanceUpdate`. ⚠️ Требует live-проверки на testnet: точный формат event-фрейма (голый vs `{event:...}`) и поведение подписки при долгой сессии.
 - **Demo (testnet) Binance Futures UDS** использовал prod-хост → теперь testnet-хост в demo-режиме.
 - **Bybit demo публичные стримы** (`stream-demo.bybit.com` не отдаёт публичные данные) → публичные подписки всегда на mainnet-хост.
 - **Binance `timeInForce`**: `PostOnly` уходил сырым (невалидно) → futures маппится в `GTX`, spot post-only — в тип `LIMIT_MAKER`.
@@ -52,11 +52,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Notes
 
-- **Не вошло (требует отдельной работы):** полная перестройка Binance Spot UDS на WS API; точечные WS-reconnect-края (`BinanceFuturesPublicStream` cleanup пустых соединений, connect-timeout, Bybit resubscribe 1s / double-subscribe). closePosition+quantity — требует подтверждения на живом Binance.
+- **Не вошло (требует отдельной работы):** точечные WS-reconnect-края (`BinanceFuturesPublicStream` cleanup пустых соединений, connect-timeout, Bybit resubscribe 1s / double-subscribe). closePosition+quantity — требует подтверждения на живом Binance.
 
-## [0.14.0] - 2026-05-18
+## [0.14.0-base] - 2026-05-18 (history note — изначальный объём 0.14.0 до аудита)
 
-Крупный минорный релиз, объединяющий новые публичные подписки Bybit V5 (orderbook + publicTrade), визуализацию rate-limit'ов на двух уровнях (per-UID + per-order runtime snapshot), полный спектр batch-операций над ордерами (create/modify/cancel через REST + WebSocket) с автоматическим chunking, и BREAKING-изменение возвращаемого типа `cancelBatchOrders`.
+Базовый объём релиза 0.14.0: новые публичные подписки Bybit V5 (orderbook + publicTrade), визуализация rate-limit'ов на двух уровнях (per-UID + per-order runtime snapshot), полный спектр batch-операций над ордерами (create/modify/cancel через REST + WebSocket) с автоматическим chunking, и BREAKING-изменение возвращаемого типа `cancelBatchOrders`.
 
 ### Added
 

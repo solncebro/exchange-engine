@@ -437,10 +437,23 @@ export interface PositionUpdateEvent {
   timestamp: number;
 }
 
+export interface BalanceUpdateItem {
+  asset: string;
+  free: number;
+  locked: number;
+}
+
+export interface BalanceUpdateEvent {
+  balanceList: BalanceUpdateItem[];
+  timestamp: number;
+}
+
 export type OrderUpdateHandler = (event: OrderUpdateEvent) => void;
 export type PositionUpdateHandler = (event: PositionUpdateEvent) => void;
+export type BalanceUpdateHandler = (event: BalanceUpdateEvent) => void;
 
 export interface UserDataStreamHandlerArgs {
   onOrderUpdate: OrderUpdateHandler;
   onPositionUpdate: PositionUpdateHandler;
+  onBalanceUpdate?: BalanceUpdateHandler;
 }
