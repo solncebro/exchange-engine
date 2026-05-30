@@ -2,6 +2,7 @@ import axios, { AxiosInstance, AxiosError, AxiosResponse } from 'axios';
 import { HttpsAgent as KeepAliveHttpsAgent } from 'agentkeepalive';
 
 import type { ExchangeLogger } from '../types/common';
+import { serializeQueryParams } from '../utils/serializeQueryParams';
 import type { BaseHttpClientArgs, HttpErrorResponseData, HttpHeaders, HttpQueryParams, HttpRecord } from './BaseHttpClient.types';
 
 const DEFAULT_HTTPS_AGENT = new KeepAliveHttpsAgent({
@@ -31,7 +32,11 @@ function getRetryDelayMilliseconds(error: AxiosError, attempt: number): number {
     const retryAfterRaw = error.response.headers['retry-after'];
 
     if (retryAfterRaw) {
-      return parseInt(String(retryAfterRaw), 10) * 1000;
+      const retryAfterSeconds = parseInt(String(retryAfterRaw), 10);
+
+      if (Number.isFinite(retryAfterSeconds)) {
+        return retryAfterSeconds * 1000;
+      }
     }
   }
 
@@ -84,6 +89,9 @@ abstract class BaseHttpClient {
       baseURL: args.baseUrl,
       timeout: args.timeout ?? 30000,
       httpsAgent: args.httpsAgent ?? DEFAULT_HTTPS_AGENT,
+      paramsSerializer: {
+        serialize: serializeQueryParams,
+      },
     });
   }
 

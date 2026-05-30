@@ -5,6 +5,121 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — Reliability & API-compliance audit
+
+Комплексный аудит надёжности и соответствия текущему API Binance/Bybit. Кодовые находки подтверждены `файл:строка`; API-находки сверены с официальными доками бирж.
+
+### Fixed — Critical
+
+- **Подпись Binance batch-ордеров.** HMAC считался над строкой `URLSearchParams`, а axios сериализовал параметры своим дефолтным сериализатором (оставляет `,`/`:` без кодирования) → байты на проводе ≠ подписанные → Binance `-1022` на всех batch-операциях (create/cancel/modify). Введён общий `serializeQueryParams` (`src/utils/serializeQueryParams.ts`), используемый и при подписи, и как `paramsSerializer` axios-инстанса (`BaseHttpClient`) — wire-строка байт-в-байт равна подписанной. Покрыто wire-level тестом.
+- **Binance Futures user-data WS URL.** Legacy `wss://fstream.binance.com/ws/<listenKey>` выведен биржей из эксплуатации 2026-04-23 → переведён на `wss://fstream.binance.com/private/ws/<listenKey>`.
+
+### Fixed — High
+
+- **Binance Spot user-data stream** (listenKey REST `/api/v3/userDataStream` удалён биржей 2026-02-20): `BinanceSpot.connectUserDataStream` теперь бросает явную ошибку о необходимости миграции вместо тихого вызова удалённого эндпоинта. Полная перестройка на WS API (`userDataStream.subscribe` + `session.logon`) — отдельная задача.
+- **Demo (testnet) Binance Futures UDS** использовал prod-хост → теперь testnet-хост в demo-режиме.
+- **Bybit demo публичные стримы** (`stream-demo.bybit.com` не отдаёт публичные данные) → публичные подписки всегда на mainnet-хост.
+- **Binance `timeInForce`**: `PostOnly` уходил сырым (невалидно) → futures маппится в `GTX`, spot post-only — в тип `LIMIT_MAKER`.
+- **Статус ордеров в user-data**: устранены локальные дубли карт статусов, расходившиеся с нормализаторами (Binance `REJECTED` и Bybit `PartiallyFilledCanceled` падали в `'open'`). Используется единый канон `BINANCE_ORDER_STATUS` / `BYBIT_ORDER_STATUS`.
+- **Precision без `loadTradeSymbols`**: `amountToPrecision` больше не «флорит» sub-1 объём в `0` (риск ордера с `qty: 0`).
+- **Bybit дедуп WS-топиков**: `addTopicToConnection` не дублирует уже подписанный топик (исключает утечку при cleanup и спам на reconnect).
+
+### Fixed — Medium / Low
+
+- Bybit private WS учитывает demo-режим (`stream-demo.bybit.com/v5/private`).
+- Защита от двойного `connectUserDataStream` (утечка стрима + keepalive-таймера).
+- `isConnected()` user-data/private стримов сверяется с реальным статусом сокета (`getStatus()`), а не «объект существует».
+- `BybitBaseClient.fetchKlines('1s')` бросает понятную ошибку (Bybit REST не отдаёт 1s).
+- Bybit `cancelOrder` возвращает реальный ордер (`getOrder`) вместо фабрикованного stub с `side: Buy`.
+- `submitOrder` (Bybit single WS) пробрасывает `Order.rateLimit` snapshot.
+- Нормализаторы: `side` с fallback (`?? Buy`), `Triggered → 'open'`, отсечение `NaN`-балансов.
+- `BaseTradeStream.ensureConnected` — порядок проверок исправлен (нет ложного `WebSocket is not connected` при гонке).
+- `TradeToKlineAggregator` не эмитит вырожденную свечу `volume=0`.
+- `loadKlinesInChunks` и `Exchange.close` — `Promise.allSettled` (сбой одного не рушит остальное).
+- `Retry-After` с HTTP-датой → экспоненциальный backoff (не мгновенный ретрай).
+- `modifyOrder`/`modifyBatchOrders` валидируют ответ (`signedPut`).
+- Bybit REST `recvWindow` = 7000 (константа `BYBIT_RECV_WINDOW` задействована).
+- `BinanceSpotPublicStream` — убрана двойная переподписка на reconnect.
+- `roundToStep` корректно обрабатывает научную нотацию step (`1e-8`).
+- `src/types/index.ts` — runtime-энумы экспортируются как значения (`export {}`), не `export type`.
+- Bybit spot Market + `quoteOrderQty` явно ставит `marketUnit=quoteCoin`.
+- **Bybit `getOrderRateLimit`** теперь зависит от категории (сверено с https://bybit-exchange.github.io/docs/v5/rate-limit): **spot = 20 RPS**, **linear = 10 RPS** (документированный create-лимит per-UID; у linear все order-эндпоинты 10/s, у spot create/cancel/batch 20/s, amend 10/s).
+
+### Changed
+
+- Удалены неиспользуемые demo-public Bybit константы; добавлена `BYBIT_DEMO_PRIVATE_WEBSOCKET_URL`.
+- `BybitPrivateStreamArgs` получил обязательное поле `url`.
+
+### Notes
+
+- **Не вошло (требует отдельной работы):** полная перестройка Binance Spot UDS на WS API; точечные WS-reconnect-края (`BinanceFuturesPublicStream` cleanup пустых соединений, connect-timeout, Bybit resubscribe 1s / double-subscribe). closePosition+quantity — требует подтверждения на живом Binance.
+
+## [0.14.0] - 2026-05-18
+
+Крупный минорный релиз, объединяющий новые публичные подписки Bybit V5 (orderbook + publicTrade), визуализацию rate-limit'ов на двух уровнях (per-UID + per-order runtime snapshot), полный спектр batch-операций над ордерами (create/modify/cancel через REST + WebSocket) с автоматическим chunking, и BREAKING-изменение возвращаемого типа `cancelBatchOrders`.
+
+### Added
+
+#### Bybit V5 public subscriptions
+
+- Публичные подписки на orderbook updates и сырые publicTrade-сделки на Bybit V5 public stream (`linear` и `spot`).
+- В `BybitPublicStream`: `subscribeOrderbook(symbol, depth, handler)` / `unsubscribeOrderbook(...)` для topic `orderbook.{depth}.{symbol}` и `subscribePublicTrades(symbol, handler)` / `unsubscribePublicTrades(...)` для topic `publicTrade.{symbol}`. Новый custom-subscriber `publicTrade` работает рядом с существующим `TradeToKlineAggregator` — оба consumer'а получают сообщения независимо; topic снимается только когда отписались оба.
+- В `BaseExchangeClient`: делегирующие методы `subscribeOrderbook` / `unsubscribeOrderbook` / `subscribePublicTrades` / `unsubscribePublicTrades`. Если `PublicStreamLike` не реализует эти методы (Binance) — `subscribe*` бросает `Not supported`, `unsubscribe*` — no-op.
+- Типы: `OrderBookUpdate`, `OrderBookUpdateType` (`'snapshot' | 'delta'`), `OrderBookRawLevel` (`[string, string]` — точные decimal-строки без потери точности), `OrderBookHandler`, `PublicTradeHandler`, `SubscribeOrderbookArgs`, `SubscribePublicTradesArgs`. Экспортируются из корневого `index.ts`.
+- Нормализаторы: `normalizeBybitOrderBookUpdate(raw, symbol, updateType, receivedTimestamp)` — возвращает `OrderBookUpdate` с сохранением `bidList`/`askList` как сырых пар decimal-строк; `normalizeBybitPublicTradeFromStream(rawList)` — конвертирует WS-payload (`T`/`s`/`p`/`v`/`S`/`i`/`BT`) в `PublicTrade[]` с маппингом side через `BYBIT_ORDER_SIDE`.
+- `BybitOrderBookRaw` расширен опциональными полями `s` (symbol из WS payload) и `seq` (cross-sequence). `BybitPublicTradeDataRaw` расширен опциональными `S` (side), `i` (trade id), `BT` (block trade flag), `L` (price direction tick).
+- `PublicStreamLike` расширен optional методами для orderbook/publicTrade подписок, чтобы Binance public stream продолжал ему соответствовать без переопределения.
+
+#### Rate-limit visibility (per-UID + per-order runtime)
+
+- `ExchangeClient.getOrderRateLimit(): Promise<OrderRateLimit>` — возвращает per-UID write rate-limit для order endpoints (статический снимок из exchange-info). Тип `OrderRateLimit { writeRequestsPerSecond: number; source: OrderRateLimitSource }`, где `OrderRateLimitSource = 'binance-exchange-info' | 'bybit-documented' | 'fallback'`.
+- Binance Futures/Spot реализация: `parseBinanceOrderRateLimit(raw: BinanceExchangeInfoRaw)` (`src/normalizers/binanceNormalizer.ts`) фильтрует `rateLimits[].rateLimitType === 'ORDERS'`, конвертирует все интервалы в RPS, берёт `Math.min(...)` (наиболее строгий лимит). Если в `/fapi/v1/exchangeInfo` или `/api/v3/exchangeInfo` нет `rateLimits` — возвращает `{ writeRequestsPerSecond: BINANCE_ORDER_RATE_LIMIT_FALLBACK_RPS, source: 'fallback' }` (15 RPS). Новый raw-тип `BinanceRateLimitRaw { rateLimitType, interval: 'SECOND'|'MINUTE'|'HOUR'|'DAY', intervalNum, limit }`; `BinanceExchangeInfoRaw` расширен опциональным `rateLimits?`.
+- Bybit Linear/Spot реализация: hardcoded `{ writeRequestsPerSecond: 20, source: 'bybit-documented' }` — Bybit не отдаёт rate-limits через GET endpoint, только через headers на actual order calls. Документированный лимит для `/v5/order/create`, `/v5/order/cancel`, `/v5/order/create-batch`, `/v5/order/cancel-batch` = 20 RPS per-UID (источник: https://bybit-exchange.github.io/docs/v5/rate-limit).
+- Default throw `getOrderRateLimit()` в `BaseExchangeClient`; реализация на уровне `BinanceBaseClient` + `BybitBaseClient`.
+- `OrderRateLimitSnapshot { limit, remaining, resetMs }` в `src/types/common.ts` — per-response runtime snapshot из заголовков ответа на одиночные order-операции через WebSocket Trade Stream. Опциональное поле `Order.rateLimit?` заполняется автоматически.
+- `BybitTradeStream.handleSingleOrderResponse` парсит `message.header` через `parseBybitHeaderRateLimit` (`X-Bapi-Limit`, `X-Bapi-Limit-Status`, `X-Bapi-Limit-Reset-Timestamp` → `{ limit, remaining, resetMs }`). Новый тип `BybitTradeResponseHeader` в `BybitTradeStream.types.ts`.
+- `BinanceTradeStream.handleMessage` парсит `message.rateLimits` через `parseBinanceRateLimitArray` (ищет entry с `rateLimitType === 'ORDERS' && interval === 'SECOND'` → `{ limit, remaining: limit - count, resetMs: now + intervalNum * 1000 }`). Новый тип `BinanceWebSocketRateLimitEntry` в `BinanceTradeStream.types.ts`.
+
+#### Batch order operations (REST + WebSocket)
+
+- `ExchangeClient.modifyBatchOrders(orderList: ModifyBatchOrderArgs[]): Promise<ModifyBatchOrdersResult>` — массовая модификация ордеров с per-order success/error результатом (`ModifyBatchOrdersResult = ModifyOrderItemResult[]`).
+- **Binance Futures REST**: `modifyBatchOrders` через `PUT /fapi/v1/batchOrders` (max 5 ордеров на batch). `BinanceFuturesHttpClient.modifyBatchOrders(orderList)` использует ручной signing через `buildBinanceSignedParams` (паттерн как у `modifyOrder`). Тип возврата HTTP-слоя — `Array<Record<string, unknown>>`: Binance возвращает смесь успешных ответов (`{orderId, ...}`) и ошибок (`{code, msg}`) per-order. На exchange-слое смесь разворачивается в `ModifyOrderItemResult[]`.
+- **Bybit Linear/Spot REST**: `modifyBatchOrders` через `POST /v5/order/amend-batch` (max 20 для linear/inverse/option, 10 для spot). `BybitHttpClient.amendBatchOrders(category, requestList)` + новые типы `BybitAmendBatchOrderRaw`, `BybitAmendBatchOrderExtInfo`, `BybitAmendBatchOrdersResponse`. На exchange-слое `BybitBaseClient.modifyBatchOrders` маппит `retExtInfo.list[i].code === 0 → isSuccess`.
+- **Bybit Trade Stream WebSocket**: три новых публичных метода в `BybitTradeStream` — `createBatchOrders(category, originalArgsList, requestPayloadList)`, `modifyBatchOrders(category, originalOrderIdList, requestPayloadList)`, `cancelBatchOrders(category, originalOrderIdList, requestPayloadList)`. Используют ops `order.create-batch`, `order.amend-batch`, `order.cancel-batch` со структурой args `[{ category, request: [...] }]`. Хранение pending запросов через `pendingBatchContextByReqId: Map<string, BybitPendingBatchContext>` (discriminated union по kind), очищается при resolve/reject/orphan/kind-mismatch/timeout.
+- **WS-routing** в `BybitBaseClient`: для всех трёх batch-методов (`createBatchOrders`, `modifyBatchOrders`, `cancelBatchOrders`) — если `tradeStream !== null && tradeStream.isConnected()` маршрут через WebSocket, иначе REST. В demo mode (`tradeStream === null`) — всегда REST. Chunking применяется снаружи на уровне `BybitBaseClient`, не нарушает лимит per-batch.
+- Утилита `chunkList<T>(list, chunkSize): T[][]` в `src/utils/chunkList.ts` + 8 тестов покрытия (split, empty, edge cases, validation).
+- Константы chunk-size: `BINANCE_FUTURES_CREATE_BATCH_CHUNK_SIZE=5`, `BINANCE_FUTURES_MODIFY_BATCH_CHUNK_SIZE=5`, `BINANCE_FUTURES_CANCEL_BATCH_CHUNK_SIZE=10`, `BYBIT_LINEAR_BATCH_CHUNK_SIZE=20`, `BYBIT_SPOT_BATCH_CHUNK_SIZE=10`.
+- В `BybitBaseClient` добавлено абстрактное `protected abstract readonly batchChunkSize: number`; в `BybitLinear` = 20, в `BybitSpot` = 10.
+- Маппинг `BINANCE_ORDER_SIDE_REVERSE: Record<OrderSideEnum, string>` (Buy → 'BUY', Sell → 'SELL') в `src/constants/mappings.ts` — используется в `buildBinanceModifyBatchOrderParams` для конвертации `ModifyBatchOrderArgs.side` в wire-формат Binance.
+- Типы `ModifyBatchOrderArgs` (с обязательным `side: OrderSideEnum` для Binance Futures PUT batch), `ModifyOrderItemResult` (симметричен `CancelOrderItemResult`), `ModifyBatchOrdersResult` в `src/types/exchange.ts`; реэкспортированы из `src/index.ts`.
+- В `BaseTradeStream` добавлены protected `sendRequest<TResult>(request, requestId, kind)`, `ensureConnectedHook()`, `generateReqId()` — обобщённая инфраструктура для отправки batch-запросов и матчинга ответов в подклассах.
+- В `BybitTradeStream.types.ts` добавлены `BybitBatchOrderItem`, `BybitBatchOrderExtInfo`, `BybitBatchTradeMessage`, `BybitTradeAnyMessage` (union для базы), `BybitPendingBatchContext` (discriminated union).
+- Тесты: `test/utils/chunkList.test.ts` (новый, 8 тестов), `test/ws/BybitTradeStream.batch.test.ts` (новый, 15 тестов: send/receive batch, top-level retCode != 0, WS disconnected, timeout, "Unknown error" fallback, ignore non-batch ops, orphan context cleanup, kind mismatch protection). Расширены `BinanceFuturesHttpClient.test.ts`, `BybitHttpClient.test.ts`, `BinanceFutures.test.ts`, `BybitLinear.test.ts`, `BybitSpot.test.ts`.
+- Фикстуры: `BINANCE_RAW_MODIFY_BATCH_RESPONSE_MIXED`, `BYBIT_RAW_AMEND_BATCH_RESPONSE`, `BYBIT_WS_RAW_CREATE_BATCH_RESPONSE`, `BYBIT_WS_RAW_AMEND_BATCH_RESPONSE`, `BYBIT_WS_RAW_CANCEL_BATCH_RESPONSE`.
+
+### Changed
+
+- `BinanceFutures.createBatchOrders` теперь чанкает входной массив по 5 ордеров (`BINANCE_FUTURES_CREATE_BATCH_CHUNK_SIZE`). Раньше отправлял всё одним запросом — при >5 ордеров Binance отвергал запрос. Кроме того, per-order ошибки в ответе Binance (`{code, msg}`) теперь логируются как `warning` и пропускаются — раньше падали на `normalizeBinanceOrder` со сломанным объектом.
+- `BybitBaseClient.createBatchOrders` и `cancelBatchOrders` теперь чанкают по `batchChunkSize` (linear=20, spot=10). Раньше отправляли всё одним запросом — при превышении Bybit отвергал.
+- `BybitBaseClient.cancelBatchOrders`: добавлен early-return `[]` для пустого input до debug-лога. Маппинг success/error через `retExtInfo.list[i].code === 0` сохранён байт-в-байт.
+- `BaseTradeStream.PendingRequest` теперь kind-tagged: enum `PendingRequestKind` (`SingleOrder | CreateBatch | ModifyBatch | CancelBatch`), поле `kind: PendingRequestKind` и `resolve: (data: unknown) => void`. Старый приватный `sendOrderRequest` стал wrapper'ом над новым `sendRequest<Order>(..., SingleOrder)`. Сигнатура публичного `createOrder` не изменилась.
+- `BinanceTradeStream.handleMessage` и `BybitTradeStream.handleSingleOrderResponse` добавили защиту от mismatched `pending.kind !== SingleOrder` — reject вместо silent corruption.
+- `BybitTradeStream.handleMessage` маршрутизирует по `op`: `order.create` → single, `order.create-batch/amend-batch/cancel-batch` → соответствующие batch handler'ы. Контекст `pendingBatchContextByReqId` удаляется во всех ветках (resolve/reject/orphan/kind-mismatch) — утечка предотвращена.
+- `BybitPublicStream.handleMessage`: ветка `topic.startsWith('orderbook.')` обрабатывается ДО проверки `Array.isArray(message.data)` — Bybit отдаёт `data` как объект (не массив) для orderbook-сообщений.
+- `BybitPublicStream.unsubscribeKlines` (интервал `1s`): topic `publicTrade.{symbol}` снимается только если нет ни одного custom `publicTrade`-subscriber'а (защита от удаления topic при работающем capture-сервисе).
+- `BybitPublicStream.resubscribeStream` / `BinanceFuturesPublicStream.resubscribeStream`: вместо безусловного `recreateConnection` теперь используется conditional light-resubscribe — `unsubscribe` + `subscribe` для подключённых сокетов, `recreateConnection` как fallback при ошибке отправки или `WebSocketStatus !== CONNECTED`. Снижает overhead на принудительной переподписке к одному topic, сохраняет recreate-семантику для отказных соединений.
+- `BaseHttpClient.get`: в финальном `throw` (catch-блок retry-цикла) ошибка обогащается через `this.enrichError(axiosError)` — единый формат `Error("[code] msg")` или `Error("HTTP {status}: {message}")` вместо raw `AxiosError`.
+
+### Changed (BREAKING)
+
+- `ExchangeClient.cancelBatchOrders(symbol, orderIdList)` — сигнатура возврата изменена с `Promise<void>` на `Promise<CancelBatchOrdersResult>` (`= CancelOrderItemResult[]`). Каждый элемент содержит `{ orderId, isSuccess, errorCode: number | null, errorText: string | null }` для per-order трассировки результата. Consumer'ам, которые игнорировали возврат, миграция не требуется; те, кто ожидал `void` в type-checking — пометьте возврат явно или используйте `await` без присваивания.
+
+### Notes
+
+- **Binance Spot batch API не существует** на стороне биржи — `modifyBatchOrders`, `createBatchOrders`, `cancelBatchOrders` на Binance Spot бросают `Not supported for spot market` (наследуется default throw из `BaseExchangeClient`).
+- **Binance Futures WebSocket API не имеет batch-методов** — только одиночные `order.place`, `order.modify`, `order.cancel`. Verified: URLs `Place-Multiple-Orders` / `Modify-Multiple-Orders` / `Cancel-Multiple-Orders` в Binance WebSocket API docs возвращают 404. Batch на Binance идёт только через REST.
+- **Per-order `rateLimit` snapshot заполняется** только для одиночных order-операций через WebSocket Trade Stream (`createOrder` → `order.create` / `order.place`). REST endpoints и batch-методы не возвращают эту структуру в текущей реализации.
+
 ## [0.13.1] - 2026-05-11
 
 ### Changed
@@ -504,6 +619,7 @@ total: 54 | source: Binance Futures Public WebSocket
 - Private endpoints (balance, position, orders) require valid credentials
 - WebSocket subscriptions are stateless and can be re-established on reconnect
 
+[0.14.0]: https://github.com/solncebro/exchange-engine/releases/tag/v0.14.0
 [0.13.1]: https://github.com/solncebro/exchange-engine/releases/tag/v0.13.1
 [0.13.0]: https://github.com/solncebro/exchange-engine/releases/tag/v0.13.0
 [0.12.1]: https://github.com/solncebro/exchange-engine/releases/tag/v0.12.1

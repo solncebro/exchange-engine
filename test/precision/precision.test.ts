@@ -39,6 +39,15 @@ describe('amountToPrecision', () => {
     expect(result).toBe(0);
   });
 
+  it('handles a scientific-notation stepSize without truncating to zero', () => {
+    const symbol = {
+      ...BTCUSDT_TRADE_SYMBOL,
+      filter: { ...BTCUSDT_TRADE_SYMBOL.filter, stepSize: '1e-8' },
+    };
+
+    expect(amountToPrecision(symbol, 0.00000005)).toBeCloseTo(0.00000005, 10);
+  });
+
   it('handles integer step', () => {
     const symbol = {
       ...BTCUSDT_TRADE_SYMBOL,

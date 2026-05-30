@@ -10,7 +10,6 @@ import {
 } from '../normalizers/bybitNormalizer';
 import {
   BYBIT_PUBLIC_LINEAR_WEBSOCKET_URL,
-  BYBIT_DEMO_PUBLIC_LINEAR_WEBSOCKET_URL,
   BYBIT_LINEAR_BATCH_CHUNK_SIZE,
 } from '../constants/bybit';
 import { BybitBaseClient } from './BybitBaseClient';
@@ -22,13 +21,10 @@ class BybitLinear extends BybitBaseClient {
   protected readonly batchChunkSize = BYBIT_LINEAR_BATCH_CHUNK_SIZE;
 
   constructor(args: ExchangeArgs) {
-    const isDemoMode = args.config.isDemoMode === true;
-    const publicWebSocketUrl = isDemoMode ? BYBIT_DEMO_PUBLIC_LINEAR_WEBSOCKET_URL : BYBIT_PUBLIC_LINEAR_WEBSOCKET_URL;
-
     super({
       exchangeArgs: args,
       category: 'linear',
-      publicWebSocketUrl,
+      publicWebSocketUrl: BYBIT_PUBLIC_LINEAR_WEBSOCKET_URL,
       publicStreamLabel: 'Bybit Linear Public WebSocket',
       tradeStreamLabel: 'Bybit Linear Order WebSocket',
     });

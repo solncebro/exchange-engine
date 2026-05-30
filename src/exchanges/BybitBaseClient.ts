@@ -24,7 +24,7 @@ import type {
   OrderUpdateEvent,
   PositionUpdateEvent,
 } from '../types/common';
-import { OrderTypeEnum, OrderSideEnum, PositionSideEnum, TimeInForceEnum } from '../types/common';
+import { OrderTypeEnum, OrderSideEnum, PositionSideEnum } from '../types/common';
 import type { PublicStreamLike } from '../types/stream';
 import { BybitHttpClient } from '../http/BybitHttpClient';
 import {
@@ -48,21 +48,13 @@ import {
   BYBIT_BASE_URL,
   BYBIT_DEMO_BASE_URL,
   BYBIT_TRADE_WEBSOCKET_URL,
+  BYBIT_PRIVATE_WEBSOCKET_URL,
+  BYBIT_DEMO_PRIVATE_WEBSOCKET_URL,
 } from '../constants/bybit';
+import { BYBIT_ORDER_STATUS } from '../constants/mappings';
 import { chunkList as chunkListUtil } from '../utils/chunkList';
 import { BaseExchangeClient } from './BaseExchangeClient';
 import type { BybitBaseClientArgs } from './BybitBaseClient.types';
-
-const BYBIT_ORDER_STATUS_MAP: Record<string, string> = {
-  New: 'open',
-  PartiallyFilled: 'open',
-  Untriggered: 'open',
-  Filled: 'closed',
-  Cancelled: 'canceled',
-  Rejected: 'canceled',
-  Deactivated: 'expired',
-  Expired: 'expired',
-};
 
 abstract class BybitBaseClient extends BaseExchangeClient {
   protected readonly exchangeLabel = 'Bybit';
@@ -72,6 +64,7 @@ abstract class BybitBaseClient extends BaseExchangeClient {
   protected readonly category: string;
   protected abstract readonly batchChunkSize: number;
   private readonly secret: string;
+  private readonly privateWebSocketUrl: string;
   private readonly publicStream: BybitPublicStream;
   private readonly tradeStream: BybitTradeStream | null;
   private privateStream: BybitPrivateStream | null = null;
@@ -83,6 +76,7 @@ abstract class BybitBaseClient extends BaseExchangeClient {
     const baseUrl = isDemoMode ? BYBIT_DEMO_BASE_URL : BYBIT_BASE_URL;
     this.category = args.category;
     this.secret = args.exchangeArgs.config.secret;
+    this.privateWebSocketUrl = isDemoMode ? BYBIT_DEMO_PRIVATE_WEBSOCKET_URL : BYBIT_PRIVATE_WEBSOCKET_URL;
 
     this.httpClient = new BybitHttpClient({
       baseUrl,
@@ -139,6 +133,11 @@ abstract class BybitBaseClient extends BaseExchangeClient {
     options?: FetchPageWithLimitArgs,
   ): Promise<Kline[]> {
     const bybitInterval = BYBIT_KLINE_INTERVAL[interval];
+
+    if (bybitInterval === undefined) {
+      throw new Error(`Kline interval '${interval}' is not supported by Bybit REST`);
+    }
+
     const raw = await this.httpClient.fetchKline({
       category: this.category,
       symbol,
@@ -234,24 +233,7 @@ abstract class BybitBaseClient extends BaseExchangeClient {
     this.logger.debug(`[Bybit] Cancelling order ${orderId} for ${symbol}`);
     await this.httpClient.cancelOrder({ category: this.category, symbol, orderId });
 
-    return {
-      id: orderId,
-      clientOrderId: '',
-      symbol,
-      side: OrderSideEnum.Buy,
-      type: OrderTypeEnum.Limit,
-      timeInForce: TimeInForceEnum.Gtc,
-      price: 0,
-      avgPrice: 0,
-      stopPrice: 0,
-      amount: 0,
-      filledAmount: 0,
-      filledQuoteAmount: 0,
-      status: 'canceled',
-      reduceOnly: false,
-      timestamp: Date.now(),
-      updatedTimestamp: Date.now(),
-    };
+    return this.getOrder(symbol, orderId);
   }
 
   async getOrder(symbol: string, orderId: string): Promise<Order> {
@@ -368,12 +350,10 @@ abstract class BybitBaseClient extends BaseExchangeClient {
   }
 
   async getOrderRateLimit(): Promise<OrderRateLimit> {
-    // Bybit V5 linear createOrder/cancel/amend (incl. batch, counted per item) write
-    // rate-limit is 10 RPS. Bybit does not expose rate-limits via a GET endpoint —
-    // only via headers on actual order calls — so we treat it as a documented constant.
-    // Source: https://bybit-exchange.github.io/docs/v5/rate-limit
+    const writeRequestsPerSecond = this.category === 'spot' ? 20 : 10;
+
     return {
-      writeRequestsPerSecond: 10,
+      writeRequestsPerSecond,
       source: 'bybit-documented',
     };
   }
@@ -517,8 +497,13 @@ abstract class BybitBaseClient extends BaseExchangeClient {
     if (this.tradeStream !== null && this.tradeStream.isConnected()) {
       this.logger.debug(`[Bybit] Creating order via WebSocket: ${args.symbol}`);
       const order = await this.tradeStream.createOrder(orderParams);
+      const rebuiltOrder = buildBybitOrderFromCreateResponse(args, order.id);
 
-      return buildBybitOrderFromCreateResponse(args, order.id);
+      if (order.rateLimit !== undefined) {
+        rebuiltOrder.rateLimit = order.rateLimit;
+      }
+
+      return rebuiltOrder;
     }
 
     this.logger.debug(`[Bybit] Creating order via REST: ${args.symbol}`);
@@ -534,6 +519,7 @@ abstract class BybitBaseClient extends BaseExchangeClient {
 
     this.privateStream = new BybitPrivateStream({
       label: `Bybit ${this.marketLabel} UserData`,
+      url: this.privateWebSocketUrl,
       apiKey: this.apiKey,
       secret: this.secret,
       logger: this.logger,
@@ -576,7 +562,7 @@ abstract class BybitBaseClient extends BaseExchangeClient {
           orderId: orderData.orderId as string,
           clientOrderId: (orderData.orderLinkId as string) ?? '',
           side: side === 'Buy' ? OrderSideEnum.Buy : OrderSideEnum.Sell,
-          status: BYBIT_ORDER_STATUS_MAP[orderData.orderStatus as string] ?? 'open',
+          status: BYBIT_ORDER_STATUS[orderData.orderStatus as string] ?? 'open',
           price: Number(orderData.price),
           avgPrice: Number(orderData.avgPrice),
           amount: Number(orderData.qty),

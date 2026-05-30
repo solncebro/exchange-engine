@@ -46,6 +46,15 @@ abstract class BinanceBaseHttpClient extends BaseHttpClient {
     );
   }
 
+  protected async signedPut<T>(
+    path: string,
+    params: Record<string, string | number | boolean> = {},
+  ): Promise<T> {
+    return this.signedRequest(params, (signedParams, headers) =>
+      this.putWithParams<T>(path, signedParams, headers),
+    );
+  }
+
   protected async signedDelete<T>(
     path: string,
     params: Record<string, string | number | boolean> = {},

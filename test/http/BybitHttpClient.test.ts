@@ -35,6 +35,7 @@ describe('BybitHttpClient', () => {
       expect(options.headers['X-BAPI-API-KEY']).toBe('testKey');
       expect(options.headers['X-BAPI-SIGN']).toBeDefined();
       expect(options.headers['X-BAPI-TIMESTAMP']).toBe('1700000000000');
+      expect(options.headers['X-BAPI-RECV-WINDOW']).toBe('7000');
     });
   });
 

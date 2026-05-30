@@ -1,3 +1,4 @@
+import { WebSocketStatus } from '@solncebro/websocket-engine';
 import { BybitPrivateStream } from '../../src/ws/BybitPrivateStream';
 import { BYBIT_PRIVATE_WEBSOCKET_URL } from '../../src/constants/bybit';
 import { createMockLogger } from '../fixtures/mockLogger';
@@ -7,6 +8,7 @@ let capturedOnOpen: ((context: any) => Promise<void>) | undefined;
 
 const mockWebSocket = {
   close: jest.fn(),
+  getStatus: jest.fn().mockReturnValue(WebSocketStatus.CONNECTED),
 };
 
 jest.mock('@solncebro/websocket-engine', () => {
@@ -42,6 +44,7 @@ describe('BybitPrivateStream', () => {
     return {
       stream: new BybitPrivateStream({
         label: 'BybitPrivateStream',
+        url: BYBIT_PRIVATE_WEBSOCKET_URL,
         apiKey: 'testKey',
         secret: 'testSecret',
         logger: mockLogger,

@@ -62,6 +62,7 @@ Rate limiting — **только реактивный** (нет proactive thrott
 ### Signing-обёртки:
 - `signedGet<T>(path, params?)` — добавляет timestamp, recvWindow, signature к params
 - `signedPost<T>(path, params?)` — то же для POST
+- `signedPut<T>(path, params?)` — то же для PUT (через `putWithParams` + `validateResponse`); используется в `modifyOrder`/`modifyBatchOrders`
 - `signedDelete<T>(path, params?)` — то же для DELETE
 - `authHeaders()` → `{ 'X-MBX-APIKEY': apiKey }`
 
@@ -74,9 +75,11 @@ Rate limiting — **только реактивный** (нет proactive thrott
 
 ### Binance signing (src/auth/binanceAuth.ts):
 1. Добавить `timestamp = Date.now()` и `recvWindow = 5000` к params
-2. Собрать query string через `URLSearchParams` (автоматическая сортировка по ключу)
+2. Собрать query string через `serializeQueryParams` (`src/utils/serializeQueryParams.ts`) — `URLSearchParams` поверх `Object.entries`, сохраняет порядок вставки
 3. `signature = HMAC-SHA256(queryString, secret)` → hex
 4. Добавить `signature` к params
+
+**Wire-parity (критично):** `BaseHttpClient` настраивает axios `paramsSerializer.serialize = serializeQueryParams` — та же функция, что и при подписи. Это гарантирует, что строка, реально отправляемая axios, байт-в-байт совпадает с подписанной (иначе спецсимволы `,`/`:` в payload, например JSON batch-ордеров, ломают подпись → Binance `-1022`). Тот же сериализатор применяется к Bybit GET (`BybitHttpClient.authenticatedGet`), где Bybit REST recvWindow = `BYBIT_RECV_WINDOW` (7000).
 
 ### Общие эндпоинты (реализованы в base):
 - `fetchExchangeInfo()` → `BinanceExchangeInfoRaw` — GET `endpoints.exchangeInfo`

@@ -63,6 +63,14 @@ describe('BinanceFuturesHttpClient', () => {
       expect(options.params.signature).toBeDefined();
       expect(options.headers['X-MBX-APIKEY']).toBe('testKey');
     });
+
+    it('throws ExchangeError when the response body carries a negative code', async () => {
+      mockInstance.put.mockResolvedValue({ data: { code: -2013, msg: 'Order does not exist.' } });
+
+      await expect(
+        client.modifyOrder({ symbol: 'BTCUSDT', orderId: '123', quantity: '0.1' }),
+      ).rejects.toThrow('Binance API error -2013: Order does not exist.');
+    });
   });
 
   describe('setMarginType', () => {

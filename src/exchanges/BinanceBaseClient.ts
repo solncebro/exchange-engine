@@ -26,22 +26,19 @@ import {
   normalizeBinancePublicTrades,
   parseBinanceOrderRateLimit,
 } from '../normalizers/binanceNormalizer';
-import { BINANCE_FUTURES_ORDER_TYPE_REVERSE, BINANCE_SPOT_ORDER_TYPE_REVERSE, BINANCE_WORKING_TYPE } from '../constants/mappings';
+import {
+  BINANCE_FUTURES_ORDER_TYPE_REVERSE,
+  BINANCE_SPOT_ORDER_TYPE_REVERSE,
+  BINANCE_WORKING_TYPE,
+  BINANCE_ORDER_STATUS,
+  BINANCE_FUTURES_TIME_IN_FORCE_REVERSE,
+} from '../constants/mappings';
 import { BinanceUserDataStream } from '../ws/BinanceUserDataStream';
 import { BinanceTradeStream } from '../ws/BinanceTradeStream';
 import { BaseExchangeClient } from './BaseExchangeClient';
 import type { BinanceBaseClientArgs } from './BinanceBaseClient.types';
 
 const LISTEN_KEY_KEEPALIVE_INTERVAL_MS = 30 * 60 * 1000;
-
-const BINANCE_ORDER_STATUS_MAP: Record<string, string> = {
-  NEW: 'open',
-  PARTIALLY_FILLED: 'open',
-  FILLED: 'closed',
-  CANCELED: 'canceled',
-  EXPIRED: 'expired',
-  EXPIRED_IN_MATCH: 'expired',
-};
 
 abstract class BinanceBaseClient<T extends BinanceBaseHttpClient> extends BaseExchangeClient {
   protected readonly exchangeLabel = 'Binance';
@@ -53,6 +50,7 @@ abstract class BinanceBaseClient<T extends BinanceBaseHttpClient> extends BaseEx
   private readonly userDataWebSocketUrl: string;
   private listenKey: string | null = null;
   private listenKeyKeepAliveTimer: ReturnType<typeof setInterval> | null = null;
+  private userDataStreamConnecting = false;
 
   constructor(args: BinanceBaseClientArgs<T>) {
     super(args.exchangeArgs);
@@ -170,7 +168,16 @@ abstract class BinanceBaseClient<T extends BinanceBaseHttpClient> extends BaseEx
       args.type === OrderTypeEnum.TakeProfitLimit;
 
     if (isLimitLike) {
-      orderParams.timeInForce = args.timeInForce ?? TimeInForceEnum.Gtc;
+      const timeInForce = args.timeInForce ?? TimeInForceEnum.Gtc;
+      const isPostOnly = timeInForce === TimeInForceEnum.PostOnly;
+
+      if (isSpot && isPostOnly && args.type === OrderTypeEnum.Limit) {
+        orderParams.type = 'LIMIT_MAKER';
+      } else if (isSpot) {
+        orderParams.timeInForce = isPostOnly ? TimeInForceEnum.Gtc : timeInForce;
+      } else {
+        orderParams.timeInForce = BINANCE_FUTURES_TIME_IN_FORCE_REVERSE[timeInForce] ?? timeInForce;
+      }
     }
 
     return orderParams;
@@ -262,33 +269,39 @@ abstract class BinanceBaseClient<T extends BinanceBaseHttpClient> extends BaseEx
   }
 
   async connectUserDataStream(handler: UserDataStreamHandlerArgs): Promise<void> {
-    if (this.userDataStream !== null) {
+    if (this.userDataStream !== null || this.userDataStreamConnecting) {
       return;
     }
 
-    const response = await this.httpClient.createListenKey();
-    this.listenKey = response.listenKey;
+    this.userDataStreamConnecting = true;
 
-    this.userDataStream = new BinanceUserDataStream({
-      label: `${this.exchangeLabel} ${this.marketLabel} UserData`,
-      listenKey: this.listenKey,
-      baseWebSocketUrl: this.userDataWebSocketUrl,
-      logger: this.logger,
-      onNotify: this.onNotify,
-      onMessage: (event) => this.handleUserDataMessage(event, handler),
-    });
+    try {
+      const response = await this.httpClient.createListenKey();
+      this.listenKey = response.listenKey;
 
-    this.userDataStream.connect();
+      this.userDataStream = new BinanceUserDataStream({
+        label: `${this.exchangeLabel} ${this.marketLabel} UserData`,
+        listenKey: this.listenKey,
+        baseWebSocketUrl: this.userDataWebSocketUrl,
+        logger: this.logger,
+        onNotify: this.onNotify,
+        onMessage: (event) => this.handleUserDataMessage(event, handler),
+      });
 
-    this.listenKeyKeepAliveTimer = setInterval(() => {
-      if (this.listenKey) {
-        this.httpClient.keepAliveListenKey(this.listenKey).catch((error) => {
-          this.logger.error(`[${this.exchangeLabel}] Failed to keep alive listenKey: ${error instanceof Error ? error.message : String(error)}`);
-        });
-      }
-    }, LISTEN_KEY_KEEPALIVE_INTERVAL_MS);
+      this.userDataStream.connect();
 
-    this.logger.info(`[${this.exchangeLabel}] User data stream connected (${this.marketLabel})`);
+      this.listenKeyKeepAliveTimer = setInterval(() => {
+        if (this.listenKey) {
+          this.httpClient.keepAliveListenKey(this.listenKey).catch((error) => {
+            this.logger.error(`[${this.exchangeLabel}] Failed to keep alive listenKey: ${error instanceof Error ? error.message : String(error)}`);
+          });
+        }
+      }, LISTEN_KEY_KEEPALIVE_INTERVAL_MS);
+
+      this.logger.info(`[${this.exchangeLabel}] User data stream connected (${this.marketLabel})`);
+    } finally {
+      this.userDataStreamConnecting = false;
+    }
   }
 
   disconnectUserDataStream(): void {
@@ -331,7 +344,7 @@ abstract class BinanceBaseClient<T extends BinanceBaseHttpClient> extends BaseEx
         orderId: String(orderData.i),
         clientOrderId: orderData.c as string,
         side: (orderData.S as string).toLowerCase() === 'buy' ? OrderSideEnum.Buy : OrderSideEnum.Sell,
-        status: BINANCE_ORDER_STATUS_MAP[orderData.X as string] ?? 'open',
+        status: BINANCE_ORDER_STATUS[orderData.X as string] ?? 'open',
         price: Number(orderData.p),
         avgPrice: Number(orderData.ap),
         amount: Number(orderData.q),

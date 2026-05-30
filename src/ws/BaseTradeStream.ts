@@ -133,12 +133,12 @@ abstract class BaseTradeStream<TMessage> {
   }
 
   private async ensureConnected(): Promise<void> {
-    if (this.webSocket !== null) {
-      return;
-    }
-
     if (this.connectPromise !== null) {
       return this.connectPromise;
+    }
+
+    if (this.webSocket !== null) {
+      return;
     }
 
     this.connectPromise = this.initConnection();

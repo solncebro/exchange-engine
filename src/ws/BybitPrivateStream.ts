@@ -1,9 +1,8 @@
-import { ReliableWebSocket } from '@solncebro/websocket-engine';
+import { ReliableWebSocket, WebSocketStatus } from '@solncebro/websocket-engine';
 import type { WebSocketOpenContext } from '@solncebro/websocket-engine';
 
 import type { ExchangeLogger, WebSocketConnectionInfo } from '../types/common';
 import { WebSocketConnectionTypeEnum } from '../types/common';
-import { BYBIT_PRIVATE_WEBSOCKET_URL } from '../constants/bybit';
 import {
   BYBIT_HEARTBEAT_CONFIG,
   BYBIT_PING_INTERVAL,
@@ -16,6 +15,7 @@ class BybitPrivateStream {
   private webSocket: ReliableWebSocket<BybitPrivateMessage> | null = null;
   private readonly logger: ExchangeLogger;
   private readonly label: string;
+  private readonly url: string;
   private readonly apiKey: string;
   private readonly secret: string;
   private readonly onNotify?: (message: string) => void | Promise<void>;
@@ -25,6 +25,7 @@ class BybitPrivateStream {
   constructor(args: BybitPrivateStreamArgs) {
     this.logger = args.logger;
     this.label = args.label;
+    this.url = args.url;
     this.apiKey = args.apiKey;
     this.secret = args.secret;
     this.onNotify = args.onNotify;
@@ -39,7 +40,7 @@ class BybitPrivateStream {
 
     this.webSocket = new ReliableWebSocket<BybitPrivateMessage>({
       label: this.label,
-      url: BYBIT_PRIVATE_WEBSOCKET_URL,
+      url: this.url,
       logger: this.logger,
       parseMessage: (rawData) => parseWebSocketMessage<BybitPrivateMessage>(rawData),
       onMessage: (message) => this.handleMessage(message),
@@ -66,15 +67,15 @@ class BybitPrivateStream {
 
     return {
       label: this.label,
-      url: BYBIT_PRIVATE_WEBSOCKET_URL,
-      isConnected: true,
+      url: this.url,
+      isConnected: this.isConnected(),
       type: WebSocketConnectionTypeEnum.UserData,
       subscriptionList: [],
     };
   }
 
   isConnected(): boolean {
-    return this.webSocket !== null;
+    return this.webSocket !== null && this.webSocket.getStatus() === WebSocketStatus.CONNECTED;
   }
 
   private async authenticate(context: WebSocketOpenContext<BybitPrivateMessage>): Promise<void> {

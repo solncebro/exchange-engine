@@ -54,10 +54,10 @@ BinanceTicker24hrRaw { symbol, lastPrice: string, priceChangePercent: string, ti
   - NaN liquidationPrice → 0
   - Сохраняет raw в `info`
 - `normalizeBinanceOrder(raw)` → `Order`
-  - Маппинг через `BINANCE_ORDER_SIDE`, `BINANCE_ORDER_TYPE` и `BINANCE_ORDER_STATUS` (константы из `src/constants/mappings.ts`)
+  - Маппинг через `BINANCE_ORDER_SIDE`, `BINANCE_ORDER_TYPE` и `BINANCE_ORDER_STATUS` (константы из `src/constants/mappings.ts`); `side` с fallback `?? OrderSideEnum.Buy` (не утекает `undefined` в non-optional поле)
   - `orderId` number → string
 - `normalizeBinanceBalances(raw)` → `BalanceByAsset` (Map)
-  - Пропускает нулевые балансы (`free + locked === 0`)
+  - Пропускает нулевые балансы (`free + locked === 0`) и невалидные (`NaN` в `free`/`locked` → `continue`)
 - `normalizeBinanceFuturesBalances(raw)` → `BalanceByAsset` (Map)
   - Отдельная функция для фьючерсного баланса — использует `walletBalance`/`availableBalance` вместо `free`/`locked`
   - Пропускает записи с `walletBalance === 0`
@@ -133,7 +133,7 @@ WebSocket:
   - NaN liquidationPrice → 0
   - Сохраняет raw в `info`
 - `normalizeBybitOrder(raw)` → `Order`
-  - Маппинг через `BYBIT_ORDER_SIDE`, `BYBIT_ORDER_TYPE`, `BYBIT_ORDER_STATUS`, `BYBIT_TIME_IN_FORCE`
+  - Маппинг через `BYBIT_ORDER_SIDE`, `BYBIT_ORDER_TYPE`, `BYBIT_ORDER_STATUS`, `BYBIT_TIME_IN_FORCE`; `side` с fallback `?? OrderSideEnum.Buy`
   - `triggerPrice → stopPrice`, `cumExecValue → filledQuoteAmount`
   - timestamp через `parseFloat(raw.createdTime)`
 - `buildBybitOrderFromCreateResponse(args, orderId)` → `Order`
@@ -206,7 +206,7 @@ WebSocket:
   - `'binancePercentPriceBySide'` — `{ bidMultiplierUp, bidMultiplierDown, askMultiplierUp, askMultiplierDown, avgPriceMins }`
   - `'bybitRiskParameters'` — `{ priceLimitRatioX, priceLimitRatioY }`
 - `TradingFunding` — `{ fundingIntervalMinutes?, upperFundingRate?, lowerFundingRate? }`
-- `Position` — `{ symbol, side, contracts, entryPrice, markPrice, unrealizedPnl, leverage, marginMode, liquidationPrice, info }`
+- `Position` — `{ symbol, side, direction: 'long' | 'short' | null, contracts, entryPrice, markPrice, unrealizedPnl, leverage, marginMode, liquidationPrice, positionIdx?, info }`
 - `Order` — `{ id, clientOrderId, symbol, side, type, amount, price, avgPrice, stopPrice, filledAmount, filledQuoteAmount, status, timeInForce, reduceOnly, timestamp, updatedTimestamp, rateLimit?: OrderRateLimitSnapshot }`. Поле `rateLimit?` опциональное — заполняется только для одиночных order-операций через WebSocket Trade Stream.
 - `OrderRateLimitSnapshot` — `{ limit: number; remaining: number; resetMs: number }`. Per-response runtime snapshot per-UID rate-limit, извлечённый из заголовков ответа на одиночный `createOrder` через WS. Bybit: парсится из `header['X-Bapi-Limit' / 'X-Bapi-Limit-Status' / 'X-Bapi-Limit-Reset-Timestamp']` через `parseBybitHeaderRateLimit`. Binance: из массива `message.rateLimits[]` (поиск entry с `rateLimitType === 'ORDERS' && interval === 'SECOND'`) через `parseBinanceRateLimitArray`, `remaining = limit - count`, `resetMs = Date.now() + intervalNum * 1000`. Отличается от `OrderRateLimit` (см. `getOrderRateLimit()`): тот возвращает статический per-UID лимит из exchange-info, этот — runtime snapshot после конкретной операции.
 - `Balance` — `{ asset, free, locked, total, walletBalance?, availableToWithdraw?, totalOrderInitialMargin?, totalPositionInitialMargin? }` (опциональные поля — Bybit Unified Account)
@@ -258,10 +258,11 @@ BINANCE_ORDER_TYPE: { MARKET → Market, LIMIT → Limit, STOP_MARKET → StopMa
 BINANCE_ORDER_TYPE_REVERSE: { market → 'MARKET', limit → 'LIMIT', stopMarket → 'STOP_MARKET', ... } (обратный маппинг)
 BINANCE_ORDER_STATUS: { NEW → 'open', PARTIALLY_FILLED → 'open', FILLED → 'closed', CANCELED → 'canceled', REJECTED → 'rejected', EXPIRED → 'canceled', EXPIRED_IN_MATCH → 'canceled' }
 BINANCE_TIME_IN_FORCE: { GTC → Gtc, IOC → Ioc, FOK → Fok, GTX → PostOnly }
+BINANCE_FUTURES_TIME_IN_FORCE_REVERSE: { Gtc → 'GTC', Ioc → 'IOC', Fok → 'FOK', PostOnly → 'GTX' } (build-маппинг для Binance futures; spot post-only выражается типом LIMIT_MAKER, не TIF)
 BINANCE_WORKING_TYPE: { markPrice → 'MARK_PRICE', contractPrice → 'CONTRACT_PRICE' }
 BYBIT_POSITION_SIDE: { Buy → Long, Sell → Short }
 BYBIT_ORDER_SIDE: { Buy → Buy, Sell → Sell }
 BYBIT_ORDER_TYPE: { Market → Market, Limit → Limit }
-BYBIT_ORDER_STATUS: { New → 'open', PartiallyFilled → 'open', Untriggered → 'open', Filled → 'closed', Cancelled → 'canceled', PartiallyFilledCanceled → 'canceled', Rejected → 'rejected', Deactivated → 'canceled' }
+BYBIT_ORDER_STATUS: { New → 'open', PartiallyFilled → 'open', Untriggered → 'open', Triggered → 'open', Filled → 'closed', Cancelled → 'canceled', PartiallyFilledCanceled → 'canceled', Rejected → 'rejected', Deactivated → 'canceled' }
 BYBIT_TIME_IN_FORCE: { GTC → Gtc, IOC → Ioc, FOK → Fok, PostOnly → PostOnly }
 ```

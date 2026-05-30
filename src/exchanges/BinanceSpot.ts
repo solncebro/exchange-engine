@@ -1,4 +1,5 @@
 import type { ExchangeArgs } from '../types/exchange';
+import type { UserDataStreamHandlerArgs } from '../types/common';
 import { BinanceSpotHttpClient } from '../http/BinanceSpotHttpClient';
 import { BinanceSpotPublicStream } from '../ws/BinanceSpotPublicStream';
 import {
@@ -50,6 +51,13 @@ class BinanceSpot extends BinanceBaseClient<BinanceSpotHttpClient> {
       tradeStreamLabel: 'Binance Spot Order WebSocket',
       userDataWebSocketUrl: BINANCE_SPOT_WEBSOCKET_STREAM_URL,
     });
+  }
+
+  async connectUserDataStream(_handler: UserDataStreamHandlerArgs): Promise<void> {
+    throw new Error(
+      'Binance Spot user data stream via listenKey was decommissioned by Binance on 2026-02-20. '
+      + 'Migrate to the WebSocket API user data stream (userDataStream.subscribe with session.logon).',
+    );
   }
 }
 

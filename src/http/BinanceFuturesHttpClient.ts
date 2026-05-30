@@ -10,7 +10,6 @@ import type {
   BinanceIncomeRaw,
 } from '../normalizers/binanceNormalizer';
 import type { FetchPageWithLimitArgs } from '../types/exchange';
-import { buildBinanceSignedParams } from '../auth/binanceAuth';
 import { BINANCE_REQUEST_TIMEOUT } from '../constants/binance';
 import { applyTimeRangeOptions } from '../utils/httpParams';
 import type { BinanceEndpoints, BinanceHttpClientArgs } from './BinanceBaseHttpClient';
@@ -70,15 +69,9 @@ class BinanceFuturesHttpClient extends BinanceBaseHttpClient {
   }
 
   async modifyOrder(params: Record<string, unknown>): Promise<BinanceOrderResponseRaw> {
-    const signed = buildBinanceSignedParams({
-      params: params as Record<string, string | number | boolean>,
-      secret: this.secret,
-    });
-
-    return this.putWithParams<BinanceOrderResponseRaw>(
+    return this.signedPut<BinanceOrderResponseRaw>(
       '/fapi/v1/order',
-      signed as Record<string, string | number | boolean>,
-      this.authHeaders(),
+      params as Record<string, string | number | boolean>,
     );
   }
 
@@ -111,15 +104,9 @@ class BinanceFuturesHttpClient extends BinanceBaseHttpClient {
   async modifyBatchOrders(
     orderList: Array<Record<string, unknown>>,
   ): Promise<Array<Record<string, unknown>>> {
-    const signed = buildBinanceSignedParams({
-      params: { batchOrders: JSON.stringify(orderList) },
-      secret: this.secret,
-    });
-
-    return this.putWithParams<Array<Record<string, unknown>>>(
+    return this.signedPut<Array<Record<string, unknown>>>(
       '/fapi/v1/batchOrders',
-      signed as Record<string, string | number | boolean>,
-      this.authHeaders(),
+      { batchOrders: JSON.stringify(orderList) },
     );
   }
 

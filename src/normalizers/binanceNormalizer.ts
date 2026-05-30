@@ -19,7 +19,7 @@ import type {
   Income,
   PriceLimitRisk,
 } from '../types/common';
-import { TradeSymbolTypeEnum, PositionSideEnum, MarginModeEnum, TimeInForceEnum } from '../types/common';
+import { TradeSymbolTypeEnum, PositionSideEnum, MarginModeEnum, TimeInForceEnum, OrderSideEnum } from '../types/common';
 import type { OrderRateLimit } from '../types/exchange';
 import { BINANCE_POSITION_SIDE, BINANCE_ORDER_SIDE, BINANCE_ORDER_TYPE, BINANCE_ORDER_STATUS, BINANCE_TIME_IN_FORCE } from '../constants/mappings';
 import { parseOrderBookLevel } from './normalizerUtils';
@@ -560,7 +560,7 @@ export function normalizeBinanceOrder(raw: BinanceOrderResponseRaw): Order {
     id: String(raw.orderId),
     clientOrderId: raw.clientOrderId ?? '',
     symbol: raw.symbol,
-    side: BINANCE_ORDER_SIDE[raw.side],
+    side: BINANCE_ORDER_SIDE[raw.side] ?? OrderSideEnum.Buy,
     type: BINANCE_ORDER_TYPE[raw.type] ?? raw.type.toLowerCase() as never,
     timeInForce: BINANCE_TIME_IN_FORCE[raw.timeInForce] ?? TimeInForceEnum.Gtc,
     price: parseFloat(raw.price),
@@ -582,6 +582,10 @@ export function normalizeBinanceBalances(raw: BinanceAccountRaw): AccountBalance
   for (const entry of raw.balances) {
     const free = parseFloat(entry.free);
     const locked = parseFloat(entry.locked);
+
+    if (!Number.isFinite(free) || !Number.isFinite(locked)) {
+      continue;
+    }
 
     if (free + locked === 0) {
       continue;

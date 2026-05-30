@@ -557,6 +557,14 @@ describe('BybitLinear', () => {
       expect(klineList[0].openTimestamp).toBe(1700000000000);
       expect(klineList[0].openPrice).toBe(65000);
     });
+
+    it('throws for the 1s interval which Bybit REST does not support', async () => {
+      const { client } = createClient();
+
+      await expect(client.fetchKlines('BTCUSDT', '1s')).rejects.toThrow(
+        "Kline interval '1s' is not supported by Bybit REST",
+      );
+    });
   });
 
   describe('fetchBalances', () => {
@@ -622,10 +630,17 @@ describe('BybitLinear', () => {
   });
 
   describe('cancelOrder', () => {
-    it('returns order with canceled status', async () => {
+    it('returns the real order fetched after cancellation', async () => {
       const { client, mockInstance } = createClient();
       mockInstance.post.mockResolvedValue({
         data: { retCode: 0, result: { orderId: 'order-1', orderLinkId: '' } },
+      });
+      mockInstance.get.mockResolvedValueOnce({
+        data: {
+          result: {
+            list: [{ ...BYBIT_RAW_ORDER_RESPONSE, orderId: 'order-1', symbol: 'BTCUSDT', orderStatus: 'Cancelled' }],
+          },
+        },
       });
 
       const result = await client.cancelOrder('BTCUSDT', 'order-1');

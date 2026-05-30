@@ -1,6 +1,7 @@
 import { buildBybitAuthHeaders } from '../auth/bybitAuth';
-import { BYBIT_REQUEST_TIMEOUT } from '../constants/bybit';
+import { BYBIT_RECV_WINDOW, BYBIT_REQUEST_TIMEOUT } from '../constants/bybit';
 import { ExchangeError } from '../errors/ExchangeError';
+import { serializeQueryParams } from '../utils/serializeQueryParams';
 import type {
   BybitClosedPnlRaw,
   BybitFeeRateRaw,
@@ -49,25 +50,16 @@ class BybitHttpClient extends BaseHttpClient {
       apiKey: this.apiKey,
       secret: this.secret,
       timestamp: Date.now(),
+      recvWindow: BYBIT_RECV_WINDOW,
       payload,
     });
-  }
-
-  private toQueryString(params: Record<string, string | number | boolean>): string {
-    const urlParams = new URLSearchParams();
-
-    for (const [key, value] of Object.entries(params)) {
-      urlParams.append(key, String(value));
-    }
-
-    return urlParams.toString();
   }
 
   private async authenticatedGet<T>(
     path: string,
     params: Record<string, string | number | boolean>,
   ): Promise<T> {
-    const headers = this.buildAuthHeaders(this.toQueryString(params));
+    const headers = this.buildAuthHeaders(serializeQueryParams(params));
     const response = await this.get<T & BybitApiResponse>(path, params, headers);
 
     this.validateResponse(response);

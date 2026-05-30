@@ -1,4 +1,5 @@
 import { hmacSha256 } from '../utils/crypto';
+import { serializeQueryParams } from '../utils/serializeQueryParams';
 
 export function buildBinanceSignature(queryString: string, secret: string): string {
   return hmacSha256(queryString, secret);
@@ -32,9 +33,7 @@ function buildTimestampedParams(
 export function buildBinanceSignedParams(args: BuildBinanceSignedParamsArgs): Record<string, string | number> {
   const { signedParams, secret } = buildTimestampedParams(args);
 
-  const queryString = new URLSearchParams(
-    Object.entries(signedParams).map(([key, value]) => [key, String(value)]) as [string, string][]
-  ).toString();
+  const queryString = serializeQueryParams(signedParams);
 
   signedParams.signature = buildBinanceSignature(queryString, secret);
 

@@ -509,7 +509,7 @@ export function normalizeBybitOrder(raw: BybitOrderResponseRaw): Order {
     id: raw.orderId,
     clientOrderId: raw.orderLinkId ?? '',
     symbol: raw.symbol,
-    side: BYBIT_ORDER_SIDE[raw.side],
+    side: BYBIT_ORDER_SIDE[raw.side] ?? OrderSideEnum.Buy,
     type: BYBIT_ORDER_TYPE[raw.orderType] ?? raw.orderType.toLowerCase() as never,
     timeInForce: BYBIT_TIME_IN_FORCE[raw.timeInForce] ?? TimeInForceEnum.Gtc,
     price: parseFloat(raw.price),

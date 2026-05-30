@@ -166,10 +166,17 @@ describe('BybitSpot', () => {
   });
 
   describe('cancelOrder', () => {
-    it('returns order with canceled status', async () => {
+    it('returns the real order fetched after cancellation', async () => {
       const { client, mockInstance } = createClient();
       mockInstance.post.mockResolvedValue({
         data: { retCode: 0, result: { orderId: 'order-1', orderLinkId: '' } },
+      });
+      mockInstance.get.mockResolvedValueOnce({
+        data: {
+          result: {
+            list: [{ ...BYBIT_RAW_ORDER_RESPONSE, orderId: 'order-1', symbol: 'BTCUSDT', orderStatus: 'Cancelled' }],
+          },
+        },
       });
 
       const result = await client.cancelOrder('BTCUSDT', 'order-1');
@@ -673,6 +680,20 @@ describe('BybitSpot', () => {
 
       expect(publicStream.close).toHaveBeenCalled();
       expect(tradeStream).toBeNull();
+    });
+  });
+
+  describe('getOrderRateLimit', () => {
+    it('returns documented 20 RPS for spot without any HTTP request', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockClear();
+      mockInstance.post.mockClear();
+
+      const result = await client.getOrderRateLimit();
+
+      expect(result).toEqual({ writeRequestsPerSecond: 20, source: 'bybit-documented' });
+      expect(mockInstance.get).not.toHaveBeenCalled();
+      expect(mockInstance.post).not.toHaveBeenCalled();
     });
   });
 });

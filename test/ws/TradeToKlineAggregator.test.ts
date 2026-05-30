@@ -141,6 +141,18 @@ describe('TradeToKlineAggregator', () => {
 
       expect(() => aggregator.forceEmitPendingKlineList()).not.toThrow();
     });
+
+    it('does not emit a degenerate zero-volume placeholder kline', () => {
+      const aggregator = new TradeToKlineAggregator(mockLogger);
+      const handler = jest.fn();
+      aggregator.setHandler(handler);
+
+      aggregator.processTrade(createTrade('BTCUSDT', '50000', '0.1', 1700000000500));
+
+      aggregator.forceEmitPendingKlineList();
+
+      expect(handler).not.toHaveBeenCalled();
+    });
   });
 
   describe('clearSymbol', () => {

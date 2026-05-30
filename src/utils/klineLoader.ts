@@ -28,13 +28,23 @@ export async function loadKlinesInChunks(args: LoadKlinesInChunksArgs): Promise<
   for (let i = 0; i < symbolList.length; i += chunkSize) {
     const chunk = symbolList.slice(i, i + chunkSize);
 
-    const chunkResultList = await Promise.all(
+    const settledResultList = await Promise.allSettled(
       chunk.map(async (symbol) => ({ symbol, klineList: await fetchKlines(symbol) })),
     );
 
     const chunkResult = new Map<string, Kline[]>();
 
-    for (const { symbol, klineList } of chunkResultList) {
+    for (let chunkIndex = 0; chunkIndex < settledResultList.length; chunkIndex++) {
+      const settledResult = settledResultList[chunkIndex];
+
+      if (settledResult.status === 'rejected') {
+        const reason = settledResult.reason instanceof Error ? settledResult.reason.message : String(settledResult.reason);
+        logger.warn(`Failed to load klines for ${chunk[chunkIndex]}: ${reason}`);
+        continue;
+      }
+
+      const { symbol, klineList } = settledResult.value;
+
       if (klineList.length === 0) {
         logger.warn(`${symbol} has no klines`);
         continue;

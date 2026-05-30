@@ -4,18 +4,17 @@ Universal TypeScript client library for cryptocurrency trading on Binance and By
 
 ## Latest Release
 
-Current version: `0.13.1`
+Current version: `0.14.0`
 
-- **0.13.1:** `BybitPublicStream.resubscribeStream` пересоздаёт WebSocket-соединение с нужным topic (вместо повторного `subscribe` на сокет), с дедупом recreate 2s и сбросом `TradeToKlineAggregator` для `publicTrade.*`.
-- New `OrderTypeEnum` values: `StopLimit`, `TakeProfitLimit` for atomic STOP_LOSS_LIMIT / TAKE_PROFIT_LIMIT on Binance Spot and Bybit Spot.
-- New enums: `TriggerByEnum` (`MarkPrice` | `LastPrice` | `IndexPrice`), `OrderFilterEnum` (`Order` | `tpslOrder` | `StopOrder`), `MarketUnitEnum` (`baseCoin` | `quoteCoin`).
-- `CreateOrderWebSocketArgs` extended with `triggerBy`, `closeOnTrigger`, `orderFilter`, `marketUnit`, `trailingDelta`, `quoteOrderQty`.
-- Spot/futures order param mappings split: separate `BINANCE_FUTURES_ORDER_TYPE_REVERSE` / `BINANCE_SPOT_ORDER_TYPE_REVERSE`. On spot, `closePosition`/`workingType`/`positionSide`/`reduceOnly` and Bybit `triggerDirection`/`triggerBy`/`closeOnTrigger` are no longer set.
-- `BybitLinear.fetchPositionMode()` implemented via `GET /v5/position/list?category=linear&settleCoin=USDT` (Hedge if any positionIdx ∈ {1,2}; OneWay if all 0; `undefined` if no positions).
-- BREAKING: `ExchangeClient.fetchPositionMode()` now returns `Promise<PositionModeEnum | undefined>`.
-- `awaitWebSocketConnectionsReady()` on `ExchangeClient`; Binance Futures public stream uses `/market/ws` with batched `SUBSCRIBE`, stale reconnect, and optional `messageCount` / `lastMessageTimestamp` on `WebSocketConnectionInfo`.
-- New utility `formatWebSocketConnectionsReport`.
-- Bybit instruments with `status === 'PreLaunch'` are normalized as active (`isActive: true`).
+- **Batch order modification** — new `ExchangeClient.modifyBatchOrders(orderList)` with per-order success/error result. REST: Binance Futures (`PUT /fapi/v1/batchOrders`), Bybit Linear/Spot (`POST /v5/order/amend-batch`). Bybit Trade WebSocket: `order.amend-batch`.
+- **WebSocket batch operations (Bybit)** — `BybitTradeStream` now supports `order.create-batch` / `order.amend-batch` / `order.cancel-batch`. With an active `tradeStream`, all three batch methods in `BybitBaseClient` route through WebSocket; otherwise REST. Demo mode stays REST-only.
+- **Automatic batch chunking** — `createBatchOrders` / `modifyBatchOrders` / `cancelBatchOrders` auto-split input per exchange limits (Binance Futures: 5/5/10; Bybit Linear: 20; Bybit Spot: 10). No need to worry about exchange caps.
+- **Order rate-limit visibility** — two levels:
+  - Static per-UID: new `ExchangeClient.getOrderRateLimit(): Promise<OrderRateLimit>`. Binance — parsed from `exchangeInfo.rateLimits[]`, Bybit — documented constant `10 RPS` (linear createOrder/cancel/amend, counted per batch item).
+  - Runtime per-response: `Order.rateLimit?: OrderRateLimitSnapshot { limit, remaining, resetMs }` auto-populated for single-order operations via WS Trade Stream (Bybit — from `X-Bapi-Limit*` headers, Binance — from `message.rateLimits[]`).
+- **Bybit V5 public subscriptions** — new `subscribeOrderbook(symbol, depth, handler)` / `subscribePublicTrades(symbol, handler)` for topics `orderbook.{depth}.{symbol}` and `publicTrade.{symbol}`. Custom publicTrade subscriber coexists with `TradeToKlineAggregator` (1s klines).
+- **WebSocket Trade Stream refactor** — `PendingRequest` is now kind-tagged (enum `PendingRequestKind`), shared generic `sendRequest<TResult>(...)` in `BaseTradeStream`. Single-order behavior and public API unchanged.
+- **BREAKING** — `ExchangeClient.cancelBatchOrders(symbol, orderIdList)` return type changed from `Promise<void>` to `Promise<CancelBatchOrdersResult>` (`= CancelOrderItemResult[]`) — per-order success/error result instead of silent void.
 
 Full release notes: [CHANGELOG.md](./CHANGELOG.md)
 

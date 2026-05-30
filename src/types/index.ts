@@ -1,4 +1,4 @@
-export type {
+export {
   ExchangeNameEnum,
   OrderSideEnum,
   OrderTypeEnum,
@@ -9,6 +9,9 @@ export type {
   TimeInForceEnum,
   WorkingTypeEnum,
   WebSocketConnectionTypeEnum,
+} from './common';
+
+export type {
   KlineInterval,
   ExchangeConfig,
   ExchangeLogger,

@@ -101,7 +101,7 @@ class TradeToKlineAggregator {
   }
 
   private emitKline(aggregatedKline: AggregatedKline): void {
-    if (!this.handler) {
+    if (!this.handler || aggregatedKline.volume <= 0) {
       return;
     }
 

@@ -622,12 +622,12 @@ describe('BinanceFutures', () => {
       expect(result).toBe(0.123);
     });
 
-    it('floors amount to integer for unknown symbol', () => {
+    it('returns amount unchanged when symbol metadata is not loaded', () => {
       const { client } = createClient();
 
       const result = client.amountToPrecision('UNKNOWN', 0.12345);
 
-      expect(result).toBe(0);
+      expect(result).toBe(0.12345);
     });
   });
 

@@ -8,7 +8,7 @@
 | BINANCE_FUTURES_BASE_URL | https://fapi.binance.com |
 | BINANCE_DEMO_SPOT_BASE_URL | https://demo-api.binance.com |
 | BINANCE_DEMO_FUTURES_BASE_URL | https://demo-fapi.binance.com |
-| BINANCE_FUTURES_WEBSOCKET_STREAM_URL | wss://fstream.binance.com/ws |
+| BINANCE_FUTURES_WEBSOCKET_STREAM_URL | wss://fstream.binance.com/private/ws (user-data; legacy `/ws` выведен 2026-04-23) |
 | BINANCE_FUTURES_WEBSOCKET_COMBINED_URL | wss://fstream.binance.com/stream |
 | BINANCE_FUTURES_WEBSOCKET_MARKET_URL | wss://fstream.binance.com/market/ws |
 | BINANCE_FUTURES_WEBSOCKET_MARKET_COMBINED_URL | wss://fstream.binance.com/market/stream |
@@ -34,9 +34,8 @@
 | BYBIT_PUBLIC_SPOT_WEBSOCKET_URL | wss://stream.bybit.com/v5/public/spot |
 | BYBIT_PRIVATE_WEBSOCKET_URL | wss://stream.bybit.com/v5/private |
 | BYBIT_TRADE_WEBSOCKET_URL | wss://stream.bybit.com/v5/trade |
-| BYBIT_DEMO_PUBLIC_LINEAR_WEBSOCKET_URL | wss://stream-demo.bybit.com/v5/public/linear |
-| BYBIT_DEMO_PUBLIC_SPOT_WEBSOCKET_URL | wss://stream-demo.bybit.com/v5/public/spot |
-| BYBIT_RECV_WINDOW | 7000 ms |
+| BYBIT_DEMO_PRIVATE_WEBSOCKET_URL | wss://stream-demo.bybit.com/v5/private |
+| BYBIT_RECV_WINDOW | 7000 ms (используется в REST-подписи) |
 | BYBIT_REQUEST_TIMEOUT | 30000 ms |
 | BYBIT_PING_INTERVAL | 20000 ms |
 

@@ -3,6 +3,16 @@ import type { TradeSymbol } from '../types/common';
 export const MAX_PRICE_DECIMAL_PLACES = 8;
 
 function countDecimalPlaces(step: string): number {
+  const normalizedStep = step.toLowerCase();
+
+  if (normalizedStep.includes('e')) {
+    const [mantissa, exponentString] = normalizedStep.split('e');
+    const exponent = parseInt(exponentString, 10);
+    const mantissaDecimals = (mantissa.split('.')[1] ?? '').replace(/0+$/, '').length;
+
+    return Math.max(0, mantissaDecimals - exponent);
+  }
+
   const parts = step.split('.');
 
   if (parts.length === 1) {

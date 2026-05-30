@@ -4,7 +4,6 @@ import { createMockLogger } from '../fixtures/mockLogger';
 
 let capturedOnMessage: ((message: any) => void) | undefined;
 let capturedOnOpen: ((context: any) => Promise<void>) | undefined;
-let capturedOnReconnectSuccess: (() => void) | undefined;
 
 const mockWebSocket = {
   close: jest.fn(),
@@ -18,7 +17,6 @@ jest.mock('@solncebro/websocket-engine', () => {
     ReliableWebSocket: jest.fn().mockImplementation((args: any) => {
       capturedOnMessage = args.onMessage;
       capturedOnOpen = args.onOpen;
-      capturedOnReconnectSuccess = args.onReconnectSuccess;
       return mockWebSocket;
     }),
   };
@@ -59,7 +57,6 @@ describe('BinanceSpotPublicStream', () => {
     jest.clearAllMocks();
     capturedOnMessage = undefined;
     capturedOnOpen = undefined;
-    capturedOnReconnectSuccess = undefined;
   });
 
   describe('subscribeAllTickers', () => {
@@ -208,13 +205,13 @@ describe('BinanceSpotPublicStream', () => {
   });
 
   describe('resubscribeAll', () => {
-    it('resubscribes all streams on reconnect', () => {
+    it('resubscribes all streams on reconnect via onOpen', async () => {
       const stream = new BinanceSpotPublicStream({ webSocketUrl: url, logger: mockLogger, onNotify: undefined, label: 'BinanceSpotPublicStream' });
       stream.subscribeAllTickers(jest.fn(), []);
       stream.subscribeKlines('BTCUSDT', '1m', jest.fn());
 
       mockWebSocket.sendToConnectedSocket.mockClear();
-      capturedOnReconnectSuccess!();
+      await capturedOnOpen!({});
 
       expect(mockWebSocket.sendToConnectedSocket).toHaveBeenCalledWith(
         expect.objectContaining({

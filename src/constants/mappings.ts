@@ -15,6 +15,7 @@ export const BYBIT_ORDER_STATUS: Record<string, string> = {
   New: 'open',
   PartiallyFilled: 'open',
   Untriggered: 'open',
+  Triggered: 'open',
   Filled: 'closed',
   Cancelled: 'canceled',
   PartiallyFilledCanceled: 'canceled',
@@ -85,6 +86,13 @@ export const BINANCE_TIME_IN_FORCE: Record<string, TimeInForceEnum> = {
   IOC: TimeInForceEnum.Ioc,
   FOK: TimeInForceEnum.Fok,
   GTX: TimeInForceEnum.PostOnly,
+};
+
+export const BINANCE_FUTURES_TIME_IN_FORCE_REVERSE: Record<TimeInForceEnum, string> = {
+  [TimeInForceEnum.Gtc]: 'GTC',
+  [TimeInForceEnum.Ioc]: 'IOC',
+  [TimeInForceEnum.Fok]: 'FOK',
+  [TimeInForceEnum.PostOnly]: 'GTX',
 };
 
 export const BINANCE_WORKING_TYPE: Record<string, string> = {

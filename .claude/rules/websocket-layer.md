@@ -72,13 +72,13 @@ Exchange-классы агрегируют через `getWebSocketConnectionInf
 - **Тикер стрим**: `!miniTicker@arr`
 - **Mark price**: не поддерживается — `subscribeMarkPrices` логирует предупреждение и не подписывается; `unsubscribeMarkPrices` — no-op
 - **Подписка**: динамическая через JSON: `{ method: 'SUBSCRIBE', params: [...], id }`
-- **Reconnect**: `onReconnectSuccess → resubscribeAll()` — переподписка всех стримов
+- **Reconnect**: переподписка через `onOpen → handleOpen → resubscribeAll()` (срабатывает на каждый connect, включая reconnect); `onReconnectSuccess` НЕ используется — иначе была бы двойная переподписка
 - **Heartbeat**: `{ method: 'PING' }` → ответ с `id` и `result: null`, интервал 30s
 - **Методы**: `resubscribeStream(symbol, interval)` — принудительная переподписка на конкретный стрим через SUBSCRIBE
 
 ## Bybit Public Stream
 
-- **URL**: `wss://stream.bybit.com/v5/public/linear` или `.../spot`
+- **URL**: `wss://stream.bybit.com/v5/public/linear` или `.../spot`. **Публичные стримы всегда на mainnet-хосте**, даже в demo-режиме (Bybit demo-хост `stream-demo.bybit.com` НЕ отдаёт публичные данные — только private)
 - **Multi-connection**: `connectionList: BybitConnection[]`, чанкинг при превышении лимита
 - **Лимит**: 200 topics на соединение (`MAX_TOPICS_PER_CONNECTION`), 10 topics на SUBSCRIBE сообщение (`MAX_TOPICS_PER_SUBSCRIBE`)
 - **Kline topic**: `kline.{bybitInterval}.{symbol}` (интервал конвертируется через `BYBIT_KLINE_INTERVAL`)
@@ -94,7 +94,7 @@ Exchange-классы агрегируют через `getWebSocketConnectionInf
 - **Deferred connection**: `queueMicrotask()` для батчинга подписок (через `scheduleConnect()`)
 - **onOpen**: при открытии соединения подписывает все topics этого соединения через `sendSubscribeInBatches()` с `context.send()`
 - **Reconnect**: `onReconnectSuccess → resubscribeConnection(index)` — переподписка topics конкретного соединения, `tradeAggregator.clearSymbol()` для trade-подписок
-- **Dynamic topics**: новые подписки добавляются в соединение с наименьшим количеством topics (через `addTopicToConnection`); если все полны — создаётся новое
+- **Dynamic topics**: новые подписки добавляются в соединение с наименьшим количеством topics (через `addTopicToConnection`); если все полны — создаётся новое. `addTopicToConnection` дедуплицирует: если топик уже есть в каком-либо соединении — no-op (общие топики `publicTrade.{symbol}` / kline не дублируются в `topicList`, иначе была бы утечка при cleanup и спам «already subscribed» на reconnect)
 - **Heartbeat**: `{ op: 'ping' }` → `{ op: 'pong' }`, интервал 20s
 - **subscriptionList отображение**: `Tickers`, `MarkPrices`, `Klines {symbol} {interval}`, `Orderbook {symbol} depth={depth}`, `Trades {symbol}` (для `publicTrade.*`)
 - **Методы**: `resubscribeStream(symbol, interval)` — находит соединение с соответствующим kline topic. Если WS соединения CONNECTED — light-resubscribe: отправляет `{ op: 'unsubscribe', args: [topic] }` + `{ op: 'subscribe', args: [topic] }` на уже открытый сокет (без пересоздания). Если сокет не CONNECTED или `sendToConnectedSocket` бросает — fallback на `recreateConnection` (полное пересоздание `ReliableWebSocket` с тем же `topicList`); дедуп recreate в окне 2000ms по `lastRecreateTimestamp` на `BybitConnection`; для топиков `publicTrade.*` перед recreate — `tradeAggregator.clearSymbol`
@@ -105,18 +105,18 @@ Exchange-классы агрегируют через `getWebSocketConnectionInf
 Агрегирует Bybit public trade данные в 1-секундные klines:
 - `setHandler(handler)` — устанавливает callback для эмита klines
 - `processTrade(tradeData)` — обрабатывает один трейд: первый трейд для символа пропускается (неполная секунда), далее агрегация OHLCV
-- `forceEmitPendingKlineList()` — принудительно эмитит все накопленные klines (вызывается при `close()`)
+- `forceEmitPendingKlineList()` — принудительно эмитит накопленные klines (вызывается при `close()`)
 - `clearSymbol(symbol)` — сбрасывает состояние символа (вызывается при reconnect)
 - Эмитит kline с `isClosed: true` при переходе на следующую секунду
-- Не эмитит kline с `volume = 0` (секунда без трейдов)
+- Не эмитит kline с `volume <= 0` — гард в `emitKline` (защищает и rollover, и `forceEmitPendingKlineList`: вырожденный placeholder с нулевым OHLC после first-trade-skip на close НЕ эмитится)
 
 ## Binance User Data Stream
 
-- **URL**: `wss://stream.binance.com:9443/ws/{listenKey}`
+- **URL**: `${baseWebSocketUrl}/{listenKey}`, где `baseWebSocketUrl` передаётся в конструкторе. Для **Binance Futures** — `wss://fstream.binance.com/private/ws` (prod) / `wss://fstream.binancefuture.com/ws` (demo). **Binance Spot UDS через listenKey удалён биржей 2026-02-20** → `BinanceSpot.connectUserDataStream` бросает ошибку о необходимости миграции на WS API; реально этим классом пользуется только Binance Futures
 - listenKey получается внешне (REST API), передаётся в конструкторе
 - Все сообщения передаются в `onMessage` хендлер без фильтрации
 - **listenKey refresh** НЕ управляется этим классом — ответственность вызывающего (каждые 30 мин)
-- `getConnectionInfo()` → `WebSocketConnectionInfo | null` — возвращает null если не подключён
+- `isConnected()` / `getConnectionInfo().isConnected` — через `webSocket.getStatus() === WebSocketStatus.CONNECTED`; `getConnectionInfo()` возвращает null если сокет не создан
 
 ## BaseTradeStream<T> (src/ws/BaseTradeStream.ts)
 
@@ -126,7 +126,7 @@ Exchange-классы агрегируют через `getWebSocketConnectionInf
 - `connect()` / `disconnect()` / `isConnected()` — управление жизненным циклом
 - `createOrder(orderParams)` → `Promise<Order>` — async request-response (single order)
 - `getConnectionInfo()` → `WebSocketConnectionInfo | null` — info о текущем соединении
-- `ensureConnected()` — lazy connection с dedup промисов
+- `ensureConnected()` — lazy connection с dedup промисов. Порядок гардов: сначала `if (connectPromise !== null) return connectPromise`, затем `if (webSocket !== null) return` — параллельный вызов в окне CONNECTING ждёт in-flight `connectPromise`, а не возвращается рано (иначе `sendRequest` падал бы `WebSocket is not connected`)
 - `sendRequest<TResult>(request, requestId, kind: PendingRequestKind): Promise<TResult>` — generic helper для всех request-response типов (single и batch). Timeout 30s, pending requests хранятся в `Map<reqId, PendingRequest>`.
 - `sendOrderRequest(request, requestId): Promise<Order>` — private wrapper над `sendRequest<Order>(..., PendingRequestKind.SingleOrder)` (обратная совместимость для single create)
 - `takePendingRequest(requestId)` — protected метод, возвращает и удаляет pending request из Map
@@ -221,13 +221,13 @@ function parseWebSocketMessage<T>(rawData: RawData): T
 
 ## Bybit Private Stream
 
-- **URL**: `wss://stream.bybit.com/v5/private`
+- **URL**: передаётся через `BybitPrivateStreamArgs.url` (обязательное поле) — `wss://stream.bybit.com/v5/private` (prod) или `wss://stream-demo.bybit.com/v5/private` (demo). `BybitBaseClient` выбирает по `isDemoMode` и прокидывает в стрим
 - Аутентификация на каждый `onOpen` через `authenticateBybitWebSocket()`
 - После успешной аутентификации автоматически подписывается на топики из `topicList` (если не пустой): `{ op: 'subscribe', args: topicList }`
 - `topicList?: string[]` — опциональный список топиков для подписки, передаётся через `BybitPrivateStreamArgs`
 - Фильтрует `message.op === 'auth'` — не передаёт в хендлер
 - **Heartbeat**: `{ op: 'ping' }`, интервал 20s
-- `getConnectionInfo()` → `WebSocketConnectionInfo | null` — возвращает null если не подключён
+- `isConnected()` / `getConnectionInfo().isConnected` — через `webSocket.getStatus() === WebSocketStatus.CONNECTED` (не «объект существует»); `getConnectionInfo()` возвращает null если сокет не создан
 
 ## Error Protection
 

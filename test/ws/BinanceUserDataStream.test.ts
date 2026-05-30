@@ -1,3 +1,4 @@
+import { WebSocketStatus } from '@solncebro/websocket-engine';
 import { BinanceUserDataStream } from '../../src/ws/BinanceUserDataStream';
 import { createMockLogger } from '../fixtures/mockLogger';
 
@@ -5,6 +6,7 @@ let capturedOnMessage: ((message: any) => void) | undefined;
 
 const mockWebSocket = {
   close: jest.fn(),
+  getStatus: jest.fn().mockReturnValue(WebSocketStatus.CONNECTED),
 };
 
 jest.mock('@solncebro/websocket-engine', () => {
@@ -127,6 +129,14 @@ describe('BinanceUserDataStream', () => {
       stream.connect();
 
       expect(stream.isConnected()).toBe(true);
+    });
+
+    it('returns false when the socket is not in CONNECTED status', () => {
+      const { stream } = createStream();
+      stream.connect();
+      mockWebSocket.getStatus.mockReturnValueOnce(WebSocketStatus.RECONNECTING);
+
+      expect(stream.isConnected()).toBe(false);
     });
   });
 });

@@ -7,6 +7,7 @@ export interface BybitPrivateMessage extends BybitBaseWebSocketMessage {
 
 export interface BybitPrivateStreamArgs {
   label: string;
+  url: string;
   apiKey: string;
   secret: string;
   logger: ExchangeLogger;

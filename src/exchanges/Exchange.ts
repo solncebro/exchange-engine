@@ -35,7 +35,7 @@ class Exchange {
   }
 
   async close(): Promise<void> {
-    await Promise.all([this.futures.close(), this.spot.close()]);
+    await Promise.allSettled([this.futures.close(), this.spot.close()]);
   }
 }
 

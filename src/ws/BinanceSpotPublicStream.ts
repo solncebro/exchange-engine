@@ -145,7 +145,6 @@ class BinanceSpotPublicStream {
       parseMessage: (rawData) => parseWebSocketMessage<BinanceSpotWebSocketEnvelope>(rawData),
       onMessage: (message) => this.handleMessage(message),
       onOpen: (context) => this.handleOpen(context),
-      onReconnectSuccess: () => this.resubscribeAll(),
       onNotify: this.onNotify,
       heartbeat: {
         buildPayload: () => ({ method: 'PING' }),

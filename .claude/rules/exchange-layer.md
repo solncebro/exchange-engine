@@ -162,7 +162,7 @@ Binance public streams создаются до `super()`, поэтому выз�
 Реализует `createOrderWebSocket()` через `BinanceTradeStream` с fallback на REST:
 1. Формирует params через `buildBinanceOrderParams()`: `{ symbol, side, type, quantity, price, timeInForce, ... }`
 2. Форматирует через `amountToPrecision()` + `priceToPrecision()`
-3. Для limit ордеров добавляет `timeInForce = GTC` если не указан
+3. Для limit-like ордеров маппит `timeInForce`: **futures** через `BINANCE_FUTURES_TIME_IN_FORCE_REVERSE` (`PostOnly → GTX`, дефолт `GTC`); **spot** post-only Limit → тип `LIMIT_MAKER` (без `timeInForce`), иначе значение enum как есть (`GTC`/`IOC`/`FOK`)
 4. Если `tradeStream.isConnected()` → отправляет через WebSocket
 5. Иначе fallback: `httpClient.createOrder()` → `normalizeBinanceOrder()`
 
@@ -176,8 +176,8 @@ Binance public streams создаются до `super()`, поэтому выз�
 
 Реализует `isTradeWebSocketConnected()` и `connectTradeWebSocket()` через `BinanceTradeStream`.
 
-Реализует `connectUserDataStream(handler)` — создаёт listenKey через REST, запускает `BinanceUserDataStream`, устанавливает keepalive-таймер (`setInterval` каждые 30 мин → `keepAliveListenKey`). Обрабатывает события:
-- `ORDER_TRADE_UPDATE` → `handler.onOrderUpdate` (нормализация через `BINANCE_ORDER_STATUS_MAP`)
+Реализует `connectUserDataStream(handler)` — создаёт listenKey через REST, запускает `BinanceUserDataStream`, устанавливает keepalive-таймер (`setInterval` каждые 30 мин → `keepAliveListenKey`). Защита от гонки: флаг `userDataStreamConnecting` + `try/finally` не дают создать второй стрим/таймер при параллельном вызове. **`BinanceSpot` переопределяет `connectUserDataStream` и бросает ошибку** (listenKey REST `/api/v3/userDataStream` удалён биржей 2026-02-20; нужна миграция на WS API). Обрабатывает события:
+- `ORDER_TRADE_UPDATE` → `handler.onOrderUpdate` (статус через канон `BINANCE_ORDER_STATUS` из mappings — НЕ локальная карта; `REJECTED → 'rejected'`, `EXPIRED → 'canceled'`)
 - `ACCOUNT_UPDATE` → `handler.onPositionUpdate` (из `event.a.P[]`)
 
 Реализует `disconnectUserDataStream()` — очищает keepalive-таймер, закрывает стрим, удаляет listenKey через `deleteListenKey`.
@@ -223,13 +223,15 @@ Binance public streams создаются до `super()`, поэтому выз�
 Реализует `createOrderWebSocket()` через `BybitTradeStream` с fallback на REST:
 1. Формирует params через `buildBybitOrderParams()`: `{ category, symbol, orderType, side, qty, ... }`
 2. `submitOrder(orderParams, args: CreateOrderWebSocketArgs)` — принимает аргументы как второй параметр
-3. Если `tradeStream !== null && tradeStream.isConnected()` → отправляет через WebSocket
+3. Если `tradeStream !== null && tradeStream.isConnected()` → отправляет через WebSocket; на WS-пути `Order.rateLimit` snapshot из ответа переносится на пересобранный Order (не теряется)
 4. Иначе fallback: `httpClient.createOrder()` → `buildBybitOrderFromCreateResponse()`
+
+`fetchKlines` для Bybit интервала без маппинга в `BYBIT_KLINE_INTERVAL` (например `1s`) бросает ошибку — Bybit REST не отдаёт 1s-свечи (только WS-агрегатор).
 
 Реализует `isTradeWebSocketConnected()` и `connectTradeWebSocket()` через `BybitTradeStream`.
 
-Реализует `connectUserDataStream(handler)` — создаёт `BybitPrivateStream` с `topicList: ['order', 'position']`. Обрабатывает события:
-- `topic === 'order'` → `handler.onOrderUpdate` (нормализация через `BYBIT_ORDER_STATUS_MAP`)
+Реализует `connectUserDataStream(handler)` — создаёт `BybitPrivateStream` с `topicList: ['order', 'position']` и demo-aware `url` (`privateWebSocketUrl`, выбран по `isDemoMode`). Обрабатывает события:
+- `topic === 'order'` → `handler.onOrderUpdate` (статус через канон `BYBIT_ORDER_STATUS` из mappings — НЕ локальная карта; `Rejected → 'rejected'`, `Deactivated`/`PartiallyFilledCanceled → 'canceled'`, `Triggered → 'open'`)
 - `topic === 'position'` → `handler.onPositionUpdate`
 
 Реализует `disconnectUserDataStream()` — закрывает `privateStream`.
@@ -237,7 +239,7 @@ Binance public streams создаются до `super()`, поэтому выз�
 Реализует `isUserDataStreamConnected()` — `privateStream !== null && privateStream.isConnected()`.
 
 Реализует методы работы с ордерами и рыночными данными (14 методов):
-- `cancelOrder(symbol, orderId)` → `httpClient.cancelOrder()` → возвращает минимальный Order со status='canceled'
+- `cancelOrder(symbol, orderId)` → `httpClient.cancelOrder()` → затем `getOrder(symbol, orderId)` возвращает реальный нормализованный Order (а не фабрикованный stub с `side: Buy`)
 - `getOrder(symbol, orderId)` → сначала `httpClient.getOpenOrders()` (realtime), fallback на `httpClient.getOrderHistory()` → `normalizeBybitOrder()`
 - `fetchOpenOrders(symbol?)` → `httpClient.getOpenOrders()` → `map(normalizeBybitOrder)`
 - `fetchOrderHistory(symbol, options?)` → `httpClient.getOrderHistory()` → `map(normalizeBybitOrder)`
@@ -266,7 +268,7 @@ interface OrderRateLimit {
 ```
 
 - **Binance Futures/Spot** (`BinanceBaseClient.getOrderRateLimit`): делает `httpClient.fetchExchangeInfo()` → `parseBinanceOrderRateLimit(raw)` (`src/normalizers/binanceNormalizer.ts:349`). Функция фильтрует `raw.rateLimits[]` по `rateLimitType === 'ORDERS'`, конвертирует все интервалы в RPS (`limit / (intervalNum * secondsInInterval)`), возвращает наиболее строгий лимит через `Math.min(...)` с `source: 'binance-exchange-info'`. Если `rateLimits` отсутствует/пуст — `{ writeRequestsPerSecond: BINANCE_ORDER_RATE_LIMIT_FALLBACK_RPS, source: 'fallback' }` (константа = 15 RPS, `src/normalizers/binanceNormalizer.ts:331`). Поддерживаемые интервалы: `SECOND` / `MINUTE` / `HOUR` / `DAY`.
-- **Bybit Linear/Spot** (`BybitBaseClient.getOrderRateLimit`): возвращает hardcoded `{ writeRequestsPerSecond: 20, source: 'bybit-documented' }`. Bybit не отдаёт rate-limits через GET endpoint — только через headers на actual order calls — поэтому значение нельзя обнаружить без выполнения order-операции. Берётся как документированная константа (источник: https://bybit-exchange.github.io/docs/v5/rate-limit для `/v5/order/create`, `/v5/order/cancel`, `/v5/order/create-batch`, `/v5/order/cancel-batch`).
+- **Bybit Linear/Spot** (`BybitBaseClient.getOrderRateLimit`): возвращает `{ writeRequestsPerSecond, source: 'bybit-documented' }`, где `writeRequestsPerSecond` зависит от категории — **spot = 20, linear = 10**. Bybit не отдаёт rate-limits через GET endpoint (только через headers на actual order calls), поэтому значение — документированная константа. Источник: https://bybit-exchange.github.io/docs/v5/rate-limit. Точные per-UID лимиты (standard account): для spot `/v5/order/create`, `/cancel`, `/cancel-all`, `/create-batch`, `/amend-batch`, `/cancel-batch` = 20/s (а `/amend` = 10/s); для linear все order-эндпоинты = 10/s (inverse/option ещё строже). Берётся create-лимит категории.
 - **Default**: в `BaseExchangeClient.getOrderRateLimit` — throw `Not supported for ${marketLabel} market`, но переопределяется во всех четырёх реальных классах.
 
 Raw-тип: `BinanceRateLimitRaw { rateLimitType, interval, intervalNum, limit }` в `binanceNormalizer.ts`. `BinanceExchangeInfoRaw` имеет опциональное `rateLimits?: BinanceRateLimitRaw[]`.

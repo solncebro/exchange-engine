@@ -11,6 +11,7 @@ import {
   OrderSideEnum,
   OrderTypeEnum,
   PositionSideEnum,
+  TimeInForceEnum,
   TriggerByEnum,
   WorkingTypeEnum,
 } from '../../src/types/common';
@@ -403,5 +404,51 @@ describe('buildBybitOrderParams — spot', () => {
     expect(params.price).toBe('89');
     expect(params.triggerPrice).toBe('90');
     expect(params.orderFilter).toBe('StopOrder');
+  });
+});
+
+describe('buildBinanceOrderParams — timeInForce mapping', () => {
+  it('futures PostOnly Limit maps timeInForce to GTX (not the raw enum value)', () => {
+    const client = createBinanceFutures();
+    const params = callBinanceBuild(client, {
+      symbol: 'BTCUSDT',
+      side: OrderSideEnum.Buy,
+      amount: 1,
+      price: 100,
+      type: OrderTypeEnum.Limit,
+      timeInForce: TimeInForceEnum.PostOnly,
+    });
+
+    expect(params.timeInForce).toBe('GTX');
+    expect(params.type).toBe('LIMIT');
+  });
+
+  it('futures Ioc Limit maps timeInForce to IOC', () => {
+    const client = createBinanceFutures();
+    const params = callBinanceBuild(client, {
+      symbol: 'BTCUSDT',
+      side: OrderSideEnum.Buy,
+      amount: 1,
+      price: 100,
+      type: OrderTypeEnum.Limit,
+      timeInForce: TimeInForceEnum.Ioc,
+    });
+
+    expect(params.timeInForce).toBe('IOC');
+  });
+
+  it('spot PostOnly Limit becomes LIMIT_MAKER with no timeInForce', () => {
+    const client = createBinanceSpot();
+    const params = callBinanceBuild(client, {
+      symbol: 'BTCUSDT',
+      side: OrderSideEnum.Buy,
+      amount: 1,
+      price: 100,
+      type: OrderTypeEnum.Limit,
+      timeInForce: TimeInForceEnum.PostOnly,
+    });
+
+    expect(params.type).toBe('LIMIT_MAKER');
+    expect(params.timeInForce).toBeUndefined();
   });
 });

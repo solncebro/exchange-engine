@@ -30,6 +30,7 @@ import {
   BINANCE_FUTURES_TRADE_WEBSOCKET_URL,
   BINANCE_DEMO_FUTURES_TRADE_WEBSOCKET_URL,
   BINANCE_FUTURES_WEBSOCKET_STREAM_URL,
+  BINANCE_DEMO_FUTURES_WEBSOCKET_STREAM_URL,
   BINANCE_FUTURES_WEBSOCKET_MARKET_URL,
   BINANCE_DEMO_FUTURES_WEBSOCKET_MARKET_URL,
   BINANCE_FUTURES_CANCEL_BATCH_CHUNK_SIZE,
@@ -79,6 +80,10 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
       ? BINANCE_DEMO_FUTURES_TRADE_WEBSOCKET_URL
       : BINANCE_FUTURES_TRADE_WEBSOCKET_URL;
 
+    const userDataWebSocketUrl = isDemoMode
+      ? BINANCE_DEMO_FUTURES_WEBSOCKET_STREAM_URL
+      : BINANCE_FUTURES_WEBSOCKET_STREAM_URL;
+
     const httpClient = new BinanceFuturesHttpClient({
       baseUrl,
       apiKey: args.config.apiKey,
@@ -100,7 +105,7 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
       publicStream,
       tradeWebSocketUrl,
       tradeStreamLabel: 'Binance Futures Order WebSocket',
-      userDataWebSocketUrl: BINANCE_FUTURES_WEBSOCKET_STREAM_URL,
+      userDataWebSocketUrl,
     });
 
     publicStream.setTradeSymbols(this.tradeSymbols);

@@ -1,4 +1,4 @@
-import { ReliableWebSocket } from '@solncebro/websocket-engine';
+import { ReliableWebSocket, WebSocketStatus } from '@solncebro/websocket-engine';
 
 import type { ExchangeLogger, WebSocketConnectionInfo } from '../types/common';
 import { WebSocketConnectionTypeEnum } from '../types/common';
@@ -65,14 +65,14 @@ class BinanceUserDataStream {
     return {
       label: this.label,
       url: this.url,
-      isConnected: true,
+      isConnected: this.isConnected(),
       type: WebSocketConnectionTypeEnum.UserData,
       subscriptionList: [],
     };
   }
 
   isConnected(): boolean {
-    return this.webSocket !== null;
+    return this.webSocket !== null && this.webSocket.getStatus() === WebSocketStatus.CONNECTED;
   }
 }
 

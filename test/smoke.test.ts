@@ -252,6 +252,7 @@ const _ticker: Ticker = {
 const _position: Position = {
   symbol:           'BTCUSDT',
   side:             PositionSideEnum.Long,
+  direction:        'long',
   contracts:        0,
   entryPrice:       0,
   markPrice:        0,

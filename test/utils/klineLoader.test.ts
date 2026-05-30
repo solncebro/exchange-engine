@@ -65,13 +65,22 @@ describe('loadKlinesInChunks', () => {
     expect(logger.info).toHaveBeenCalledWith('Loaded klines for 5/5 symbols');
   });
 
-  it('propagates fetchKlines rejection', async () => {
-    const fetchKlines = jest.fn().mockRejectedValue(new Error('Network error'));
+  it('skips a failing symbol and keeps the successful ones in the same chunk', async () => {
+    const fetchKlines = jest.fn().mockImplementation((symbol: string) => {
+      if (symbol === 'B') {
+        return Promise.reject(new Error('Network error'));
+      }
+
+      return Promise.resolve([createMockKline(symbol)]);
+    });
     const logger = createMockLogger();
 
-    await expect(
-      loadKlinesInChunks({ fetchKlines, symbolList: ['BTCUSDT'], logger }),
-    ).rejects.toThrow('Network error');
+    const result = await loadKlinesInChunks({ fetchKlines, symbolList: ['A', 'B', 'C'], logger });
+
+    expect(result.has('A')).toBe(true);
+    expect(result.has('C')).toBe(true);
+    expect(result.has('B')).toBe(false);
+    expect(logger.warn).toHaveBeenCalledWith('Failed to load klines for B: Network error');
   });
 
   it('preserves order of results in Map', async () => {

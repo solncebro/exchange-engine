@@ -119,6 +119,28 @@ describe('BaseHttpClient', () => {
       jest.useRealTimers();
     });
 
+    it('falls back to exponential backoff when retry-after is an HTTP-date (not delta-seconds)', async () => {
+      jest.useFakeTimers();
+
+      const error429 = createAxiosError(429, { 'retry-after': 'Wed, 21 Oct 2025 07:28:00 GMT' });
+      mockInstance.get
+        .mockRejectedValueOnce(error429)
+        .mockResolvedValueOnce({ data: 'ok' });
+
+      const promise = client.testGet('/test');
+
+      await jest.advanceTimersByTimeAsync(999);
+      expect(mockInstance.get).toHaveBeenCalledTimes(1);
+
+      await jest.advanceTimersByTimeAsync(1);
+      const result = await promise;
+
+      expect(result).toBe('ok');
+      expect(mockInstance.get).toHaveBeenCalledTimes(2);
+
+      jest.useRealTimers();
+    });
+
     it('retries on 500 with exponential backoff', async () => {
       jest.useFakeTimers();
 

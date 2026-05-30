@@ -472,6 +472,10 @@ class BybitPublicStream {
   }
 
   private addTopicToConnection(topic: string): void {
+    if (this.connectionList.some((connection) => connection.topicList.includes(topic))) {
+      return;
+    }
+
     let targetConnection = this.connectionList.find(
       (connection) => connection.topicList.length < MAX_TOPICS_PER_CONNECTION,
     );
