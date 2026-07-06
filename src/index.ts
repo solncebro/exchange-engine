@@ -45,6 +45,8 @@ export {
 export type {
   KlineInterval,
   ExchangeConfig,
+  BybitPublicTopicType,
+  PublicStreamConnectionPacking,
   ExchangeLogger,
   Ticker,
   TickerBySymbol,

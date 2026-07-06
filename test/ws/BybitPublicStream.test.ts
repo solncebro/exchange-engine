@@ -207,7 +207,7 @@ describe('BybitPublicStream', () => {
       expect(mockLogger.info).not.toHaveBeenCalled();
     });
 
-    it('logs subscription error', async () => {
+    it('logs subscription error as a single line including retMsg', async () => {
       const stream = new BybitPublicStream({ url: 'wss://stream.bybit.com/v5/public/linear', logger: mockLogger, onNotify: undefined, label: 'test' });
       stream.subscribeAllTickers(jest.fn(), ['BTCUSDT']);
 
@@ -216,8 +216,22 @@ describe('BybitPublicStream', () => {
       capturedOnMessage!({ op: 'subscribe', success: false, ret_msg: 'invalid' });
 
       expect(mockLogger.error).toHaveBeenCalledWith(
-        expect.objectContaining({ subscriptionMessage: expect.any(Object) }),
-        'Bybit subscription error',
+        expect.stringContaining('subscribe error (invalid'),
+      );
+    });
+
+    it('downgrades benign "already subscribed" to debug (not error)', async () => {
+      const stream = new BybitPublicStream({ url: 'wss://stream.bybit.com/v5/public/linear', logger: mockLogger, onNotify: undefined, label: 'test' });
+      stream.subscribeAllTickers(jest.fn(), ['BTCUSDT']);
+
+      await Promise.resolve();
+      mockLogger.error.mockClear();
+
+      capturedOnMessage!({ op: 'subscribe', success: false, ret_msg: 'error:already subscribed,topic:orderbook.200.BTCUSDT' });
+
+      expect(mockLogger.error).not.toHaveBeenCalled();
+      expect(mockLogger.debug).toHaveBeenCalledWith(
+        expect.stringContaining('already subscribed'),
       );
     });
 
@@ -335,6 +349,92 @@ describe('BybitPublicStream', () => {
       stream.resubscribeStream('BTCUSDT', '5m');
 
       expect(mockWebSocket.close).toHaveBeenCalled();
+    });
+  });
+
+  describe('resubscribeOrderbook / resubscribePublicTrades / resubscribeMarkPrices (light path)', () => {
+    it('resubscribeOrderbook sends unsubscribe + subscribe for the orderbook topic', async () => {
+      mockWebSocket.getStatus.mockReturnValue('connected');
+
+      const stream = new BybitPublicStream({ url: 'wss://stream.bybit.com/v5/public/linear', logger: mockLogger, onNotify: undefined, label: 'test' });
+      stream.subscribeOrderbook('BTCUSDT', 200, jest.fn());
+
+      await Promise.resolve();
+      await Promise.resolve();
+
+      mockWebSocket.sendToConnectedSocket.mockClear();
+      mockWebSocket.close.mockClear();
+
+      stream.resubscribeOrderbook('BTCUSDT', 200);
+
+      expect(mockWebSocket.sendToConnectedSocket).toHaveBeenNthCalledWith(1, {
+        op: 'unsubscribe',
+        args: ['orderbook.200.BTCUSDT'],
+      });
+      expect(mockWebSocket.sendToConnectedSocket).toHaveBeenNthCalledWith(2, {
+        op: 'subscribe',
+        args: ['orderbook.200.BTCUSDT'],
+      });
+      expect(mockWebSocket.close).not.toHaveBeenCalled();
+    });
+
+    it('resubscribePublicTrades sends unsubscribe + subscribe for the publicTrade topic', async () => {
+      mockWebSocket.getStatus.mockReturnValue('connected');
+
+      const stream = new BybitPublicStream({ url: 'wss://stream.bybit.com/v5/public/linear', logger: mockLogger, onNotify: undefined, label: 'test' });
+      stream.subscribePublicTrades('BTCUSDT', jest.fn());
+
+      await Promise.resolve();
+      await Promise.resolve();
+
+      mockWebSocket.sendToConnectedSocket.mockClear();
+      mockWebSocket.close.mockClear();
+
+      stream.resubscribePublicTrades('BTCUSDT');
+
+      expect(mockWebSocket.sendToConnectedSocket).toHaveBeenNthCalledWith(1, {
+        op: 'unsubscribe',
+        args: ['publicTrade.BTCUSDT'],
+      });
+      expect(mockWebSocket.sendToConnectedSocket).toHaveBeenNthCalledWith(2, {
+        op: 'subscribe',
+        args: ['publicTrade.BTCUSDT'],
+      });
+      expect(mockWebSocket.close).not.toHaveBeenCalled();
+    });
+
+    it('resubscribeMarkPrices batch-resubscribes all subscribed ticker topics', async () => {
+      mockWebSocket.getStatus.mockReturnValue('connected');
+
+      const stream = new BybitPublicStream({ url: 'wss://stream.bybit.com/v5/public/linear', logger: mockLogger, onNotify: undefined, label: 'test' });
+      stream.subscribeMarkPrices(jest.fn(), ['BTCUSDT', 'ETHUSDT']);
+
+      await Promise.resolve();
+      await Promise.resolve();
+
+      mockWebSocket.sendToConnectedSocket.mockClear();
+      mockWebSocket.close.mockClear();
+
+      stream.resubscribeMarkPrices();
+
+      expect(mockWebSocket.sendToConnectedSocket).toHaveBeenNthCalledWith(1, {
+        op: 'unsubscribe',
+        args: ['tickers.BTCUSDT', 'tickers.ETHUSDT'],
+      });
+      expect(mockWebSocket.sendToConnectedSocket).toHaveBeenNthCalledWith(2, {
+        op: 'subscribe',
+        args: ['tickers.BTCUSDT', 'tickers.ETHUSDT'],
+      });
+      expect(mockWebSocket.close).not.toHaveBeenCalled();
+    });
+
+    it('resubscribeMarkPrices is a no-op when no ticker symbols are subscribed', () => {
+      const stream = new BybitPublicStream({ url: 'wss://stream.bybit.com/v5/public/linear', logger: mockLogger, onNotify: undefined, label: 'test' });
+
+      mockWebSocket.sendToConnectedSocket.mockClear();
+      stream.resubscribeMarkPrices();
+
+      expect(mockWebSocket.sendToConnectedSocket).not.toHaveBeenCalled();
     });
   });
 
@@ -595,7 +695,9 @@ describe('BybitPublicStream', () => {
       expect(update.bidList).toEqual([['65000.00', '1.5']]);
       expect(update.askList).toEqual([['65001.00', '0.8']]);
       expect(update.updateId).toBe(1);
-      expect(update.eventTimestamp).toBe(1700000000000);
+      // eventTimestamp comes from the message ENVELOPE ts (1700000000005), which takes
+      // precedence over data.ts — real Bybit V5 orderbook frames carry ts only in the envelope.
+      expect(update.eventTimestamp).toBe(1700000000005);
       expect(typeof update.receivedTimestamp).toBe('number');
     });
 
@@ -726,6 +828,114 @@ describe('BybitPublicStream', () => {
 
       // @ts-expect-error — private access for test
       expect(stream.activeSubscriptionSet.has('publicTrade.BTCUSDT')).toBe(false);
+    });
+  });
+
+  describe('connection packing (separateByTopicType)', () => {
+    const typePrefixSet = (subscriptionList: string[]): Set<string> =>
+      new Set(subscriptionList.map((entry) => entry.split(' ')[0]));
+
+    it('packs each connection with a single topic type — never mixing', async () => {
+      const stream = new BybitPublicStream({
+        url: 'wss://stream.bybit.com/v5/public/linear',
+        logger: mockLogger,
+        onNotify: undefined,
+        label: 'test',
+        connectionPacking: {
+          separateByTopicType: true,
+          maxTopicsPerConnectionByType: { orderbook: 1 },
+        },
+      });
+
+      stream.subscribeMarkPrices(jest.fn(), ['BTCUSDT', 'ETHUSDT']);
+      stream.subscribeKlines('BTCUSDT', '1m', jest.fn());
+      stream.subscribeOrderbook('BTCUSDT', 200, jest.fn());
+      stream.subscribeOrderbook('ETHUSDT', 200, jest.fn());
+      stream.subscribePublicTrades('BTCUSDT', jest.fn());
+
+      await Promise.resolve();
+      await Promise.resolve();
+
+      const infoList = stream.getConnectionInfoList();
+
+      for (const info of infoList) {
+        expect(typePrefixSet(info.subscriptionList).size).toBe(1);
+      }
+
+      const orderbookConnectionList = infoList.filter((info) =>
+        info.subscriptionList.every((entry) => entry.startsWith('Orderbook')),
+      );
+      expect(orderbookConnectionList).toHaveLength(2);
+      expect(orderbookConnectionList.every((info) => info.subscriptionList.length === 1)).toBe(true);
+    });
+
+    it('labels carry the topic type and a stable #N (single source via getConnectionInfoList)', async () => {
+      const stream = new BybitPublicStream({
+        url: 'wss://stream.bybit.com/v5/public/linear',
+        logger: mockLogger,
+        onNotify: undefined,
+        label: 'Bybit Linear Public WebSocket',
+        connectionPacking: { separateByTopicType: true },
+      });
+
+      stream.subscribeOrderbook('BTCUSDT', 200, jest.fn());
+
+      await Promise.resolve();
+      await Promise.resolve();
+
+      const [info] = stream.getConnectionInfoList();
+      expect(info.label).toBe('Bybit Linear Public WebSocket orderbook #1');
+      // shortLabel is the context-free tail of the same label (for grouped UI listings).
+      expect(info.shortLabel).toBe('orderbook #1');
+    });
+
+    it('legacy mode (no packing config) keeps the flat mixed packing and a numbered label', async () => {
+      const stream = new BybitPublicStream({
+        url: 'wss://stream.bybit.com/v5/public/linear',
+        logger: mockLogger,
+        onNotify: undefined,
+        label: 'test',
+      });
+
+      stream.subscribeMarkPrices(jest.fn(), ['BTCUSDT']);
+      stream.subscribeOrderbook('BTCUSDT', 200, jest.fn());
+
+      await Promise.resolve();
+      await Promise.resolve();
+
+      const infoList = stream.getConnectionInfoList();
+      expect(infoList).toHaveLength(1);
+      expect(typePrefixSet(infoList[0].subscriptionList).size).toBe(2);
+      expect(infoList[0].label).toBe('test #1');
+      expect(infoList[0].shortLabel).toBe('#1');
+    });
+
+    it('post-connect subscription joins its own type pool, never back-filling another', async () => {
+      const stream = new BybitPublicStream({
+        url: 'wss://stream.bybit.com/v5/public/linear',
+        logger: mockLogger,
+        onNotify: undefined,
+        label: 'test',
+        connectionPacking: { separateByTopicType: true },
+      });
+
+      stream.subscribeOrderbook('BTCUSDT', 200, jest.fn());
+
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // Added AFTER connections exist → must NOT join the orderbook connection.
+      stream.subscribeKlines('ETHUSDT', '1m', jest.fn());
+
+      await Promise.resolve();
+
+      const infoList = stream.getConnectionInfoList();
+
+      for (const info of infoList) {
+        expect(typePrefixSet(info.subscriptionList).size).toBe(1);
+      }
+      expect(infoList.some((info) => info.subscriptionList.every((entry) => entry.startsWith('Orderbook')))).toBe(true);
+      expect(infoList.some((info) => info.subscriptionList.every((entry) => entry.startsWith('Klines')))).toBe(true);
     });
   });
 });

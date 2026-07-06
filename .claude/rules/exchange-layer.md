@@ -81,6 +81,9 @@ Precision:
   subscribeKlines(args): void
   unsubscribeKlines(args): void
   resubscribeKlines(args): void
+  resubscribeOrderbook(args: ResubscribeOrderbookArgs): void
+  resubscribePublicTrades(args: ResubscribePublicTradesArgs): void
+  resubscribeMarkPrices(): void
   subscribeMarkPrices(handler: MarkPriceHandler): void
   unsubscribeMarkPrices(handler: MarkPriceHandler): void
   subscribeOrderbook(args: SubscribeOrderbookArgs): void
@@ -107,6 +110,7 @@ WebSocket Registry:
 - `watchTickers()` — подписка через `getPublicStream().subscribeAllTickers()` + yield `fetchTickers()`
 - `subscribeKlines()` / `unsubscribeKlines()` — делегирует в publicStream
 - `resubscribeKlines()` — принудительная переподписка на стрим (вызывает `publicStream.resubscribeStream()` если поддерживается)
+- `resubscribeOrderbook(args)` / `resubscribePublicTrades(args)` / `resubscribeMarkPrices()` — принудительная light-переподписка (unsubscribe+subscribe на живом сокете, без реконнекта; recreate-fallback при disconnect) соответствующих топиков; делегируют в `publicStream.resubscribe*` если реализованы (Bybit; для mark-price — батчево по всем `tickers.{symbol}`, connection-granular). Используются `StreamSubscriptionWatchdog` (trade-engine) для recovery при тихом устаревании потока без разрыва сокета
 - `subscribeMarkPrices()` / `unsubscribeMarkPrices()` — делегирует в `getPublicStream()`, прокидывая `Array.from(this.tradeSymbols.keys())` как `symbolList` (Binance Futures — агрегатный `!markPrice@arr@1s`, symbolList игнорируется; Bybit — per-symbol `tickers.{symbol}` по каждому символу из symbolList, агрегатного топика нет; Binance Spot — предупреждение в стриме, без подписки)
 - `subscribeOrderbook()` / `subscribePublicTrades()` — делегирует в `getPublicStream()`, если метод реализован (Bybit). Если `PublicStreamLike.subscribeOrderbook`/`subscribePublicTrades` равен `undefined` (Binance) — `subscribe*` бросает `Not supported for ${marketLabel} market`, `unsubscribe*` — no-op
 - `awaitWebSocketConnectionsReady()` — `publicStream.awaitConnectionsReady?.() ?? Promise.resolve()` (Binance Futures public ждёт SUBSCRIBE-батчи; остальные стримы без метода — немедленный resolve)

@@ -687,14 +687,23 @@ export function normalizeBybitOrderBookUpdate(
   symbol: string,
   updateType: OrderBookUpdateType,
   receivedTimestamp: number,
+  envelopeTimestamp?: number,
 ): OrderBookUpdate {
+  // Bybit V5 orderbook frames carry the exchange event timestamp in the message ENVELOPE
+  // (`ts`), NOT inside `data` — so `raw.ts` (the data object) is routinely undefined. Prefer
+  // the envelope timestamp; fall back to `raw.ts` only if the envelope value is absent.
+  const eventTimestamp =
+    typeof envelopeTimestamp === 'number' && Number.isFinite(envelopeTimestamp)
+      ? envelopeTimestamp
+      : raw.ts;
+
   return {
     symbol,
     updateType,
     bidList: toOrderBookRawLevelList(raw.b),
     askList: toOrderBookRawLevelList(raw.a),
     updateId: raw.u,
-    eventTimestamp: raw.ts,
+    eventTimestamp,
     receivedTimestamp,
   };
 }

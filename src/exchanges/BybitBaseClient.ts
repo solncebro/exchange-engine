@@ -91,6 +91,7 @@ abstract class BybitBaseClient extends BaseExchangeClient {
       logger: args.exchangeArgs.logger,
       onNotify: this.onNotify,
       label: args.publicStreamLabel,
+      connectionPacking: args.exchangeArgs.config.publicStreamConnectionPacking,
     });
 
     if (isDemoMode) {
@@ -568,6 +569,8 @@ abstract class BybitBaseClient extends BaseExchangeClient {
           amount: Number(orderData.qty),
           filledAmount: Number(orderData.cumExecQty),
           timestamp: Number(orderData.updatedTime),
+          cancelType: (orderData.cancelType as string) || undefined,
+          rejectReason: (orderData.rejectReason as string) || undefined,
         };
 
         handler.onOrderUpdate(orderUpdate);

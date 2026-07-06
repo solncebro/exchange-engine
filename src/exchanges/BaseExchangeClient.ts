@@ -11,6 +11,8 @@ import type {
   OrderRateLimit,
   SubscribeKlinesArgs,
   ResubscribeKlinesArgs,
+  ResubscribeOrderbookArgs,
+  ResubscribePublicTradesArgs,
   SubscribeOrderbookArgs,
   SubscribePublicTradesArgs,
 } from '../types/exchange';
@@ -151,6 +153,18 @@ abstract class BaseExchangeClient implements ExchangeClient {
 
   resubscribeKlines(args: ResubscribeKlinesArgs): void {
     this.getPublicStream().resubscribeStream?.(args.symbol, args.interval);
+  }
+
+  resubscribeOrderbook(args: ResubscribeOrderbookArgs): void {
+    this.getPublicStream().resubscribeOrderbook?.(args.symbol, args.depth);
+  }
+
+  resubscribePublicTrades(args: ResubscribePublicTradesArgs): void {
+    this.getPublicStream().resubscribePublicTrades?.(args.symbol);
+  }
+
+  resubscribeMarkPrices(): void {
+    this.getPublicStream().resubscribeMarkPrices?.();
   }
 
   awaitWebSocketConnectionsReady(): Promise<void> {

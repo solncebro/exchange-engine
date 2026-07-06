@@ -13,6 +13,9 @@ export interface PublicStreamLike {
   subscribePublicTrades?(symbol: string, handler: PublicTradeHandler): void;
   unsubscribePublicTrades?(symbol: string, handler: PublicTradeHandler): void;
   resubscribeStream?(symbol: string, interval: string): void;
+  resubscribeOrderbook?(symbol: string, depth: number): void;
+  resubscribePublicTrades?(symbol: string): void;
+  resubscribeMarkPrices?(): void;
   getConnectionInfoList(): WebSocketConnectionInfo[];
   awaitConnectionsReady?(): Promise<void>;
   close(): void;

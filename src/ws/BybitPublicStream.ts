@@ -1,6 +1,7 @@
 import { ReliableWebSocket, WebSocketStatus } from '@solncebro/websocket-engine';
+import type { WebSocketCloseContext } from '@solncebro/websocket-engine';
 
-import type { ExchangeLogger, KlineInterval, MarkPriceHandler, MarkPriceUpdate, OrderBookHandler, OrderBookUpdateType, PublicTradeHandler, TickerBySymbol, WebSocketConnectionInfo } from '../types/common';
+import type { BybitPublicTopicType, ExchangeLogger, KlineInterval, MarkPriceHandler, MarkPriceUpdate, OrderBookHandler, OrderBookUpdateType, PublicTradeHandler, TickerBySymbol, WebSocketConnectionInfo } from '../types/common';
 import { WebSocketConnectionTypeEnum } from '../types/common';
 import type { KlineHandler } from '../types/exchange';
 import { normalizeBybitKlineWebSocketMessage, normalizeBybitOrderBookUpdate, normalizeBybitPublicTradeFromStream, normalizeBybitTickers } from '../normalizers/bybitNormalizer';
@@ -14,6 +15,35 @@ import { parseWebSocketMessage } from './parseWebSocketMessage';
 const MAX_TOPICS_PER_CONNECTION = 200;
 const MAX_TOPICS_PER_SUBSCRIBE = 10;
 const RECREATE_DEDUP_WINDOW_MS = 2000;
+
+// Human-readable suffix used in the connection label when topics are separated by
+// type — matches the Diagnostic composition wording (tickers/klines/orderbook/trades).
+const TOPIC_TYPE_LABEL: Record<BybitPublicTopicType, string> = {
+  tickers: 'tickers',
+  kline: 'klines',
+  orderbook: 'orderbook',
+  publicTrade: 'trades',
+};
+
+// Deterministic order in which per-type connection pools are created — keeps the
+// global connection numbering stable across restarts.
+const TOPIC_TYPE_ORDER: BybitPublicTopicType[] = ['tickers', 'kline', 'orderbook', 'publicTrade'];
+
+function classifyTopicType(topic: string): BybitPublicTopicType {
+  if (topic.startsWith('kline.')) {
+    return 'kline';
+  }
+
+  if (topic.startsWith('orderbook.')) {
+    return 'orderbook';
+  }
+
+  if (topic.startsWith('publicTrade.')) {
+    return 'publicTrade';
+  }
+
+  return 'tickers';
+}
 
 function resolveUnifiedInterval(bybitInterval: string): KlineInterval {
   for (const [unified, bybit] of Object.entries(BYBIT_KLINE_INTERVAL)) {
@@ -41,12 +71,67 @@ class BybitPublicStream {
   private readonly tradeSubscribedSymbolSet: Set<string> = new Set();
   private readonly tickerSubscribedSymbolSet: Set<string> = new Set();
   private isConnectScheduled = false;
+  private readonly separateByTopicType: boolean;
+  private readonly maxTopicsPerConnection: number;
+  private readonly maxTopicsByType: Partial<Record<BybitPublicTopicType, number>>;
 
   constructor(args: BybitPublicStreamArgs) {
     this.url = args.url;
     this.logger = args.logger;
     this.onNotify = args.onNotify;
     this.label = args.label;
+
+    const packing = args.connectionPacking;
+    this.separateByTopicType = packing?.separateByTopicType === true;
+    this.maxTopicsPerConnection = packing?.maxTopicsPerConnection ?? MAX_TOPICS_PER_CONNECTION;
+    this.maxTopicsByType = packing?.maxTopicsPerConnectionByType ?? {};
+  }
+
+  private maxTopicsForType(topicType: BybitPublicTopicType): number {
+    return this.maxTopicsByType[topicType] ?? this.maxTopicsPerConnection;
+  }
+
+  // Connection identity, single source of truth. Always includes a stable `#N`
+  // (N = position in connectionList); when topics are type-separated the label also
+  // names the type, so the SAME string surfaces in logs, watchdog alerts and the
+  // Diagnostic report — e.g. `Bybit Linear Public WebSocket orderbook #11`.
+  private buildConnectionLabel(index: number, topicType: BybitPublicTopicType | undefined): string {
+    return `${this.label} ${this.buildConnectionShortLabel(index, topicType)}`;
+  }
+
+  // Compact identifier without the repeated stream prefix — `${type} #N` when topics
+  // are type-separated, otherwise just `#N`. Used by grouped UI listings (Diagnostic)
+  // where the surrounding header already names the exchange/market/stream.
+  private buildConnectionShortLabel(index: number, topicType: BybitPublicTopicType | undefined): string {
+    const typePart = this.separateByTopicType && topicType !== undefined
+      ? `${TOPIC_TYPE_LABEL[topicType]} `
+      : '';
+
+    return `${typePart}#${index + 1}`;
+  }
+
+  private groupTopicsByType(topicList: string[]): Map<BybitPublicTopicType, string[]> {
+    const topicListByType = new Map<BybitPublicTopicType, string[]>();
+
+    for (const topicType of TOPIC_TYPE_ORDER) {
+      topicListByType.set(topicType, []);
+    }
+
+    for (const topic of topicList) {
+      const bucket = topicListByType.get(classifyTopicType(topic));
+
+      if (bucket !== undefined) {
+        bucket.push(topic);
+      }
+    }
+
+    for (const [topicType, bucket] of topicListByType) {
+      if (bucket.length === 0) {
+        topicListByType.delete(topicType);
+      }
+    }
+
+    return topicListByType;
   }
 
   subscribeAllTickers(handler: (tickers: TickerBySymbol) => void, symbolList: string[]): void {
@@ -286,47 +371,113 @@ class BybitPublicStream {
 
   resubscribeStream(symbol: string, interval: string): void {
     const bybitInterval = BYBIT_KLINE_INTERVAL[interval];
-    const topic = `kline.${bybitInterval}.${symbol}`;
+    this.resubscribeTopic(`kline.${bybitInterval}.${symbol}`);
+  }
 
-    for (let index = 0; index < this.connectionList.length; index++) {
-      const connection = this.connectionList[index];
+  resubscribeOrderbook(symbol: string, depth: number): void {
+    this.resubscribeTopic(`orderbook.${depth}.${symbol}`);
+  }
 
-      if (!connection.topicList.includes(topic)) {
-        continue;
-      }
+  resubscribePublicTrades(symbol: string): void {
+    this.resubscribeTopic(`publicTrade.${symbol}`);
+  }
 
-      if (connection.webSocket.getStatus() !== WebSocketStatus.CONNECTED) {
-        this.recreateConnection(index, `manual resubscribe of ${topic} (ws disconnected)`);
+  // tickers.{symbol} is the shared topic-set feeding mark-price (Bybit V5 has no
+  // aggregate ticker topic). Mark-price recovery is therefore connection-granular:
+  // light-resubscribe every currently-subscribed tickers.{symbol} topic in batches
+  // (no socket drop), so sibling orderbook/publicTrade topics on the same connection
+  // are not disturbed.
+  resubscribeMarkPrices(): void {
+    const tickerTopicList = Array.from(
+      this.tickerSubscribedSymbolSet,
+      (symbol) => `tickers.${symbol}`,
+    );
 
-        return;
-      }
-
-      try {
-        connection.webSocket.sendToConnectedSocket({ op: 'unsubscribe', args: [topic] });
-        connection.webSocket.sendToConnectedSocket({ op: 'subscribe', args: [topic] });
-        this.logger.info(`BybitPublicStream: light resubscribe ${topic} on ${connection.label}`);
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        this.logger.warn(`BybitPublicStream: light resubscribe failed for ${topic} on ${connection.label}, falling back to recreate (${errorMessage})`);
-        this.recreateConnection(index, `manual resubscribe of ${topic} (light failed)`);
-      }
-
+    if (tickerTopicList.length === 0) {
       return;
     }
 
-    this.logger.warn(`BybitPublicStream: topic ${topic} not found in any connection`);
+    this.resubscribeTopicList(tickerTopicList);
+  }
+
+  private resubscribeTopic(topic: string): void {
+    this.resubscribeTopicList([topic]);
+  }
+
+  // Light resubscribe (unsubscribe + subscribe on the live socket, no reconnect) of a
+  // set of topics, grouped per connection and sent in batches. Falls back to recreating
+  // a connection if its socket is disconnected or a send fails. Used both for single-topic
+  // recovery (kline/orderbook/publicTrade) and the connection-granular mark-price recovery.
+  private resubscribeTopicList(topicList: string[]): void {
+    const topicSet = new Set(topicList);
+    let matchedAny = false;
+
+    for (let index = 0; index < this.connectionList.length; index++) {
+      const connection = this.connectionList[index];
+      const connectionTopicList = connection.topicList.filter((topic) => topicSet.has(topic));
+
+      if (connectionTopicList.length === 0) {
+        continue;
+      }
+
+      matchedAny = true;
+
+      if (connection.webSocket.getStatus() !== WebSocketStatus.CONNECTED) {
+        this.recreateConnection(index, `manual resubscribe of ${connectionTopicList.length} topic(s) (ws disconnected)`);
+
+        continue;
+      }
+
+      try {
+        this.sendUnsubscribeInBatches(connectionTopicList, (data) => connection.webSocket.sendToConnectedSocket(data), connection.label);
+        this.sendSubscribeInBatches(connectionTopicList, (data) => connection.webSocket.sendToConnectedSocket(data), connection.label);
+        this.logger.info(`BybitPublicStream: light resubscribe ${connectionTopicList.length} topic(s) on ${connection.label}`);
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        this.logger.warn(`BybitPublicStream: light resubscribe failed for ${connectionTopicList.length} topic(s) on ${connection.label}, falling back to recreate (${errorMessage})`);
+        this.recreateConnection(index, 'manual resubscribe (light failed)');
+      }
+    }
+
+    if (!matchedAny) {
+      this.logger.warn(`BybitPublicStream: resubscribe — no matching topic found in any connection (${topicList.length} requested)`);
+    }
   }
 
   getConnectionInfoList(): WebSocketConnectionInfo[] {
-    return this.connectionList.map((connection, index) => ({
-      label: this.connectionList.length > 1
-        ? `${this.label} #${index + 1}`
-        : this.label,
+    return this.connectionList.map((connection) => ({
+      label: connection.label,
+      shortLabel: connection.shortLabel,
       url: connection.url,
       isConnected: connection.webSocket.getStatus() === WebSocketStatus.CONNECTED,
       type: WebSocketConnectionTypeEnum.Public,
       subscriptionList: this.buildSubscriptionList(connection),
+      messageCount: connection.messageCount,
+      lastMessageTimestamp: connection.lastMessageTimestamp > 0 ? connection.lastMessageTimestamp : undefined,
+      reconnectCount: connection.reconnectCount,
     }));
+  }
+
+  // Diagnostic: on EVERY connection close, emit a single greppable line snapshotting
+  // ALL connections at that instant — so a timeline of close events reveals whether
+  // drops are host/network-wide (many connections '-' / stale at once) or isolated
+  // per-connection (only the closer is '-'). Token format per conn:
+  // `#<idx><+|-conn>t<topics>/<ageMs>ms/↻<reconnects>`. Pure logging, no recovery here.
+  private handleConnectionClose(connectionIndex: number, closeContext: WebSocketCloseContext): void {
+    const now = Date.now();
+    const snapshotTokenList = this.connectionList.map((connection, index) => {
+      const connectedMark = connection.webSocket.getStatus() === WebSocketStatus.CONNECTED ? '+' : '-';
+      const ageMs = connection.lastMessageTimestamp > 0 ? now - connection.lastMessageTimestamp : -1;
+
+      return `#${index + 1}${connectedMark}t${connection.topicList.length}/${ageMs}ms/↻${connection.reconnectCount}`;
+    });
+
+    const closingConnection = this.connectionList[connectionIndex];
+    const closingLabel = closingConnection !== undefined ? closingConnection.label : `${this.label} #${connectionIndex + 1}`;
+
+    this.logger.warn(
+      `${closingLabel} closed (code=${closeContext.closeCode ?? 'na'} pong=${closeContext.isPongTimeout} fails=${closeContext.consecutiveFailures}) | ${snapshotTokenList.join(' ')}`,
+    );
   }
 
   close(): void {
@@ -362,9 +513,18 @@ class BybitPublicStream {
       return;
     }
 
-    for (let i = 0; i < allTopicList.length; i += MAX_TOPICS_PER_CONNECTION) {
-      const topicChunk = allTopicList.slice(i, i + MAX_TOPICS_PER_CONNECTION);
-      this.createConnection(topicChunk, this.connectionList.length);
+    if (this.separateByTopicType) {
+      for (const [topicType, topicListForType] of this.groupTopicsByType(allTopicList)) {
+        const limit = this.maxTopicsForType(topicType);
+
+        for (let i = 0; i < topicListForType.length; i += limit) {
+          this.createConnection(topicListForType.slice(i, i + limit), topicType);
+        }
+      }
+    } else {
+      for (let i = 0; i < allTopicList.length; i += this.maxTopicsPerConnection) {
+        this.createConnection(allTopicList.slice(i, i + this.maxTopicsPerConnection), undefined);
+      }
     }
 
     this.logger.info(
@@ -372,14 +532,13 @@ class BybitPublicStream {
     );
   }
 
-  private createConnection(topicList: string[], index: number): void {
-    const connectionLabel = this.connectionList.length > 0 || topicList.length >= MAX_TOPICS_PER_CONNECTION
-      ? `${this.label} #${index + 1}`
-      : this.label;
+  private createConnection(topicList: string[], topicType: BybitPublicTopicType | undefined): void {
     const connectionIndex = this.connectionList.length;
+    const connectionLabel = this.buildConnectionLabel(connectionIndex, topicType);
+    const connectionShortLabel = this.buildConnectionShortLabel(connectionIndex, topicType);
     const webSocket = this.buildWebSocket(connectionIndex, connectionLabel);
 
-    this.connectionList.push({ webSocket, label: connectionLabel, topicList, dynamicTopicList: [], url: this.url, lastRecreateTimestamp: 0 });
+    this.connectionList.push({ webSocket, label: connectionLabel, shortLabel: connectionShortLabel, topicType, topicList, dynamicTopicList: [], url: this.url, lastRecreateTimestamp: 0, lastMessageTimestamp: 0, messageCount: 0, reconnectCount: 0 });
   }
 
   private buildWebSocket(connectionIndex: number, connectionLabel: string): ReliableWebSocket<BybitWebSocketMessage> {
@@ -388,7 +547,7 @@ class BybitPublicStream {
       url: this.url,
       logger: this.logger,
       parseMessage: (rawData) => parseWebSocketMessage<BybitWebSocketMessage>(rawData),
-      onMessage: (message) => this.handleMessage(message),
+      onMessage: (message) => this.handleMessage(message, connectionIndex),
       onOpen: async (context) => {
         const connection = this.connectionList[connectionIndex];
 
@@ -397,6 +556,7 @@ class BybitPublicStream {
         }
       },
       onReconnectSuccess: () => this.resubscribeConnection(connectionIndex),
+      onClose: (closeContext) => this.handleConnectionClose(connectionIndex, closeContext),
       onNotify: this.onNotify,
       heartbeat: BYBIT_HEARTBEAT_CONFIG,
       configuration: {
@@ -455,6 +615,8 @@ class BybitPublicStream {
       return;
     }
 
+    connection.reconnectCount += 1;
+
     if (this.tradeAggregator !== null) {
       for (const topic of connection.topicList) {
         if (topic.startsWith('publicTrade.')) {
@@ -476,12 +638,19 @@ class BybitPublicStream {
       return;
     }
 
-    let targetConnection = this.connectionList.find(
-      (connection) => connection.topicList.length < MAX_TOPICS_PER_CONNECTION,
+    const topicType = classifyTopicType(topic);
+    const limit = this.separateByTopicType ? this.maxTopicsForType(topicType) : this.maxTopicsPerConnection;
+
+    // When separating by type, a topic may only join a connection of its OWN type —
+    // never back-fill another pool — so a churning orderbook socket never carries klines.
+    const targetConnection = this.connectionList.find(
+      (connection) =>
+        connection.topicList.length < limit &&
+        (!this.separateByTopicType || connection.topicType === topicType),
     );
 
     if (!targetConnection) {
-      this.createConnection([topic], this.connectionList.length);
+      this.createConnection([topic], this.separateByTopicType ? topicType : undefined);
 
       return;
     }
@@ -566,10 +735,28 @@ class BybitPublicStream {
     return result;
   }
 
-  private handleMessage(message: BybitWebSocketMessage): void {
+  private handleMessage(message: BybitWebSocketMessage, connectionIndex?: number): void {
+    if (connectionIndex !== undefined) {
+      const connection = this.connectionList[connectionIndex];
+
+      if (connection) {
+        connection.lastMessageTimestamp = Date.now();
+        connection.messageCount += 1;
+      }
+    }
+
     if (message.op === 'subscribe' || message.op === 'unsubscribe') {
       if (!message.success) {
-        this.logger.error({ subscriptionMessage: message }, 'Bybit subscription error');
+        const retMsg = message.ret_msg ?? '';
+        // "already subscribed" is benign idempotency noise — Bybit keeps the topic
+        // server-side across an abnormal (1006) close, so resubscribe on reconnect
+        // re-asks for topics that are still registered. Log it quietly (single line)
+        // to avoid drowning real subscription failures in tens of thousands of lines.
+        if (retMsg.includes('already subscribed')) {
+          this.logger.debug(`BybitPublicStream: ${message.op} skipped (${retMsg})`);
+        } else {
+          this.logger.error(`BybitPublicStream: ${message.op} error (${retMsg}, reqId=${String(message.req_id ?? '')})`);
+        }
       }
 
       return;
@@ -681,7 +868,13 @@ class BybitPublicStream {
     }
 
     const receivedTimestamp = Date.now();
-    const update = normalizeBybitOrderBookUpdate(dataRaw, symbol, updateType, receivedTimestamp);
+    const update = normalizeBybitOrderBookUpdate(
+      dataRaw,
+      symbol,
+      updateType,
+      receivedTimestamp,
+      message.ts,
+    );
 
     for (const handler of handlerSet) {
       handler(symbol, update);
@@ -739,6 +932,15 @@ class BybitPublicStream {
     }
 
     this.logger.info(`BybitPublicStream: subscribed ${sentCount} topics for ${label}`);
+  }
+
+  private sendUnsubscribeInBatches(topicList: string[], send: (data: unknown) => void, label: string): void {
+    for (let i = 0; i < topicList.length; i += MAX_TOPICS_PER_SUBSCRIBE) {
+      const batch = topicList.slice(i, i + MAX_TOPICS_PER_SUBSCRIBE);
+      send({ op: 'unsubscribe', args: batch });
+    }
+
+    this.logger.info(`BybitPublicStream: unsubscribed ${topicList.length} topics for ${label}`);
   }
 
   private extractMarkPriceUpdates(

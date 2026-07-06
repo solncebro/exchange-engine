@@ -119,6 +119,15 @@ export interface ResubscribeKlinesArgs {
   interval: string;
 }
 
+export interface ResubscribeOrderbookArgs {
+  symbol: string;
+  depth: number;
+}
+
+export interface ResubscribePublicTradesArgs {
+  symbol: string;
+}
+
 export interface CancelOrderItemResult {
   orderId: string;
   isSuccess: boolean;
@@ -198,6 +207,9 @@ export interface ExchangeClient {
   subscribeKlines(args: SubscribeKlinesArgs): void;
   unsubscribeKlines(args: SubscribeKlinesArgs): void;
   resubscribeKlines(args: ResubscribeKlinesArgs): void;
+  resubscribeOrderbook(args: ResubscribeOrderbookArgs): void;
+  resubscribePublicTrades(args: ResubscribePublicTradesArgs): void;
+  resubscribeMarkPrices(): void;
   subscribeMarkPrices(handler: MarkPriceHandler): void;
   unsubscribeMarkPrices(handler: MarkPriceHandler): void;
   subscribeOrderbook(args: SubscribeOrderbookArgs): void;

@@ -61,12 +61,35 @@ export type KlineInterval =
   | '1w'
   | '1M';
 
+// Semantic topic categories for the Bybit V5 public stream. Each category is a
+// distinct message-rate profile (tickers ~1s, klines per-interval, orderbook/trades
+// event-driven), which is why they can be packed onto dedicated connections.
+export type BybitPublicTopicType = 'tickers' | 'kline' | 'orderbook' | 'publicTrade';
+
+// Controls how public-stream topics are distributed across physical WebSocket
+// connections. Default (undefined) preserves the legacy behaviour: a flat fill of
+// up to maxTopicsPerConnection topics regardless of type.
+export interface PublicStreamConnectionPacking {
+  // When true, each connection carries exactly ONE topic type — never mixing
+  // tickers/klines/orderbook/trades. A partial last connection of a type is left
+  // partial, not back-filled with another type. This isolates a churning stream
+  // (e.g. orderbook) from dragging unrelated streams (e.g. klines) on reconnect.
+  separateByTopicType?: boolean;
+  // Fallback per-connection topic cap (default 200) used when off, and for any type
+  // without an explicit override below.
+  maxTopicsPerConnection?: number;
+  // Per-type cap override, e.g. { orderbook: 100, publicTrade: 100 } shrinks the
+  // blast radius of the high-churn streams without fragmenting the stable ones.
+  maxTopicsPerConnectionByType?: Partial<Record<BybitPublicTopicType, number>>;
+}
+
 export interface ExchangeConfig {
   apiKey: string;
   secret: string;
   recvWindow?: number;
   isDemoMode?: boolean;
   httpsAgent?: unknown;
+  publicStreamConnectionPacking?: PublicStreamConnectionPacking;
 }
 
 export interface ExchangeLogger {
@@ -308,12 +331,18 @@ export enum WebSocketConnectionTypeEnum {
 
 export interface WebSocketConnectionInfo {
   label: string;
+  // Compact, context-free identifier (`${type} #N`, e.g. "orderbook #9", or just
+  // "#N" in legacy mixed mode). A substring of `label` from the same source — use it
+  // in grouped per-connection listings where the stream prefix is already implied by
+  // the surrounding header, so it is not repeated on every line.
+  shortLabel?: string;
   url: string;
   isConnected: boolean;
   type: WebSocketConnectionTypeEnum;
   subscriptionList: string[];
   messageCount?: number;
   lastMessageTimestamp?: number;
+  reconnectCount?: number;
 }
 
 export interface OrderBookLevel {
@@ -422,6 +451,8 @@ export interface OrderUpdateEvent {
   amount: number;
   filledAmount: number;
   timestamp: number;
+  cancelType?: string;
+  rejectReason?: string;
 }
 
 export interface PositionUpdateEvent {

@@ -47,6 +47,8 @@ export type {
   FetchPageWithLimitArgs,
   SubscribeKlinesArgs,
   ResubscribeKlinesArgs,
+  ResubscribeOrderbookArgs,
+  ResubscribePublicTradesArgs,
   ModifyOrderArgs,
   ExchangeClient,
 } from './exchange';

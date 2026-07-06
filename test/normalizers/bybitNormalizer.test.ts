@@ -843,6 +843,46 @@ describe('normalizeBybitOrderBookUpdate', () => {
 
     expect(result.symbol).toBe('BTCUSDT');
   });
+
+  it('uses the envelope timestamp for eventTimestamp when provided (Bybit V5 puts ts in the envelope, not data)', () => {
+    const result = normalizeBybitOrderBookUpdate(
+      BYBIT_RAW_ORDER_BOOK_STREAM,
+      'BTCUSDT',
+      'snapshot',
+      1700000000050,
+      1700000000123,
+    );
+
+    expect(result.eventTimestamp).toBe(1700000000123);
+  });
+
+  it('falls back to raw.ts when the envelope timestamp is missing', () => {
+    const result = normalizeBybitOrderBookUpdate(
+      BYBIT_RAW_ORDER_BOOK_STREAM,
+      'BTCUSDT',
+      'snapshot',
+      1700000000050,
+      undefined,
+    );
+
+    expect(result.eventTimestamp).toBe(1700000000000);
+  });
+
+  it('prefers the envelope timestamp even when raw.ts is absent (real V5 data has no data.ts)', () => {
+    const rawWithoutTs = {
+      ...BYBIT_RAW_ORDER_BOOK_STREAM,
+      ts: undefined as unknown as number,
+    };
+    const result = normalizeBybitOrderBookUpdate(
+      rawWithoutTs,
+      'BTCUSDT',
+      'delta',
+      1700000000050,
+      1700000000222,
+    );
+
+    expect(result.eventTimestamp).toBe(1700000000222);
+  });
 });
 
 describe('normalizeBybitPublicTradeFromStream', () => {
