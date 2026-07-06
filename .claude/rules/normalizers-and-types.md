@@ -33,6 +33,7 @@ BinanceTicker24hrRaw { symbol, lastPrice: string, priceChangePercent: string, ti
 - `BinancePublicTradeRaw` — `{ id, price, qty, quoteQty, time, isBuyerMaker }`
 - `BinanceMarkPriceRaw` — `{ symbol, markPrice, indexPrice, lastFundingRate, nextFundingTime, time }`
 - `BinanceMarkPriceWebSocketRaw` — событие `markPriceUpdate` c полями `e, E, s, p, ap, i, P, r, T` (символ, цены, время события)
+- `BinanceAggTradeWebSocketRaw` — событие `aggTrade` c полями `e, E, s, a, p, q, f, l, T, m` (агрегированная публичная сделка Binance Futures)
 - `BinanceOpenInterestRaw` — `{ symbol, openInterest, time }`
 - `BinanceCommissionRateRaw` — `{ symbol, makerCommissionRate, takerCommissionRate }`
 - `BinanceIncomeRaw` — `{ symbol, incomeType, income, asset, time, info, tranId, tradeId }`
@@ -71,6 +72,9 @@ BinanceTicker24hrRaw { symbol, lastPrice: string, priceChangePercent: string, ti
   - `updateId = raw.lastUpdateId`, `eventTimestamp = raw.E`
 - `normalizeBinancePublicTrades(rawList, symbol)` → `PublicTrade[]`
   - symbol передаётся отдельно, `id` number → string, `qty → quantity`, `quoteQty → quoteQuantity`
+- `normalizeBinanceAggTradeFromStream(raw)` → `PublicTrade`
+  - WS-вариант одиночной сделки (`@aggTrade`, Binance Futures Public Stream): `a` (agg trade id) → `id` (string), `p`/`q` → parseFloat, `quoteQuantity = price * quantity`, `T → timestamp`
+  - `isBuyerMaker = raw.m`, `side = raw.m ? Sell : Buy` (Binance `m: true` — покупатель был мейкером, значит инициатор сделки продавец)
 - `normalizeBinanceMarkPriceList(rawList)` → `MarkPrice[]`
   - parseFloat для строковых полей, `time → timestamp`
 - `normalizeBinanceMarkPriceWebSocketList(rawList)` → `MarkPriceUpdate[]`
@@ -90,7 +94,7 @@ BinanceTicker24hrRaw { symbol, lastPrice: string, priceChangePercent: string, ti
 
 REST:
 - `BybitInstrumentInfoRaw` — `{ symbol, status, baseCoin, quoteCoin, settleCoin?, contractType?, contractSize?, lotSizeFilter?, priceFilter? }`
-- `BybitTickerRaw` — `{ symbol, lastPrice, prevPrice24h, highPrice24h, lowPrice24h, price24hPcnt, volume24h, turnover24h, markPrice?, indexPrice?, fundingRate?, nextFundingTime?, time? }`
+- `BybitTickerRaw` — `{ symbol, lastPrice, prevPrice24h, highPrice24h, lowPrice24h, price24hPcnt, volume24h, turnover24h, markPrice?, indexPrice?, bid1Price?, bid1Size?, ask1Price?, ask1Size?, fundingRate?, nextFundingTime?, time? }`
 - `BybitPositionRaw` — `{ symbol, side, size, avgPrice, markPrice, unrealisedPnl, leverage, tradeMode, liqPrice, positionIdx, [key: string]: unknown }`
 - `BybitOrderResponseRaw` — `{ orderId, orderLinkId, symbol, side, orderType, timeInForce, qty, price, avgPrice, triggerPrice, cumExecQty, cumExecValue, orderStatus, reduceOnly, createdTime, updatedTime }`
 - `BybitWalletBalanceRaw` — `{ list: BybitAccountRaw[] }` (BybitAccountRaw — internal: `{ accountType, coin: BybitCoinRaw[] }`)
@@ -124,7 +128,7 @@ WebSocket:
 - `normalizeBybitTickers(rawList)` → `TickerBySymbol` (Map)
   - `priceChangePercent` умножается на 100 (Bybit отдаёт долю, не проценты)
   - `timestamp` fallback на `Date.now()` если отсутствует
-  - Пробрасывает `markPrice`, `indexPrice`, `fundingRate`, `nextFundingTime` через parseFloat (опционально)
+  - Пробрасывает `markPrice`, `indexPrice`, `fundingRate`, `nextFundingTime`, `bid1Price`, `bid1Size`, `ask1Price`, `ask1Size` через parseFloat (опционально, только когда Bybit прислал поле)
 - `normalizeBybitKlines(rawList)` → `Kline[]` — массив строковых массивов → массив объектов, `closeTimestamp = 0`, `numberOfTrades = 0`, `.reverse()` для хронологического порядка (Bybit возвращает newest-first)
 - `normalizeBybitKlineWebSocketMessage(raw)` → `Kline` — маппинг полей, `raw.confirm → isClosed`
 - `normalizeBybitPosition(raw)` → `Position`
@@ -147,10 +151,16 @@ WebSocket:
   - На уровне `AccountBalances` возвращает `accountType` (primary account), `totalMarginBalance`, `totalInitialMargin`
 - `normalizeBybitOrderBook(raw, symbol)` → `OrderBook`
   - symbol передаётся отдельно, `a → askList`, `b → bidList`, `ts → timestamp`, `u → updateId`
-- `normalizeBybitOrderBookUpdate(raw, symbol, updateType, receivedTimestamp)` → `OrderBookUpdate`
+- `normalizeBybitOrderBookUpdate(raw, symbol, updateType, receivedTimestamp, envelopeTimestamp?)` → `OrderBookUpdate`
   - WS-вариант orderbook (Bybit V5 public stream); сохраняет уровни как сырые пары decimal-строк (`OrderBookRawLevel = [string, string]`) — без `parseFloat`, чтобы избежать потери точности
   - `bidList`/`askList` строятся через приватный `toOrderBookRawLevelList(rawList)` (`[level[0], level[1]]`)
   - `updateType` — переданный извне (`'snapshot' | 'delta'`), `receivedTimestamp` — время, когда сообщение получено клиентом
+  - `eventTimestamp = envelopeTimestamp ?? raw.ts` — Bybit V5 кладёт время события в ENVELOPE-поле `ts` сообщения, а не в `data`, поэтому `raw.ts` обычно `undefined`; envelope-значение в приоритете, `raw.ts` — fallback
+- `parseBybitOrderbookRawFrame({ raw, symbol, receivedTimestamp }: ParseBybitOrderbookRawFrameArgs)` → `OrderBookUpdate | undefined`
+  - On-demand парсер сырого WS-кадра (для отложенного парсинга при `lazyOrderbookParse`, см. `exchange-layer.md`): `JSON.parse(raw)` → достаёт envelope (`type`, `ts`, `data`); при невалидном JSON, отсутствующем `data` или `data` как массиве (не поддерживается) — возвращает `undefined`
+  - `updateType` = `'snapshot'` только если `envelope.type === 'snapshot'`, иначе `'delta'`
+  - Делегирует в `normalizeBybitOrderBookUpdate`, передавая `envelope.ts` как `envelopeTimestamp`
+  - Экспортируется из `src/index.ts` (публичный API)
 - `normalizeBybitPublicTradeList(rawList)` → `PublicTrade[]`
   - `execId → id`, `size → quantity`, `quoteQuantity` вычисляется как `price * size`
   - `isBuyerMaker = raw.side === 'Sell'`
@@ -193,10 +203,10 @@ WebSocket:
 - `WebSocketConnectionTypeEnum` — Public, Trade, UserData
 
 ### Конфигурация:
-- `ExchangeConfig` — `{ apiKey, secret, recvWindow?, isDemoMode?, httpsAgent? }`
+- `ExchangeConfig` — `{ apiKey, secret, recvWindow?, isDemoMode?, httpsAgent?, publicStreamConnectionPacking?, lazyOrderbookParse? }`
 
 ### Интерфейсы:
-- `Ticker` — `{ symbol, lastPrice, openPrice, highPrice, lowPrice, priceChangePercent, volume, quoteVolume, timestamp, markPrice?, indexPrice?, fundingRate?, nextFundingTime? }` (последние 4 поля заполняются Bybit tickers)
+- `Ticker` — `{ symbol, lastPrice, openPrice, highPrice, lowPrice, priceChangePercent, volume, quoteVolume, timestamp, markPrice?, indexPrice?, bid1Price?, bid1Size?, ask1Price?, ask1Size?, fundingRate?, nextFundingTime? }` (последние 8 полей заполняются Bybit tickers, когда биржа их прислала)
 - `Kline` — `{ openTimestamp, openPrice, highPrice, lowPrice, closePrice, volume, closeTimestamp, quoteAssetVolume, numberOfTrades, takerBuyBaseAssetVolume, takerBuyQuoteAssetVolume, isClosed?: boolean }`
 - `TradeSymbol` — `{ symbol, baseAsset, quoteAsset, settle, isActive, type, isLinear, contractSize, contractType, filter, leverageFilter?, priceLimitRisk?, pricePrecision?, quantityPrecision?, funding?, launchTimestamp?, triggerProtect?, liquidationFee?, orderTypeList?, timeInForceList?, info? }`
 - `TradeSymbolFilter` — `{ tickSize, stepSize, minQty, maxQty, minNotional, minPrice?, maxPrice?, maxNotional?, marketMinQty?, marketMaxQty?, marketStepSize?, postOnlyMaxQty? }` (все string)
@@ -220,6 +230,8 @@ WebSocket:
 - `OrderBookUpdateType` — `'snapshot' | 'delta'`
 - `OrderBookUpdate` — `{ symbol, updateType: OrderBookUpdateType, bidList: OrderBookRawLevel[], askList: OrderBookRawLevel[], updateId, eventTimestamp, receivedTimestamp }` (WS payload Bybit V5 — отличается от `OrderBook` тем, что уровни хранятся как строки)
 - `OrderBookHandler` — `(symbol: string, update: OrderBookUpdate) => void`
+- `RawOrderbookFrame` — `{ symbol, raw: string, receivedTimestamp }` — сырой (не распарсенный) orderbook-кадр Bybit; `raw` — исходный текст WS-сообщения целиком
+- `RawOrderbookHandler` — `(frame: RawOrderbookFrame) => void`
 - `PublicTrade` — `{ id, symbol, price, quantity, quoteQuantity, timestamp, isBuyerMaker, isBlockTrade?, side? }` (`isBlockTrade` и `side` — Bybit)
 - `PublicTradeHandler` — `(symbol: string, tradeList: PublicTrade[]) => void`
 - `MarkPrice` — `{ symbol, markPrice, indexPrice, lastFundingRate, nextFundingTime, timestamp }`

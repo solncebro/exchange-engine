@@ -151,6 +151,37 @@ describe('BinanceFuturesPublicStream', () => {
       );
     });
 
+    it('does not flood per-stream SUBSCRIBE frames when a new interval connection is filled before it opens', async () => {
+      const stream = createStreamForTest({ url, mockLogger });
+
+      // Interval 1: establish and fully open a connection so connectionList is non-empty.
+      stream.subscribeKlines('AAAUSDT', '1m', jest.fn());
+      await flushAsync();
+      mockWebSocket.sendToConnectedSocket.mockClear();
+      mockSend.mockClear();
+
+      // Interval 2: many symbols subscribed synchronously onto a brand-new (not-yet-open) connection.
+      // <= batch size so onOpen sends a single paced batch (no fake timers needed).
+      const intervalTwoCount = 40;
+      for (let i = 0; i < intervalTwoCount; i++) {
+        stream.subscribeKlines(`SYM${i}USDT`, '5m', jest.fn());
+      }
+      await flushAsync();
+
+      // No per-stream flood: Binance caps incoming messages at 10/sec/connection, so ~40 individual
+      // SUBSCRIBE frames at once would get the connection dropped. They must go via the onOpen batch.
+      expect(mockWebSocket.sendToConnectedSocket).not.toHaveBeenCalled();
+
+      // They ARE subscribed — through the paced onOpen batch (context.send), which carries every stream.
+      const subscribedStreams = mockSend.mock.calls
+        .map(([message]) => message)
+        .filter((message) => message?.method === 'SUBSCRIBE')
+        .flatMap((message) => message.params as string[]);
+      expect(subscribedStreams).toContain('sym0usdt_perpetual@continuousKline_5m');
+      expect(subscribedStreams).toContain('sym39usdt_perpetual@continuousKline_5m');
+      expect(subscribedStreams).toHaveLength(intervalTwoCount);
+    });
+
     it('calls handler when kline message arrives', async () => {
       const stream = createStreamForTest({ url, mockLogger });
       const handler = jest.fn();
@@ -281,6 +312,61 @@ describe('BinanceFuturesPublicStream', () => {
       const callArgs = ReliableWebSocket.mock.calls[0][0];
       expect(callArgs.url).toBe(url);
       expect(callArgs.url).not.toContain('?streams=');
+    });
+  });
+
+  describe('connection sharding (per-connection stream cap)', () => {
+    const buildShardedStream = (maxStreamsPerConnection: number): BinanceFuturesPublicStream =>
+      new BinanceFuturesPublicStream({
+        webSocketUrl: url,
+        logger: mockLogger,
+        onNotify: undefined,
+        label: 'test',
+        pauseBetweenConnectionsMs: 0,
+        maxStreamsPerConnection,
+      });
+
+    it('shards one interval across multiple connections when it exceeds the per-connection cap', async () => {
+      const { ReliableWebSocket } = require('@solncebro/websocket-engine');
+      const stream = buildShardedStream(3);
+
+      for (let i = 0; i < 7; i++) {
+        stream.subscribeKlines(`SYM${i}USDT`, '1m', jest.fn());
+      }
+      await flushAsync();
+
+      expect(ReliableWebSocket).toHaveBeenCalledTimes(3); // ceil(7 / 3)
+    });
+
+    it('keeps every shard within the cap and loses no streams', async () => {
+      const stream = buildShardedStream(3);
+
+      for (let i = 0; i < 7; i++) {
+        stream.subscribeKlines(`SYM${i}USDT`, '1m', jest.fn());
+      }
+      await flushAsync();
+
+      // @ts-expect-error — private access for test
+      const connections = stream.connectionList as Array<{ streamList: string[] }>;
+      for (const connection of connections) {
+        expect(connection.streamList.length).toBeLessThanOrEqual(3);
+      }
+      const totalStreams = connections.reduce((sum, connection) => sum + connection.streamList.length, 0);
+      expect(totalStreams).toBe(7);
+    });
+
+    it('opens a new shard for the same interval when the active one is full (incremental add)', async () => {
+      const { ReliableWebSocket } = require('@solncebro/websocket-engine');
+      const stream = buildShardedStream(2);
+
+      stream.subscribeKlines('AUSDT', '1m', jest.fn());
+      stream.subscribeKlines('BUSDT', '1m', jest.fn());
+      await flushAsync();
+      expect(ReliableWebSocket).toHaveBeenCalledTimes(1);
+
+      stream.subscribeKlines('CUSDT', '1m', jest.fn());
+      await flushAsync();
+      expect(ReliableWebSocket).toHaveBeenCalledTimes(2);
     });
   });
 

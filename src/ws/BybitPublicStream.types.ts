@@ -1,6 +1,6 @@
 import type { ReliableWebSocket } from '@solncebro/websocket-engine';
 
-import type { BybitPublicTopicType, ExchangeLogger, PublicStreamConnectionPacking } from '../types/common';
+import type { BybitPublicTopicType, ExchangeLogger, PublicStreamConnectionPacking, RawOrderbookFrame } from '../types/common';
 import type { BybitBaseWebSocketMessage } from './bybitWebSocketUtils.types';
 
 export interface BybitPublicStreamArgs {
@@ -9,12 +9,14 @@ export interface BybitPublicStreamArgs {
   onNotify?: (message: string) => void | Promise<void>;
   label: string;
   connectionPacking?: PublicStreamConnectionPacking;
+  lazyOrderbookParse?: boolean;
 }
 
 export interface BybitWebSocketMessage extends BybitBaseWebSocketMessage {
   topic?: string;
   ret_code?: number;
   ts?: number;
+  __rawOrderbook?: RawOrderbookFrame;
 }
 
 export interface BybitConnection {

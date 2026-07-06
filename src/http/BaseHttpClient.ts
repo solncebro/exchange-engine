@@ -95,20 +95,28 @@ abstract class BaseHttpClient {
     });
   }
 
+  protected async beforeRequest(): Promise<void> {}
+
+  protected onResponse(_status: number | undefined, _headers: unknown): void {}
+
   protected async get<T>(
     url: string,
     params?: HttpQueryParams,
     headers?: HttpHeaders
   ): Promise<T> {
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      await this.beforeRequest();
+
       try {
         this.logger.debug({ url, params }, `GET ${url}`);
         const response = await this.axiosInstance.get<T>(url, { params, headers });
+        this.onResponse(response.status, response.headers);
         this.logger.debug({ url, response: response.data as HttpRecord }, `GET ${url} response`);
 
         return response.data;
       } catch (error) {
         const axiosError = error as AxiosError;
+        this.onResponse(axiosError.response?.status, axiosError.response?.headers);
         this.handleError(axiosError);
 
         if (!isRetryable(axiosError) || attempt === MAX_RETRIES) {

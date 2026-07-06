@@ -28,7 +28,7 @@ Exchange (фабрика) → ExchangeClient (интерфейс)
   │
   ├── HTTP-клиенты (src/http/)
   │   ├── BaseHttpClient (retry, rate limits, axios, executeRequest)
-  │   ├── BinanceBaseHttpClient (signing, signRequest, buildOptionalSymbolParams)
+  │   ├── BinanceBaseHttpClient (signing, signRequest, buildOptionalSymbolParams, троттлинг через binanceRateLimit.ts)
   │   │   ├── BinanceFuturesHttpClient
   │   │   └── BinanceSpotHttpClient
   │   └── BybitHttpClient (buildCategoryParams)
@@ -39,11 +39,14 @@ Exchange (фабрика) → ExchangeClient (интерфейс)
   ├── Ошибки (src/errors/)
   │   └── ExchangeError — кастомный Error с полями `code` и `exchange`
   │
-  └── WebSocket-стримы (src/ws/)
-      ├── Публичные стримы (тикеры, klines, mark/index price)
-      ├── BaseTradeStream → BinanceTradeStream / BybitTradeStream
-      ├── User data стримы (BinanceUserDataStream, BybitPrivateStream)
-      └── parseWebSocketMessage — generic WS parser
+  ├── WebSocket-стримы (src/ws/)
+  │   ├── Публичные стримы (тикеры, klines, mark/index price, публичные сделки)
+  │   ├── BaseTradeStream → BinanceTradeStream / BybitTradeStream
+  │   ├── User data стримы (BinanceUserDataStream, BybitPrivateStream)
+  │   ├── bybitWebSocketAuth — authenticateBybitWebSocket
+  │   └── parseWebSocketMessage — generic WS parser
+  │
+  └── src/public.ts — subpath-точка входа `./public`: только публичные стримы, без HTTP/trade/user-data
 ```
 
 ### Ключевые паттерны
@@ -73,9 +76,13 @@ Exchange (фабрика) → ExchangeClient (интерфейс)
 | Файл | Содержание |
 |------|-----------|
 | [architecture.md](.claude/rules/architecture.md) | Общая архитектура, слои, поток данных, фабрика Exchange |
-| [exchange-layer.md](.claude/rules/exchange-layer.md) | ExchangeClient интерфейс, BaseExchangeClient, все конкретные классы, demo mode, кеширование |
-| [http-layer.md](.claude/rules/http-layer.md) | HTTP-клиенты, retry-логика, signing Binance/Bybit, все эндпоинты |
-| [websocket-layer.md](.claude/rules/websocket-layer.md) | WebSocket-стримы, подписки, heartbeat, reconnect, user data |
+| [exchange-layer.md](.claude/rules/exchange-layer.md) | ExchangeClient интерфейс, BaseExchangeClient, demo mode, кеширование, args-типы (index; конкретные биржи — в сателлитах ниже) |
+| [exchange-layer-binance.md](.claude/rules/exchange-layer-binance.md) | BinanceBaseClient, BinanceFutures, BinanceSpot |
+| [exchange-layer-bybit.md](.claude/rules/exchange-layer-bybit.md) | BybitBaseClient, BybitLinear, BybitSpot |
+| [http-layer.md](.claude/rules/http-layer.md) | HTTP-клиенты, retry-логика, signing Binance/Bybit, все эндпоинты, rate-limit awareness |
+| [websocket-layer.md](.claude/rules/websocket-layer.md) | Общие паттерны стримов, PublicStreamLike, BaseTradeStream (index; конкретные биржи — в сателлитах ниже) |
+| [websocket-layer-binance.md](.claude/rules/websocket-layer-binance.md) | Binance Futures/Spot Public Stream, User Data Stream, Trade Stream |
+| [websocket-layer-bybit.md](.claude/rules/websocket-layer-bybit.md) | Bybit Public Stream, TradeToKlineAggregator, Trade Stream (+ Batch), Private Stream |
 | [normalizers-and-types.md](.claude/rules/normalizers-and-types.md) | Все raw-интерфейсы, функции нормализации, унифицированные типы, маппинги |
 | [constants-and-urls.md](.claude/rules/constants-and-urls.md) | URL, таймауты, retry-константы, precision, kline loader |
 | [testing-patterns.md](.claude/rules/testing-patterns.md) | Мокирование axios/WS, createClient, фикстуры, верификация HTTP-вызовов |

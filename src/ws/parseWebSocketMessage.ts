@@ -1,4 +1,4 @@
-import type { RawData } from 'ws';
+import type { RawData } from '@solncebro/websocket-engine';
 
 function parseWebSocketMessage<T>(rawData: RawData): T {
   const text = rawData.toString();

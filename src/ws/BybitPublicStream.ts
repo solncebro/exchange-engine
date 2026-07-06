@@ -1,7 +1,7 @@
 import { ReliableWebSocket, WebSocketStatus } from '@solncebro/websocket-engine';
-import type { WebSocketCloseContext } from '@solncebro/websocket-engine';
+import type { RawData, WebSocketCloseContext } from '@solncebro/websocket-engine';
 
-import type { BybitPublicTopicType, ExchangeLogger, KlineInterval, MarkPriceHandler, MarkPriceUpdate, OrderBookHandler, OrderBookUpdateType, PublicTradeHandler, TickerBySymbol, WebSocketConnectionInfo } from '../types/common';
+import type { BybitPublicTopicType, ExchangeLogger, KlineInterval, MarkPriceHandler, MarkPriceUpdate, OrderBookHandler, OrderBookUpdateType, PublicTradeHandler, RawOrderbookFrame, RawOrderbookHandler, TickerBySymbol, WebSocketConnectionInfo } from '../types/common';
 import { WebSocketConnectionTypeEnum } from '../types/common';
 import type { KlineHandler } from '../types/exchange';
 import { normalizeBybitKlineWebSocketMessage, normalizeBybitOrderBookUpdate, normalizeBybitPublicTradeFromStream, normalizeBybitTickers } from '../normalizers/bybitNormalizer';
@@ -15,6 +15,9 @@ import { parseWebSocketMessage } from './parseWebSocketMessage';
 const MAX_TOPICS_PER_CONNECTION = 200;
 const MAX_TOPICS_PER_SUBSCRIBE = 10;
 const RECREATE_DEDUP_WINDOW_MS = 2000;
+
+const ORDERBOOK_TOPIC_HEAD_REGEX = /"topic"\s*:\s*"(orderbook\.\d+\.([A-Z0-9]+))"/;
+const FRAME_HEAD_SCAN_LENGTH = 200;
 
 // Human-readable suffix used in the connection label when topics are separated by
 // type — matches the Diagnostic composition wording (tickers/klines/orderbook/trades).
@@ -74,12 +77,16 @@ class BybitPublicStream {
   private readonly separateByTopicType: boolean;
   private readonly maxTopicsPerConnection: number;
   private readonly maxTopicsByType: Partial<Record<BybitPublicTopicType, number>>;
+  private readonly lazyOrderbookParse: boolean;
+  private readonly liveOrderbookSymbolSet: Set<string> = new Set();
+  private readonly rawOrderbookHandlerSet: Set<RawOrderbookHandler> = new Set();
 
   constructor(args: BybitPublicStreamArgs) {
     this.url = args.url;
     this.logger = args.logger;
     this.onNotify = args.onNotify;
     this.label = args.label;
+    this.lazyOrderbookParse = args.lazyOrderbookParse === true;
 
     const packing = args.connectionPacking;
     this.separateByTopicType = packing?.separateByTopicType === true;
@@ -546,7 +553,7 @@ class BybitPublicStream {
       label: connectionLabel,
       url: this.url,
       logger: this.logger,
-      parseMessage: (rawData) => parseWebSocketMessage<BybitWebSocketMessage>(rawData),
+      parseMessage: (rawData) => this.resolveBybitMessage(rawData),
       onMessage: (message) => this.handleMessage(message, connectionIndex),
       onOpen: async (context) => {
         const connection = this.connectionList[connectionIndex];
@@ -735,6 +742,69 @@ class BybitPublicStream {
     return result;
   }
 
+  private resolveBybitMessage(rawData: RawData): BybitWebSocketMessage {
+    if (!this.lazyOrderbookParse) {
+      return parseWebSocketMessage<BybitWebSocketMessage>(rawData);
+    }
+
+    const text = rawData.toString();
+    const head = text.length > FRAME_HEAD_SCAN_LENGTH ? text.slice(0, FRAME_HEAD_SCAN_LENGTH) : text;
+    const match = ORDERBOOK_TOPIC_HEAD_REGEX.exec(head);
+
+    if (match === null) {
+      return this.parseTextMessage(text);
+    }
+
+    return {
+      topic: match[1],
+      __rawOrderbook: {
+        symbol: match[2],
+        raw: text,
+        receivedTimestamp: Date.now(),
+      },
+    };
+  }
+
+  private parseTextMessage(text: string): BybitWebSocketMessage {
+    try {
+      return JSON.parse(text) as BybitWebSocketMessage;
+    } catch {
+      throw new Error(`Failed to parse WebSocket message: ${text.slice(0, 200)}`);
+    }
+  }
+
+  setOrderbookLiveSymbol(symbol: string, isLive: boolean): void {
+    if (isLive) {
+      this.liveOrderbookSymbolSet.add(symbol);
+    } else {
+      this.liveOrderbookSymbolSet.delete(symbol);
+    }
+  }
+
+  subscribeRawOrderbook(handler: RawOrderbookHandler): void {
+    this.rawOrderbookHandlerSet.add(handler);
+  }
+
+  unsubscribeRawOrderbook(handler: RawOrderbookHandler): void {
+    this.rawOrderbookHandlerSet.delete(handler);
+  }
+
+  private dispatchRawOrderbook(frame: RawOrderbookFrame): void {
+    for (const handler of this.rawOrderbookHandlerSet) {
+      handler(frame);
+    }
+
+    if (!this.liveOrderbookSymbolSet.has(frame.symbol)) {
+      return;
+    }
+
+    const message = this.parseTextMessage(frame.raw);
+
+    if (message.topic !== undefined && message.data !== undefined && !Array.isArray(message.data)) {
+      this.handleOrderBookMessage(message.topic, message);
+    }
+  }
+
   private handleMessage(message: BybitWebSocketMessage, connectionIndex?: number): void {
     if (connectionIndex !== undefined) {
       const connection = this.connectionList[connectionIndex];
@@ -743,6 +813,12 @@ class BybitPublicStream {
         connection.lastMessageTimestamp = Date.now();
         connection.messageCount += 1;
       }
+    }
+
+    if (message.__rawOrderbook !== undefined) {
+      this.dispatchRawOrderbook(message.__rawOrderbook);
+
+      return;
     }
 
     if (message.op === 'subscribe' || message.op === 'unsubscribe') {

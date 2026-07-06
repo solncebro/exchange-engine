@@ -90,6 +90,7 @@ export interface ExchangeConfig {
   isDemoMode?: boolean;
   httpsAgent?: unknown;
   publicStreamConnectionPacking?: PublicStreamConnectionPacking;
+  lazyOrderbookParse?: boolean;
 }
 
 export interface ExchangeLogger {
@@ -117,6 +118,10 @@ export interface Ticker {
   timestamp: number;
   markPrice?: number;
   indexPrice?: number;
+  bid1Price?: number;
+  bid1Size?: number;
+  ask1Price?: number;
+  ask1Size?: number;
   fundingRate?: number;
   nextFundingTime?: number;
 }
@@ -374,6 +379,14 @@ export interface OrderBookUpdate {
 }
 
 export type OrderBookHandler = (symbol: string, update: OrderBookUpdate) => void;
+
+export interface RawOrderbookFrame {
+  symbol: string;
+  raw: string;
+  receivedTimestamp: number;
+}
+
+export type RawOrderbookHandler = (frame: RawOrderbookFrame) => void;
 
 export interface PublicTrade {
   id: string;

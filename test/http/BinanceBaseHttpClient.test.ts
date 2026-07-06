@@ -283,4 +283,49 @@ describe('BinanceBaseHttpClient', () => {
       expect(options.headers['X-MBX-APIKEY']).toBe('testKey');
     });
   });
+
+  describe('rate-limit awareness (REQUEST_WEIGHT / 418)', () => {
+    let rateLogger: ReturnType<typeof createMockLogger>;
+    let rateClient: TestBinanceHttpClient;
+
+    beforeEach(() => {
+      rateLogger = createMockLogger();
+      rateClient = new TestBinanceHttpClient({
+        baseUrl: 'https://fapi.binance.com',
+        apiKey: 'k',
+        secret: 's',
+        logger: rateLogger,
+      });
+    });
+
+    it('warns and arms a throttle when used weight nears the per-IP cap', async () => {
+      mockInstance.get.mockResolvedValueOnce({ data: [], status: 200, headers: { 'x-mbx-used-weight-1m': '2000' } });
+
+      await rateClient.fetchTickers();
+
+      expect(rateLogger.warn).toHaveBeenCalledWith(expect.stringContaining('REQUEST_WEIGHT near cap'));
+    });
+
+    it('does not throttle on a healthy low-weight response', async () => {
+      mockInstance.get.mockResolvedValueOnce({ data: [], status: 200, headers: { 'x-mbx-used-weight-1m': '100' } });
+
+      await rateClient.fetchTickers();
+
+      expect(rateLogger.warn).not.toHaveBeenCalledWith(expect.stringContaining('REQUEST_WEIGHT'));
+    });
+
+    it('logs and surfaces an HTTP 418 ban without retrying it', async () => {
+      const banError = {
+        isAxiosError: true,
+        message: 'banned',
+        response: { status: 418, headers: { 'retry-after': '120' }, data: {} },
+      };
+      mockInstance.get.mockRejectedValue(banError);
+
+      await expect(rateClient.fetchKlines('BTCUSDT', '1m')).rejects.toBeDefined();
+
+      expect(rateLogger.error).toHaveBeenCalledWith(expect.stringContaining('IP banned'));
+      expect(mockInstance.get).toHaveBeenCalledTimes(1); // 418 must not be retried
+    });
+  });
 });

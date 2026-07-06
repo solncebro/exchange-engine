@@ -22,6 +22,7 @@ export interface SymbolLimitFilterArgs {
   orderId?: string;
   settleCoin?: string;
   baseCoin?: string;
+  orderFilter?: string;
 }
 
 export interface PeriodFilterArgs {

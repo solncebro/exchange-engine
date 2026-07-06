@@ -95,6 +95,10 @@ export interface BybitTickerRaw {
   turnover24h: string;
   markPrice?: string;
   indexPrice?: string;
+  bid1Price?: string;
+  bid1Size?: string;
+  ask1Price?: string;
+  ask1Size?: string;
   fundingRate?: string;
   nextFundingTime?: string;
   time?: number;
@@ -420,6 +424,22 @@ export function normalizeBybitTickers(rawList: BybitTickerRaw[]): TickerBySymbol
       ticker.nextFundingTime = parseFloat(raw.nextFundingTime);
     }
 
+    if (raw.bid1Price !== undefined) {
+      ticker.bid1Price = parseFloat(raw.bid1Price);
+    }
+
+    if (raw.bid1Size !== undefined) {
+      ticker.bid1Size = parseFloat(raw.bid1Size);
+    }
+
+    if (raw.ask1Price !== undefined) {
+      ticker.ask1Price = parseFloat(raw.ask1Price);
+    }
+
+    if (raw.ask1Size !== undefined) {
+      ticker.ask1Size = parseFloat(raw.ask1Size);
+    }
+
     result.set(raw.symbol, ticker);
   }
 
@@ -706,6 +726,46 @@ export function normalizeBybitOrderBookUpdate(
     eventTimestamp,
     receivedTimestamp,
   };
+}
+
+export interface ParseBybitOrderbookRawFrameArgs {
+  raw: string;
+  symbol: string;
+  receivedTimestamp: number;
+}
+
+interface BybitOrderbookFrameEnvelope {
+  type?: string;
+  ts?: number;
+  data?: unknown;
+}
+
+export function parseBybitOrderbookRawFrame(args: ParseBybitOrderbookRawFrameArgs): OrderBookUpdate | undefined {
+  const { raw, symbol, receivedTimestamp } = args;
+
+  let envelope: BybitOrderbookFrameEnvelope;
+
+  try {
+    envelope = JSON.parse(raw) as BybitOrderbookFrameEnvelope;
+  } catch {
+    return undefined;
+  }
+
+  const data = envelope.data;
+
+  if (data === undefined || data === null || Array.isArray(data)) {
+    return undefined;
+  }
+
+  const updateType: OrderBookUpdateType = envelope.type === 'snapshot' ? 'snapshot' : 'delta';
+
+  return normalizeBybitOrderBookUpdate(
+    data as BybitOrderBookRaw,
+    symbol,
+    updateType,
+    receivedTimestamp,
+    envelope.ts,
+  );
 }
 
 export function normalizeBybitPublicTradeList(rawList: BybitPublicTradeRaw[]): PublicTrade[] {

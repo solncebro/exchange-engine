@@ -12,6 +12,7 @@ export interface BinanceFuturesPublicStreamArgs {
   staleCheckIntervalMs?: number;
   subscribeBatchSize?: number;
   pauseBetweenSubscribeBatchesMs?: number;
+  maxStreamsPerConnection?: number;
 }
 
 export interface BinanceCombinedMessage {

@@ -18,13 +18,9 @@ jest.mock('@solncebro/websocket-engine', () => {
   };
 });
 
-jest.mock('../../src/ws/bybitWebSocketUtils', () => {
-  const actual = jest.requireActual('../../src/ws/bybitWebSocketUtils');
-  return {
-    ...actual,
-    authenticateBybitWebSocket: jest.fn().mockResolvedValue(undefined),
-  };
-});
+jest.mock('../../src/ws/bybitWebSocketAuth', () => ({
+  authenticateBybitWebSocket: jest.fn().mockResolvedValue(undefined),
+}));
 
 describe('BybitTradeStream', () => {
   const mockLogger = createMockLogger();
@@ -61,7 +57,7 @@ describe('BybitTradeStream', () => {
     });
 
     it('authenticates on open', async () => {
-      const { authenticateBybitWebSocket } = require('../../src/ws/bybitWebSocketUtils');
+      const { authenticateBybitWebSocket } = require('../../src/ws/bybitWebSocketAuth');
       const stream = new BybitTradeStream({ url, label: '[Bybit] Trade stream', logger: mockLogger, apiKey, secret });
 
       const connectPromise = stream.connect();

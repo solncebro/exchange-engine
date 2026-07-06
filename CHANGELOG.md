@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.0] - 2026-07-06 — Public-stream efficiency: ленивый стакан, bid/ask тикера, Binance aggTrade
+
+Эффективность публичных потоков и поддержка расчёта premium из тикера. Все находки подтверждены по коду (`файл:строка`). Раздел не дублирует Binance-feeder-объём 0.15.0 (авто-шардинг, залп `SUBSCRIBE`, учёт REST-веса, хуки `beforeRequest`/`onResponse`) — он ниже.
+
+### Added
+
+- **Ленивый парсинг стакана (opt-in `ExchangeConfig.lazyOrderbookParse`, только Bybit).** При включённом флаге orderbook-кадры не проходят полный `JSON.parse`: символ дёшево достаётся из головы кадра (`ORDERBOOK_TOPIC_HEAD_REGEX`, первые 200 байт), а весь сырой кадр складывается как строка. Полностью парсятся только символы из live-набора (реактивный вход). Экономит CPU, когда публичный поток стакана слишком тяжёл для одного Node-потока. Публичное API: `setOrderbookLiveSymbol({ symbol, isLive })`, `subscribeRawOrderbook(handler)` / `unsubscribeRawOrderbook(handler)` в `ExchangeClient`; on-demand парсер сырого кадра `parseBybitOrderbookRawFrame({ raw, symbol, receivedTimestamp })` (экспортируется из `index`); типы `RawOrderbookFrame` / `RawOrderbookHandler`. Тикеры/klines/publicTrade не затронуты. (`src/ws/BybitPublicStream.ts`, `src/normalizers/bybitNormalizer.ts`, `src/types/common.ts`)
+- **Best bid/ask (уровень 1) в тикере + живой поток тикеров.** `Ticker` несёт `bid1Price` / `bid1Size` / `ask1Price` / `ask1Size` (`src/types/common.ts`); `normalizeBybitTickers` заполняет их, когда Bybit прислал (snapshot всегда, delta — при изменении стороны) (`src/normalizers/bybitNormalizer.ts`). `ExchangeClient.subscribeAllTickers(handler, symbolList)` / `unsubscribeAllTickers(handler)` дают поток `TickerBySymbol` на каждое обновление — потребитель считает premium (mid − mark) прямо из тикера, не трогая стакан. Топик `tickers.{symbol}` делится с mark-price по ref-count — без лишнего соединения. (`src/types/exchange.ts`, `src/exchanges/BaseExchangeClient.ts`)
+- **Публичные сделки Binance Futures через `@aggTrade`.** `subscribePublicTrades` / `unsubscribePublicTrades` / `resubscribePublicTrades` теперь работают и на Binance Futures (раньше публичные сделки были только у Bybit) — стрим `{symbol}@aggTrade` на отдельном соединении (`groupKey = 'aggTrades'`). Нормализатор `normalizeBinanceAggTradeFromStream` + raw-тип `BinanceAggTradeWebSocketRaw` (`src/normalizers/binanceNormalizer.ts`, `src/ws/BinanceFuturesPublicStream.ts`).
+- **`fetchOpenConditionalOrders(settleCoin)` в `ExchangeClient`.** Открытые условные (stop / take-profit-trigger) ордера, которые обычный `fetchOpenOrders` не отдаёт. Bybit: `/v5/order/realtime` с `orderFilter=StopOrder` + `settleCoin`. Binance: `/fapi/v1/openOrders` без символа с фильтром `stopPrice > 0`. Добавлен параметр `orderFilter` в `buildCategoryParams` / `SymbolLimitFilterArgs`. (`src/exchanges/BybitBaseClient.ts`, `src/exchanges/BinanceBaseClient.ts`, `src/http/BybitHttpClient.ts`)
+- **`getMaxOrderQty(symbol)` / `getMarketMaxOrderQty(symbol)` в `ExchangeClient`.** Верхняя граница объёма из `filter.maxQty` и `filter.marketMaxQty` (с fallback на `maxQty`, если у рынка нет отдельного market-cap). (`src/exchanges/BaseExchangeClient.ts`)
+- **Subpath-экспорт `@solncebro/exchange-engine/public` (`src/public.ts`).** Лёгкая точка входа только для публичных стримов (`BybitPublicStream`, `BinanceFuturesPublicStream`), нормализаторов klines / tradeSymbols и нужных констант/типов — не тянет весь клиент. `package.json` → `exports["./public"]`.
+- **Application-level heartbeat Binance Futures public.** Ping через `{ method: 'LIST_SUBSCRIPTIONS', id }` с детекцией ответа по `id` + `Array.isArray(result)` вместо дефолтного ping `ReliableWebSocket`. (`src/ws/BinanceFuturesPublicStream.ts`)
+- **Тесты-детекторы полноты ответа биржи.** `bybitResponseCompleteness`, `bybitTickerCompleteness`, `binanceAggTrade` — падают, если биржа прислала поле, которое ни смоделировано в raw-типе, ни явно проигнорировано (защита от тихой потери данных при изменениях API).
+
+### Changed
+
+- **`authenticateBybitWebSocket` вынесен в отдельный модуль `src/ws/bybitWebSocketAuth.ts`** (из `bybitWebSocketUtils.ts`) — убирает импорт `crypto` из barrel-утилит; потребители (`BybitPrivateStream`, `BybitTradeStream`) импортируют из нового файла. Тело функции (подпись, обработка ошибок, логирование) перенесено без изменений.
+- **`parseWebSocketMessage` берёт тип `RawData` из `@solncebro/websocket-engine`** вместо прямого импорта из `ws` (гигиена зависимостей — тип реэкспортируется движком).
+
+## [0.15.0] - 2026-06-22 — Binance feeder multi-app readiness
+
+Усиление для работы market-data-feeder на Binance USD-M futures с несколькими приложениями за одним IP. Кодовые находки подтверждены `файл:строка`, лимиты Binance сверены с живым `fapi/v1/exchangeInfo` и developers.binance.com.
+
+### Fixed — High
+
+- **Залп `SUBSCRIBE` при подключении 2-го/3-го интервала (Binance public stream).** Когда соединение группы интервала ещё не открыто, инкрементальный путь слал по одному `SUBSCRIBE` на каждый из сотен символов (`sendDynamicSubscribe` через отложенные `readyPromise.then`) — залпом, превышая лимит Binance 10 входящих сообщений/сек на соединение → разрыв (и риск бана IP при повторах). Теперь на ещё-не-открытое соединение поштучные кадры не шлются: `onOpen` подписывает весь `streamList` пакетами (50 / 200мс ≈ 5 сообщений/сек), а `sendSubscribeBatches` читает длину списка вживую, поэтому символы, добавленные во время открытия, не теряются. (`src/ws/BinanceFuturesPublicStream.ts`)
+
+### Added
+
+- **Авто-шардинг соединений под лимит 1024 стрима.** Один интервал дробится на несколько соединений с общим `groupKey`, когда число стримов приближается к потолку Binance (1024); лимит на соединение настраивается (`maxStreamsPerConnection`, дефолт 900). `createConnections` чанкует через `chunkList`, `addStreamToIntervalGroup` кладёт стрим на шард с местом либо открывает новый. Раньше превышение вело к тихой потере подписок. (`src/ws/BinanceFuturesPublicStream.ts`)
+- **Учёт REST-веса и обработка HTTP 418 (Binance).** HTTP-клиент Binance парсит `x-mbx-used-weight-1m`, упреждающе тормозит чтения около ~80% от лимита 2400/мин на IP и делает back-off на 418 (с учётом `Retry-After`, ограничен разумным максимумом). Логика вынесена в чистые функции (`src/http/binanceRateLimit.ts`) и подключена двумя no-op хуками `beforeRequest`/`onResponse` в `BaseHttpClient` (Bybit и прочие не затронуты). Покрывает все чтения через единый клиент — дозагрузку, опрос тикеров и переподписку kline-watchdog. (`src/http/BaseHttpClient.ts`, `src/http/BinanceBaseHttpClient.ts`)
+
 ## [0.14.0] - 2026-05-30 — Reliability & API-compliance audit
 
 Комплексный аудит надёжности и соответствия текущему API Binance/Bybit. Кодовые находки подтверждены `файл:строка`; API-находки сверены с официальными доками бирж. Включает базовый объём 0.14.0 (см. history note ниже).

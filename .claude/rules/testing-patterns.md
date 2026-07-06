@@ -176,6 +176,29 @@ describe('ClassName', () => {
 - Проверяет через `require('../src/index')` что все runtime-значения экспортированы
 - Гарантирует стабильность публичного API
 
+## Тесты полноты ответа биржи (completeness guard)
+
+Паттерн для защиты от тихой потери поля, которое биржа добавила в ответ, но нормализатор не читает:
+
+```typescript
+const RAW_SAMPLE: Record<string, string> = { /* реальный снапшот ответа биржи, включая поля не в raw-типе */ };
+const MODELED_KEYS = new Set<string>([/* поля, которые нормализатор читает */]);
+const INTENTIONALLY_IGNORED_KEYS = new Set<string>([/* поля, осознанно не используемые */]);
+
+it('every field in a real snapshot is either modeled or explicitly ignored', () => {
+  const unaccounted = Object.keys(RAW_SAMPLE).filter(
+    (key) => !MODELED_KEYS.has(key) && !INTENTIONALLY_IGNORED_KEYS.has(key)
+  );
+  expect(unaccounted).toEqual([]);
+});
+```
+
+Тест падает, если в снапшоте появляется ключ, не учтённый ни в одном из двух множеств — сигнал, что нормализатор нужно обновить (либо явно проигнорировать поле). Файлы:
+- `test/normalizers/bybitTickerCompleteness.test.ts` — снапшот `tickers.{symbol}`, покрывает регресс bid1/ask1/mark/index
+- `test/normalizers/bybitResponseCompleteness.test.ts` — снапшоты `normalizeBybitOrder`, `normalizeBybitPosition`, `normalizeBybitBalances` (coin-level), `normalizeBybitOrderBook`/`normalizeBybitOrderBookUpdate` (проверяет и envelope-`ts` приоритет над `data.ts`)
+
+`test/normalizers/binanceAggTrade.test.ts` — обычный unit-тест `normalizeBinanceAggTradeFromStream` (maker/taker маппинг в `side`/`isBuyerMaker`, `quoteQuantity`), без MODELED_KEYS-паттерна.
+
 ## Тестирование retry (BaseHttpClient.test.ts)
 
 Используются fake timers:
@@ -192,6 +215,8 @@ const result = await promise;
 expect(mockInstance.get).toHaveBeenCalledTimes(2);
 jest.useRealTimers();
 ```
+
+`BinanceBaseHttpClient.test.ts` (`describe('rate-limit awareness (REQUEST_WEIGHT / 418)')`) проверяет проактивный троттлинг: warn при приближении к весу (заголовок `x-mbx-used-weight-1m`), отсутствие warn на здоровом весе, лог + отсутствие ретрая на HTTP 418 (`mockInstance.get` вызван 1 раз). Чистые функции троттлинга (`parseUsedWeight1m`, `parseRetryAfterMs`, `resolveRateLimitCooldownMs`) тестируются отдельно и без HTTP-мока в `test/http/binanceRateLimit.test.ts`.
 
 ## Assertions для Map
 
@@ -262,9 +287,9 @@ class TestTradeStream extends BaseTradeStream<any> {
 | Файл | Покрытие |
 |------|----------|
 | BaseTradeStream.test.ts | connect, disconnect, isConnected, createOrder, takePendingRequest |
-| BinanceFuturesPublicStream.test.ts | tickers, klines, dynamic subscribe, chunking, close |
+| BinanceFuturesPublicStream.test.ts | tickers, klines, dynamic subscribe, connection sharding (`maxStreamsPerConnection`), SUBSCRIBE-burst regression, close |
 | BinanceSpotPublicStream.test.ts | tickers, klines, resubscribeAll, handleMessage, close |
-| BybitPublicStream.test.ts | tickers (linear/spot), klines, resubscribeAll, close |
+| BybitPublicStream.test.ts | tickers (linear/spot, bid1/ask1), klines, resubscribeAll, lazyOrderbookParse (live/non-live orderbook), close |
 | BinanceUserDataStream.test.ts | connect, onMessage, close, isConnected |
 | BybitPrivateStream.test.ts | connect, auth, handleMessage filtering, close |
 | BinanceTradeStream.handleMessage.test.ts | request-response matching, ExchangeError |
@@ -274,4 +299,7 @@ class TestTradeStream extends BaseTradeStream<any> {
 | BybitTradeStream.batch.test.ts | три WS batch-метода (`createBatchOrders`/`modifyBatchOrders`/`cancelBatchOrders`), top-level errors, timeout, orphan context cleanup, kind mismatch protection |
 | TradeToKlineAggregator.test.ts | processTrade aggregation, forceEmit, clearSymbol, first-trade skip |
 | parseWebSocketMessage.test.ts | JSON parsing, error handling |
-| bybitWebSocketUtils.test.ts | pong detection, HMAC authentication |
+| bybitWebSocketUtils.test.ts | pong detection (heartbeat only — HMAC-аутентификация вынесена в bybitWebSocketAuth.test.ts) |
+| bybitWebSocketAuth.test.ts | authenticateBybitWebSocket: HMAC-подпись, ожидание `auth`-ответа, ошибки |
+
+Мокирование `authenticateBybitWebSocket` в тестах `BybitPrivateStream`/`BybitTradeStream` теперь идёт по новому пути: `jest.mock('../../src/ws/bybitWebSocketAuth', () => ({ authenticateBybitWebSocket: jest.fn().mockResolvedValue(undefined) }))` (раньше — `jest.mock('../../src/ws/bybitWebSocketUtils', ...)` с `requireActual` + override).

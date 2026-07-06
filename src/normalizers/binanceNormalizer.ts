@@ -709,6 +709,19 @@ export interface BinanceMarkPriceWebSocketRaw {
   T: number;
 }
 
+export interface BinanceAggTradeWebSocketRaw {
+  e: 'aggTrade';
+  E: number;
+  s: string;
+  a: number;
+  p: string;
+  q: string;
+  f: number;
+  l: number;
+  T: number;
+  m: boolean;
+}
+
 export interface BinanceOpenInterestRaw {
   symbol: string;
   openInterest: string;
@@ -753,6 +766,22 @@ export function normalizeBinancePublicTrades(rawList: BinancePublicTradeRaw[], s
     timestamp: raw.time,
     isBuyerMaker: raw.isBuyerMaker,
   }));
+}
+
+export function normalizeBinanceAggTradeFromStream(raw: BinanceAggTradeWebSocketRaw): PublicTrade {
+  const price = parseFloat(raw.p);
+  const quantity = parseFloat(raw.q);
+
+  return {
+    id: String(raw.a),
+    symbol: raw.s,
+    price,
+    quantity,
+    quoteQuantity: price * quantity,
+    timestamp: raw.T,
+    isBuyerMaker: raw.m,
+    side: raw.m ? OrderSideEnum.Sell : OrderSideEnum.Buy,
+  };
 }
 
 export function normalizeBinanceMarkPriceList(rawList: BinanceMarkPriceRaw[]): MarkPrice[] {

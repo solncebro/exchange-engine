@@ -1,6 +1,6 @@
 {
   "name": "@solncebro/exchange-engine",
-  "version": "0.14.0",
+  "version": "0.16.0",
   "description": "Universal TypeScript client library for Binance and Bybit with unified API, type safety, and WebSocket support",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -8,6 +8,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./public": {
+      "types": "./dist/public.d.ts",
+      "default": "./dist/public.js"
     }
   },
   "sideEffects": false,

@@ -40,6 +40,7 @@ BaseExchangeClient (abstract, implements ExchangeClient)
   cancelOrder(symbol, orderId): Promise<Order>
   getOrder(symbol, orderId): Promise<Order>
   fetchOpenOrders(symbol?): Promise<Order[]>
+  fetchOpenConditionalOrders(settleCoin): Promise<Order[]>
   modifyOrder(args: ModifyOrderArgs): Promise<Order>
   cancelAllOrders(symbol): Promise<void>
   createBatchOrders(orderList): Promise<Order[]>
@@ -75,6 +76,8 @@ Precision:
   priceToPrecision(symbol, price): number
   getMinOrderQty(symbol): number
   getMinNotional(symbol): number
+  getMaxOrderQty(symbol): number
+  getMarketMaxOrderQty(symbol): number
 
 Стриминг:
   watchTickers(): AsyncGenerator<TickerBySymbol>
@@ -86,8 +89,13 @@ Precision:
   resubscribeMarkPrices(): void
   subscribeMarkPrices(handler: MarkPriceHandler): void
   unsubscribeMarkPrices(handler: MarkPriceHandler): void
+  subscribeAllTickers(handler: (tickers: TickerBySymbol) => void, symbolList: string[]): void
+  unsubscribeAllTickers(handler: (tickers: TickerBySymbol) => void): void
   subscribeOrderbook(args: SubscribeOrderbookArgs): void
   unsubscribeOrderbook(args: SubscribeOrderbookArgs): void
+  setOrderbookLiveSymbol(args: SetOrderbookLiveSymbolArgs): void
+  subscribeRawOrderbook(handler: RawOrderbookHandler): void
+  unsubscribeRawOrderbook(handler: RawOrderbookHandler): void
   subscribePublicTrades(args: SubscribePublicTradesArgs): void
   unsubscribePublicTrades(args: SubscribePublicTradesArgs): void
 
@@ -112,10 +120,14 @@ WebSocket Registry:
 - `resubscribeKlines()` — принудительная переподписка на стрим (вызывает `publicStream.resubscribeStream()` если поддерживается)
 - `resubscribeOrderbook(args)` / `resubscribePublicTrades(args)` / `resubscribeMarkPrices()` — принудительная light-переподписка (unsubscribe+subscribe на живом сокете, без реконнекта; recreate-fallback при disconnect) соответствующих топиков; делегируют в `publicStream.resubscribe*` если реализованы (Bybit; для mark-price — батчево по всем `tickers.{symbol}`, connection-granular). Используются `StreamSubscriptionWatchdog` (trade-engine) для recovery при тихом устаревании потока без разрыва сокета
 - `subscribeMarkPrices()` / `unsubscribeMarkPrices()` — делегирует в `getPublicStream()`, прокидывая `Array.from(this.tradeSymbols.keys())` как `symbolList` (Binance Futures — агрегатный `!markPrice@arr@1s`, symbolList игнорируется; Bybit — per-symbol `tickers.{symbol}` по каждому символу из symbolList, агрегатного топика нет; Binance Spot — предупреждение в стриме, без подписки)
-- `subscribeOrderbook()` / `subscribePublicTrades()` — делегирует в `getPublicStream()`, если метод реализован (Bybit). Если `PublicStreamLike.subscribeOrderbook`/`subscribePublicTrades` равен `undefined` (Binance) — `subscribe*` бросает `Not supported for ${marketLabel} market`, `unsubscribe*` — no-op
+- `subscribeAllTickers()` / `unsubscribeAllTickers()` — прямая передача (`symbolList` приходит от вызывающего, в отличие от `subscribeMarkPrices` — сам `tradeSymbols` не читает); `unsubscribeAllTickers` — опциональный вызов (`?.()`)
+- `subscribeOrderbook()` / `subscribePublicTrades()` — делегирует в `getPublicStream()`, если метод реализован. `subscribeOrderbook` — только Bybit (linear и spot); если `PublicStreamLike.subscribeOrderbook === undefined` — throw `Orderbook subscription not supported for ${marketLabel} market`, `unsubscribeOrderbook` — no-op. `subscribePublicTrades` — Bybit и Binance Futures (не Binance Spot); если `PublicStreamLike.subscribePublicTrades === undefined` — throw `Public trade subscription not supported for ${marketLabel} market`, `unsubscribePublicTrades` — no-op
+- `setOrderbookLiveSymbol()` / `subscribeRawOrderbook()` / `unsubscribeRawOrderbook()` — опциональная передача (`?.()`) в `getPublicStream()`; реализованы только у Bybit (см. «Lazy orderbook parse» ниже)
 - `awaitWebSocketConnectionsReady()` — `publicStream.awaitConnectionsReady?.() ?? Promise.resolve()` (Binance Futures public ждёт SUBSCRIBE-батчи; остальные стримы без метода — немедленный resolve)
 - `amountToPrecision()` / `priceToPrecision()` — lookup в tradeSymbols + precision utils, возвращает `number`, fallback на исходное значение
 - `getMinOrderQty()` / `getMinNotional()` — lookup в tradeSymbols, fallback 0
+- `getMaxOrderQty()` — lookup `filter.maxQty`, fallback 0
+- `getMarketMaxOrderQty()` — lookup `filter.marketMaxQty` (валидное конечное число `> 0`), fallback на `filter.maxQty` (нет отдельного market-cap у символа), затем fallback 0
 
 ### Абстрактно (нужно реализовать):
 - `protected getPublicStream(): PublicStreamLike`
@@ -145,7 +157,7 @@ Binance public streams создаются до `super()`, поэтому выз�
 ### Default throw (переопределяются в подклассах):
 - `fetchOrderHistory()`, `fetchFundingRateHistory()`, `fetchFundingInfo()`, `fetchPositionMode()`
 - `fetchPosition()`, `setLeverage()`, `setMarginMode()`
-- `cancelOrder()`, `getOrder()`, `fetchOpenOrders()`, `fetchOrderBook()`, `fetchTrades()`
+- `cancelOrder()`, `getOrder()`, `fetchOpenOrders()`, `fetchOpenConditionalOrders()`, `fetchOrderBook()`, `fetchTrades()`
 - `modifyOrder()`, `cancelAllOrders()`, `createBatchOrders()`, `cancelBatchOrders()`, `modifyBatchOrders()`, `getOrderRateLimit()`
 - `fetchMarkPrice()`, `fetchOpenInterest()`, `fetchFeeRate()`, `fetchIncome()`, `fetchClosedPnl()`
 - `setPositionMode()`, `connectUserDataStream()`, `disconnectUserDataStream()`
@@ -153,112 +165,14 @@ Binance public streams создаются до `super()`, поэтому выз�
 ### Default return (переопределяются в подклассах):
 - `isUserDataStreamConnected()` — возвращает `false`
 
-## BinanceBaseClient — шаблонный метод
+## Детальная документация по биржам
 
-Обобщённый класс `<T extends BinanceBaseHttpClient>` — общий для Spot и Futures.
+Конкретные реализации вынесены в отдельные файлы (файл-осколок теории 30k-лимита):
 
-Реализует все `protected fetchAndNormalize*()` методы:
-- `fetchAndNormalizeTradeSymbols()` → `httpClient.fetchExchangeInfo()` → `normalizeBinanceTradeSymbols()`
-- `fetchAndNormalizeTickers()` → `httpClient.fetchTickers()` → `normalizeBinanceTickers()`
-- `fetchAndNormalizeKlines()` → `httpClient.fetchKlines()` → `normalizeBinanceKlines()`
-- `fetchAndNormalizeBalances()` → `httpClient.fetchAccount()` → `normalizeBinanceBalances()`
-
-Реализует `createOrderWebSocket()` через `BinanceTradeStream` с fallback на REST:
-1. Формирует params через `buildBinanceOrderParams()`: `{ symbol, side, type, quantity, price, timeInForce, ... }`
-2. Форматирует через `amountToPrecision()` + `priceToPrecision()`
-3. Для limit-like ордеров маппит `timeInForce`: **futures** через `BINANCE_FUTURES_TIME_IN_FORCE_REVERSE` (`PostOnly → GTX`, дефолт `GTC`); **spot** post-only Limit → тип `LIMIT_MAKER` (без `timeInForce`), иначе значение enum как есть (`GTC`/`IOC`/`FOK`)
-4. Если `tradeStream.isConnected()` → отправляет через WebSocket
-5. Иначе fallback: `httpClient.createOrder()` → `normalizeBinanceOrder()`
-
-Реализует методы работы с ордерами (6 методов):
-- `fetchOrderHistory(symbol, options?)` → `httpClient.getAllOrders()` → `map(normalizeBinanceOrder)`
-- `cancelOrder(symbol, orderId)` → `httpClient.cancelOrder()` → `normalizeBinanceOrder()`
-- `getOrder(symbol, orderId)` → `httpClient.getOrder()` → `normalizeBinanceOrder()`
-- `fetchOpenOrders(symbol?)` → `httpClient.getOpenOrders()` → `map(normalizeBinanceOrder)`
-- `fetchOrderBook(symbol, limit?)` → `httpClient.fetchOrderBook()` → `normalizeBinanceOrderBook()`
-- `fetchTrades(symbol, limit?)` → `httpClient.fetchTrades()` → `normalizeBinancePublicTrades()`
-
-Реализует `isTradeWebSocketConnected()` и `connectTradeWebSocket()` через `BinanceTradeStream`.
-
-Реализует `connectUserDataStream(handler)` — создаёт listenKey через REST, запускает `BinanceUserDataStream`, устанавливает keepalive-таймер (`setInterval` каждые 30 мин → `keepAliveListenKey`). Защита от гонки: флаг `userDataStreamConnecting` + `try/finally` не дают создать второй стрим/таймер при параллельном вызове. **`BinanceSpot` переопределяет `connectUserDataStream` и бросает ошибку** (listenKey REST `/api/v3/userDataStream` удалён биржей 2026-02-20; нужна миграция на WS API). Обрабатывает события:
-- `ORDER_TRADE_UPDATE` → `handler.onOrderUpdate` (статус через канон `BINANCE_ORDER_STATUS` из mappings — НЕ локальная карта; `REJECTED → 'rejected'`, `EXPIRED → 'canceled'`)
-- `ACCOUNT_UPDATE` → `handler.onPositionUpdate` (из `event.a.P[]`)
-
-Реализует `disconnectUserDataStream()` — очищает keepalive-таймер, закрывает стрим, удаляет listenKey через `deleteListenKey`.
-
-Реализует `isUserDataStreamConnected()` — `userDataStream !== null && userDataStream.isConnected()`.
-
-Реализует `getWebSocketConnectionInfoList()` — агрегирует `publicStream.getConnectionInfoList()` + `tradeStream.getConnectionInfo()` + optional `userDataStream.getConnectionInfo()`.
-
-## Конкретные классы — отличия
-
-### BinanceFutures
-- `marketLabel = 'futures'`, `klineLimit = 499`
-- Реализует все фьючерсные методы (position, leverage, funding, marginMode)
-- Реализует дополнительные методы (9):
-  - `modifyOrder(args)` → `httpClient.modifyOrder()` → `normalizeBinanceOrder()`
-  - `cancelAllOrders(symbol)` → `httpClient.cancelAllOrders()`
-  - `createBatchOrders(orderList)` → chunking по `BINANCE_FUTURES_CREATE_BATCH_CHUNK_SIZE` (5) через `chunkList` → последовательные вызовы `httpClient.createBatchOrders()` → `normalizeBinanceOrder()` per item. Per-order ошибки в ответе (элементы с `code < 0`) пропускаются с `logger.warn()` — успешные ордера возвращаются.
-  - `cancelBatchOrders(symbol, orderIdList)` → chunking по `BINANCE_FUTURES_CANCEL_BATCH_CHUNK_SIZE` (10) → последовательные вызовы `httpClient.cancelBatchOrders()`; per-order success/error агрегируется в `CancelBatchOrdersResult`
-  - `modifyBatchOrders(orderList)` → chunking по `BINANCE_FUTURES_MODIFY_BATCH_CHUNK_SIZE` (5) → последовательные вызовы `httpClient.modifyBatchOrders()` → per-order маппинг success/error в `ModifyBatchOrdersResult`. Каждый ордер требует `side` (обязательно для Binance PUT `/fapi/v1/batchOrders`); `clientOrderId` (если задан) маппится в `origClientOrderId`.
-  - `fetchMarkPrice(symbol?)` → `httpClient.fetchMarkPrice()` → `normalizeBinanceMarkPriceList()`
-  - `fetchOpenInterest(symbol)` → `httpClient.fetchOpenInterest()` → `normalizeBinanceOpenInterest()`
-  - `fetchFeeRate(symbol?)` → `httpClient.fetchCommissionRate()` → `normalizeBinanceCommissionRate()`
-  - `fetchIncome(options?)` → `httpClient.fetchIncome()` → `normalizeBinanceIncomeList()`
-- `setPositionMode(mode)` → `httpClient.setPositionMode()`, код Binance `-4059` (`No need to change position side.`) обрабатывается как no-op без throw (логируется на HTTP-слое)
-- `setMarginMode(mode, symbol)` для Binance futures: код Binance `-4046` (`No need to change margin type.`) обрабатывается как no-op без throw (логируется на HTTP-слое)
-- HTTP: `BinanceFuturesHttpClient`, WS: `BinanceFuturesPublicStream`
-
-### BinanceSpot
-- `marketLabel = 'spot'`, `klineLimit = 1000`
-- Фьючерсные методы → `throw new Error('Not supported for spot market')`
-- HTTP: `BinanceSpotHttpClient`, WS: `BinanceSpotPublicStream`
-
-## BybitBaseClient — общая Bybit логика
-
-Промежуточный абстрактный класс для `BybitLinear` и `BybitSpot`. Наследует `BaseExchangeClient`.
-
-`category` — `protected readonly` поле (доступно подклассам для передачи в HTTP-вызовы).
-
-`batchChunkSize` — `protected abstract readonly` поле: максимальный размер чанка для batch-операций. `BybitLinear` = `BYBIT_LINEAR_BATCH_CHUNK_SIZE` (20), `BybitSpot` = `BYBIT_SPOT_BATCH_CHUNK_SIZE` (10). Используется во всех трёх batch-методах (`createBatchOrders`, `modifyBatchOrders`, `cancelBatchOrders`) через `chunkList()`.
-
-Реализует все `protected fetchAndNormalize*()` методы через `BybitHttpClient` + `bybitNormalizer`.
-
-Реализует `createOrderWebSocket()` через `BybitTradeStream` с fallback на REST:
-1. Формирует params через `buildBybitOrderParams()`: `{ category, symbol, orderType, side, qty, ... }`
-2. `submitOrder(orderParams, args: CreateOrderWebSocketArgs)` — принимает аргументы как второй параметр
-3. Если `tradeStream !== null && tradeStream.isConnected()` → отправляет через WebSocket; на WS-пути `Order.rateLimit` snapshot из ответа переносится на пересобранный Order (не теряется)
-4. Иначе fallback: `httpClient.createOrder()` → `buildBybitOrderFromCreateResponse()`
-
-`fetchKlines` для Bybit интервала без маппинга в `BYBIT_KLINE_INTERVAL` (например `1s`) бросает ошибку — Bybit REST не отдаёт 1s-свечи (только WS-агрегатор).
-
-Реализует `isTradeWebSocketConnected()` и `connectTradeWebSocket()` через `BybitTradeStream`.
-
-Реализует `connectUserDataStream(handler)` — создаёт `BybitPrivateStream` с `topicList: ['order', 'position']` и demo-aware `url` (`privateWebSocketUrl`, выбран по `isDemoMode`). Обрабатывает события:
-- `topic === 'order'` → `handler.onOrderUpdate` (статус через канон `BYBIT_ORDER_STATUS` из mappings — НЕ локальная карта; `Rejected → 'rejected'`, `Deactivated`/`PartiallyFilledCanceled → 'canceled'`, `Triggered → 'open'`)
-- `topic === 'position'` → `handler.onPositionUpdate`
-
-Реализует `disconnectUserDataStream()` — закрывает `privateStream`.
-
-Реализует `isUserDataStreamConnected()` — `privateStream !== null && privateStream.isConnected()`.
-
-Реализует методы работы с ордерами и рыночными данными (14 методов):
-- `cancelOrder(symbol, orderId)` → `httpClient.cancelOrder()` → затем `getOrder(symbol, orderId)` возвращает реальный нормализованный Order (а не фабрикованный stub с `side: Buy`)
-- `getOrder(symbol, orderId)` → сначала `httpClient.getOpenOrders()` (realtime), fallback на `httpClient.getOrderHistory()` → `normalizeBybitOrder()`
-- `fetchOpenOrders(symbol?)` → `httpClient.getOpenOrders()` → `map(normalizeBybitOrder)`
-- `fetchOrderHistory(symbol, options?)` → `httpClient.getOrderHistory()` → `map(normalizeBybitOrder)`
-- `fetchOrderBook(symbol, limit?)` → `httpClient.fetchOrderBook()` → `normalizeBybitOrderBook()`
-- `fetchTrades(symbol, limit?)` → `httpClient.fetchRecentTrades()` → `normalizeBybitPublicTradeList()`
-- `fetchFeeRate(symbol?)` → `httpClient.fetchFeeRate()` → `normalizeBybitFeeRateList()`
-- `modifyOrder(args)` → `httpClient.amendOrder()` → `getOrder()` для получения обновлённого ордера
-- `cancelAllOrders(symbol)` → `httpClient.cancelAllOrders(category, symbol)`
-- `createBatchOrders(orderList)` → chunking по `batchChunkSize` через `chunkList`. WS-routing: если `tradeStream !== null && tradeStream.isConnected()` → `tradeStream.createBatchOrders(category, originalArgsChunk, requestPayloadChunk)`; иначе `httpClient.createBatchOrders(category, request)` → `map(buildBybitOrderFromCreateResponse)`.
-- `cancelBatchOrders(symbol, orderIdList)` → chunking по `batchChunkSize`. WS-routing: если активен tradeStream → `tradeStream.cancelBatchOrders(category, originalOrderIdChunk, requestPayloadChunk)`; иначе `httpClient.cancelBatchOrders()` → per-order маппинг через `retExtInfo.list`. Результат — `CancelBatchOrdersResult`.
-- `modifyBatchOrders(orderList)` → chunking по `batchChunkSize`. WS-routing: если активен tradeStream → `tradeStream.modifyBatchOrders(category, originalOrderIdChunk, requestPayloadChunk)`; иначе `httpClient.amendBatchOrders(category, request)` → per-order маппинг через `retExtInfo.list` в `ModifyBatchOrdersResult`. `clientOrderId` маппится в `orderLinkId`.
-- `fetchIncome(options?)` → `httpClient.fetchTransactionLog()` → `normalizeBybitIncomeList()`
-- `fetchClosedPnl(symbol?, options?)` → `httpClient.getClosedPnl()` → `normalizeBybitClosedPnlList()`
-
-**WS-routing для batch-операций**: при наличии активного `tradeStream` (`tradeStream !== null && tradeStream.isConnected()`) все три batch-метода (`createBatchOrders`, `modifyBatchOrders`, `cancelBatchOrders`) отправляются через WebSocket Trade Stream (`order.create-batch`, `order.amend-batch`, `order.cancel-batch`); иначе fallback на REST. В demo mode (`tradeStream === null`) — всегда REST. Chunking применяется на уровне `BybitBaseClient` снаружи WS/REST-вызова — каждый чанк отправляется отдельным запросом, результаты конкатенируются.
+| Файл | Содержание |
+|------|-----------|
+| [exchange-layer-binance.md](exchange-layer-binance.md) | BinanceBaseClient, BinanceFutures, BinanceSpot |
+| [exchange-layer-bybit.md](exchange-layer-bybit.md) | BybitBaseClient, BybitLinear, BybitSpot |
 
 ## getOrderRateLimit (per-UID write rate-limit)
 
@@ -280,29 +194,6 @@ Raw-тип: `BinanceRateLimitRaw { rateLimitType, interval, intervalNum, limit }
 Реализует `getWebSocketConnectionInfoList()` — агрегирует `publicStream.getConnectionInfoList()` + optional `tradeStream.getConnectionInfo()` + optional `privateStream.getConnectionInfo()`.
 
 В demo mode `tradeStream = null` — все ордера через REST.
-
-### BybitLinear
-- `marketLabel = 'linear'`
-- `batchChunkSize = BYBIT_LINEAR_BATCH_CHUNK_SIZE` (20) — лимит Bybit V5 на linear/inverse/option batch
-- Наследует `BybitBaseClient`
-- Реализует фьючерсные методы (position, leverage)
-- `setMarginMode()` — no-op (Bybit Unified Account управляет margin mode на уровне аккаунта, не символа)
-- `setLeverage()` — обрабатывает код Bybit `110043` (leverage not modified) как no-op без throw
-- Реализует `createOrderWebSocket()` через `buildBybitOrderParams()` + `submitOrder()`
-- Реализует дополнительные методы:
-  - `fetchMarkPrice(symbol?)` → `httpClient.fetchTickers()` → `normalizeBybitMarkPriceList()`
-  - `fetchOpenInterest(symbol)` → `httpClient.fetchOpenInterest()` → `normalizeBybitOpenInterest()`, symbol устанавливается
-  - `fetchFundingRateHistory(symbol, options?)` → `httpClient.fetchFundingHistory()` → `normalizeBybitFundingRateHistoryList()`
-  - `fetchFundingInfo()` → `throw new Error('Not implemented for Bybit')`
-  - `fetchPositionMode()` → `httpClient.fetchPositionList({ category: 'linear', settleCoin: 'USDT' })` → инференс по `positionIdx`: Hedge если ∃ позиция с `positionIdx ∈ {1, 2}`, OneWay если все `positionIdx === 0`, `undefined` если позиций нет (Bybit V5 не даёт API для чтения mode без позиций). Сигнатура — `Promise<PositionModeEnum | undefined>` (3.4.0/0.13.0 BREAKING).
-- `setPositionMode(mode)` → `httpClient.setPositionMode()`, код Bybit `110025` обрабатывается как no-op без throw
-
-### BybitSpot
-- `marketLabel = 'spot'`
-- `batchChunkSize = BYBIT_SPOT_BATCH_CHUNK_SIZE` (10) — лимит Bybit V5 на spot batch
-- Наследует `BybitBaseClient`
-- Для market ордеров устанавливает `marketUnit = 'baseCoin'` по умолчанию (только если не задан явно через `args.marketUnit` И не используется `quoteOrderQty`)
-- Фьючерсные методы наследуют default throw из `BaseExchangeClient`
 
 ## Demo mode
 
@@ -377,4 +268,20 @@ ExchangeLogger поддерживает overloaded signatures:
 - `symbol: string` — торговый символ
 - `handler: PublicTradeHandler` — `(symbol, tradeList: PublicTrade[]) => void`
 
-Поддерживается только Bybit. Сосуществует с `subscribeKlines(symbol, '1s', ...)` (`TradeToKlineAggregator`) на одном topic `publicTrade.{symbol}` — оба consumer'а получают сообщения независимо.
+Поддерживается Bybit (linear и spot) и Binance Futures (через `@aggTrade`, см. `websocket-layer.md`); Binance Spot — нет. На Bybit сосуществует с `subscribeKlines(symbol, '1s', ...)` (`TradeToKlineAggregator`) на одном topic `publicTrade.{symbol}` — оба consumer'а получают сообщения независимо.
+
+## Lazy orderbook parse (opt-in, `ExchangeConfig.lazyOrderbookParse`)
+
+Default `false` (или поле отсутствует) → поведение без изменений: каждый WS-кадр полностью парсится (`parseWebSocketMessage` → `JSON.parse`) до маршрутизации. Включается только когда public-WS становится слишком тяжёлым для парсинга на одном Node-потоке (у coin-listing orderbook ~4650 кадров/с × ~322µs = ~1.5 ядра только на парсинг → отставание стакана). **Действует ТОЛЬКО на orderbook-топики**; tickers/klines/publicTrade не затрагиваются.
+
+При `true` (только `BybitPublicStream`):
+- `resolveBybitMessage` (новый `parseMessage`-колбэк) дёшево достаёт символ из первых ~200 байт сырого кадра через `ORDERBOOK_TOPIC_HEAD_REGEX` — **без** `JSON.parse` тела. Для orderbook-кадра символа **не из** `liveOrderbookSymbolSet` возвращает лёгкий sentinel `{ topic, __rawOrderbook: { symbol, raw, receivedTimestamp } }`. Если topic не в голове кадра — fallback на полный парс (корректность сохранена, экономии для этого кадра нет). Не-orderbook топики всегда парсятся полностью.
+- `handleMessage` при `__rawOrderbook` раздаёт сырьё зарегистрированным `rawOrderbookHandlerSet` и `return` (никакой нормализации). Для live-символа ДОПОЛНИТЕЛЬНО делает полный парс → `handleOrderBookMessage` (consumer строит абсолютную книгу в реальном времени).
+- Публичное API (проброшено через `BaseExchangeClient` / `ExchangeClient`): `setOrderbookLiveSymbol(args: { symbol, isLive })` (управление live-set), `subscribeRawOrderbook(handler: RawOrderbookHandler)` / `unsubscribeRawOrderbook(handler)`. `resubscribeOrderbook(symbol, depth)` (уже был) — даёт свежий snapshot для live-символа (unsub+sub на живом сокете).
+- `parseBybitOrderbookRawFrame({ raw, symbol, receivedTimestamp }): OrderBookUpdate | undefined` (экспортируется из index) — on-demand парсинг сырого кадра в `OrderBookUpdate` (потребитель сам решает, что и когда парсить, напр. capture-окно). Типы `RawOrderbookFrame` / `RawOrderbookHandler` в `types/common.ts`.
+
+Радиус поражения изолирован флагом (как `publicStreamConnectionPacking`): ma-chaser и прочие потребители без флага не затронуты. **coin-listing эту возможность НЕ использует** (по умолчанию off) — она оставлена в либе на будущее; приложение хранит стакан отсортированным массивом и парсит каждый кадр (узкое место было не в парсинге, а в O(N)-переборе best — устранено на стороне coin-listing).
+
+## Ticker: bid1/ask1 + subscribeAllTickers
+
+`BybitTickerRaw` и нормализованный `Ticker` (`types/common.ts`) несут **`bid1Price/bid1Size/ask1Price/ask1Size`** (best bid/ask level 1, linear). Bybit шлёт их в `tickers.{symbol}` (snapshot всегда, delta — при изменении); `normalizeBybitTickers` заполняет их когда присутствуют. Публичный `ExchangeClient.subscribeAllTickers(handler, symbolList)` / `unsubscribeAllTickers(handler)` (passthrough в `BaseExchangeClient`) даёт per-update поток `TickerBySymbol` — потребитель может считать premium (mid − mark) из тикера, не трогая стакан. Защита от молчаливой потери полей — `test/normalizers/bybitTickerCompleteness.test.ts` (реальная фикстура снапшота; падает, если биржа прислала ключ, который ни смоделирован, ни явно проигнорирован).

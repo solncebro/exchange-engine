@@ -35,6 +35,12 @@ BaseHttpClient (abstract)
 - Для этих кодов пишется `info`-лог с текстом `msg`, который вернула биржа
 - Поведение применяется ко всем HTTP-методам (`get`, `post`, `put`, `delete`)
 
+### Rate-limit extension points (`beforeRequest` / `onResponse`)
+- `protected async beforeRequest(): Promise<void>` — no-op хук, вызывается в `get()` **перед** каждой попыткой (включая retry)
+- `protected onResponse(status: number | undefined, headers: unknown): void` — no-op хук, вызывается в `get()` после ответа: и на успехе (`response.status/headers`), и на ошибке (`axiosError.response?.status/headers`)
+- Оба хука вызываются только из `get()` — единственного метода с retry; `post`/`put`/`delete` (через `executeRequest`) их не вызывают
+- `BaseHttpClient` не переопределяет ни один из хуков (пустое тело); `BinanceBaseHttpClient` переопределяет оба для проактивного троттлинга (см. ниже). Bybit и прочие наследники `BaseHttpClient` не переопределяют — поведение не меняется
+
 ### BybitHttpClient ошибки:
 - Выбрасывает `ExchangeError` (из `src/errors/ExchangeError.ts`) с полями `code` и `exchange` для структурированной обработки ошибок.
 
@@ -53,7 +59,7 @@ BaseHttpClient (abstract)
 - **Exponential backoff**: 1s → 2s → 4s
 - **429 с Retry-After**: используется значение заголовка (в секундах → ms)
 
-Rate limiting — **только реактивный** (нет proactive throttling).
+Rate limiting в `BaseHttpClient` — **только реактивный** (нет proactive throttling). `BinanceBaseHttpClient` добавляет поверх проактивный троттлинг по REQUEST_WEIGHT через `beforeRequest`/`onResponse` (см. ниже) — Bybit и прочие наследники `BaseHttpClient` этим не затронуты.
 
 ## BinanceBaseHttpClient (src/http/BinanceBaseHttpClient.ts)
 
@@ -80,6 +86,21 @@ Rate limiting — **только реактивный** (нет proactive thrott
 4. Добавить `signature` к params
 
 **Wire-parity (критично):** `BaseHttpClient` настраивает axios `paramsSerializer.serialize = serializeQueryParams` — та же функция, что и при подписи. Это гарантирует, что строка, реально отправляемая axios, байт-в-байт совпадает с подписанной (иначе спецсимволы `,`/`:` в payload, например JSON batch-ордеров, ломают подпись → Binance `-1022`). Тот же сериализатор применяется к Bybit GET (`BybitHttpClient.authenticatedGet`), где Bybit REST recvWindow = `BYBIT_RECV_WINDOW` (7000).
+
+### Rate-limit awareness (REQUEST_WEIGHT / HTTP 418, src/http/binanceRateLimit.ts)
+
+Binance банит IP по совокупному весу запросов (`REQUEST_WEIGHT`, 2400/мин) и отвечает HTTP 418 при уже случившемся бане. `BinanceBaseHttpClient` переопределяет `beforeRequest`/`onResponse`, подключая проактивный троттлинг поверх реактивного retry `BaseHttpClient` — покрывает все чтения через `get()` (дозагрузка klines, опрос тикеров, переподписка kline-watchdog).
+
+- `weightCooldownUntilMs` — приватное поле instance, unix ms до которого следующий `get()` должен ждать
+- `beforeRequest()` — если `weightCooldownUntilMs > Date.now()`, ждёт разницу через `setTimeout` перед запросом
+- `onResponse(status, headers)` — парсит заголовок `x-mbx-used-weight-1m` (`parseUsedWeight1m`) и `retry-after` (`parseRetryAfterMs`), передаёт в чистую функцию `resolveRateLimitCooldownMs({ status, usedWeight, retryAfterMs })`:
+  - `status === 418` (IP уже забанен) → cooldown = `min(retryAfterMs ?? BINANCE_BAN_DEFAULT_COOLDOWN_MS, BINANCE_BAN_MAX_COOLDOWN_MS)` (30s по умолчанию, максимум 60s), логируется `logger.error('Binance HTTP 418 — IP banned; backing off reads for ...ms')`
+  - `usedWeight >= BINANCE_REQUEST_WEIGHT_LIMIT_PER_MIN * BINANCE_WEIGHT_THROTTLE_RATIO` (2400 × 0.8 = 1920) → cooldown = `BINANCE_WEIGHT_NEAR_CAP_COOLDOWN_MS` (2000ms), логируется `logger.warn('Binance REQUEST_WEIGHT near cap ...')`
+  - иначе → `0` (без троттлинга)
+  - если cooldown > 0 → `weightCooldownUntilMs = Date.now() + cooldownMs`
+- Константы: `BINANCE_REQUEST_WEIGHT_LIMIT_PER_MIN = 2400`, `BINANCE_WEIGHT_THROTTLE_RATIO = 0.8`, `BINANCE_WEIGHT_NEAR_CAP_COOLDOWN_MS = 2000`, `BINANCE_BAN_DEFAULT_COOLDOWN_MS = 30000`, `BINANCE_BAN_MAX_COOLDOWN_MS = 60000`
+- HTTP 418 не входит в `isRetryable()` (`BaseHttpClient`) — не ретраится автоматически; back-off применяется только к следующему `get()`-вызову через `beforeRequest`, а не к текущему запросу
+- Логика вынесена в чистые функции без побочных эффектов (`parseUsedWeight1m`, `parseRetryAfterMs`, `resolveRateLimitCooldownMs`) — тестируются изолированно от HTTP-клиента (`test/http/binanceRateLimit.test.ts`)
 
 ### Общие эндпоинты (реализованы в base):
 - `fetchExchangeInfo()` → `BinanceExchangeInfoRaw` — GET `endpoints.exchangeInfo`
@@ -151,7 +172,7 @@ order, openOrders, allOrders, account, listenKey
 - `authenticatedPost<T>(path, body)` — JSON.stringify body → подписывает → POST
 
 ### Private хелпер:
-- `buildCategoryParams(category, options?)` → `Record<string, ...>` — строит params с `{ category }` + optional `symbol`, `limit` и `orderId`. Используется в 7 методах: `fetchInstrumentsInfo`, `fetchTickers`, `getOpenOrders`, `getOrderHistory`, `getPositionList`, `getClosedPnl`, `fetchFeeRate`.
+- `buildCategoryParams(category, options?)` → `Record<string, ...>` — строит params с `{ category }` + optional `symbol`, `limit`, `orderId`, `settleCoin`, `baseCoin` и `orderFilter`. Используется в 7 методах: `fetchInstrumentsInfo`, `fetchTickers`, `getOpenOrders`, `getOrderHistory`, `getPositionList`, `getClosedPnl`, `fetchFeeRate`. `orderFilter` (0.16.0) — для `fetchOpenConditionalOrders(settleCoin)` (`BybitBaseClient`), передаётся как `OrderFilterEnum.StopOrder` через `getOpenOrders(category, { settleCoin, orderFilter })`
 
 ### Все методы используют категорию:
 - `fetchInstrumentsInfo(category, options?)` → `BybitListResponse<BybitInstrumentInfoRaw>` — GET `/v5/market/instruments-info`
@@ -213,4 +234,5 @@ async fetchSomething(symbol: string, options?: FetchPageWithLimitArgs): Promise<
 Типы вынесены в co-located `.types.ts` файлы:
 - `BaseHttpClient.types.ts` — BaseHttpClientArgs
 - `BinanceBaseHttpClient.types.ts` — BinanceEndpoints, BinanceHttpClientArgs, BinanceErrorResponse, BinanceListenKeyResponse
-- `BybitHttpClient.types.ts` — BybitHttpClientArgs, BybitApiResponse, BybitListResponse, BybitResponse, BybitOrderBookRaw (дублируется из normalizer), FetchBybitKlineArgs, SetBybitLeverageArgs, SwitchBybitIsolatedArgs, SymbolFilterArgs, SymbolLimitFilterArgs, PeriodFilterArgs, CategoryFilterArgs, BybitAmendBatchOrderRaw, BybitAmendBatchOrderExtInfo, BybitAmendBatchOrdersResponse (структура аналогична `BybitCancelBatchOrdersResponse`: `result.list[]` — основные данные с `orderId`/`orderLinkId`, `retExtInfo.list[]` — per-order success/error через `{ code, msg }`)
+- `BybitHttpClient.types.ts` — BybitHttpClientArgs, BybitApiResponse, BybitListResponse, BybitResponse, BybitOrderBookRaw (дублируется из normalizer), FetchBybitKlineArgs, SetBybitLeverageArgs, SwitchBybitIsolatedArgs, SymbolFilterArgs, SymbolLimitFilterArgs (`orderFilter?: string` — 0.16.0, для `fetchOpenConditionalOrders`), PeriodFilterArgs, CategoryFilterArgs, BybitAmendBatchOrderRaw, BybitAmendBatchOrderExtInfo, BybitAmendBatchOrdersResponse (структура аналогична `BybitCancelBatchOrdersResponse`: `result.list[]` — основные данные с `orderId`/`orderLinkId`, `retExtInfo.list[]` — per-order success/error через `{ code, msg }`)
+- `binanceRateLimit.ts` (не `.types.ts`, но чистый модуль без класса) — константы + чистые функции `parseUsedWeight1m`, `parseRetryAfterMs`, `resolveRateLimitCooldownMs` для проактивного троттлинга Binance (см. «Rate-limit awareness» выше)

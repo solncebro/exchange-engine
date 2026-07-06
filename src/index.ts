@@ -1,5 +1,7 @@
 export { ExchangeError } from './errors/ExchangeError';
 export { Exchange } from './exchanges/Exchange';
+export { parseBybitOrderbookRawFrame } from './normalizers/bybitNormalizer';
+export type { ParseBybitOrderbookRawFrameArgs } from './normalizers/bybitNormalizer';
 export { formatWebSocketConnectionsReport } from './utils/formatWebSocketConnectionsReport';
 export type { FormatWebSocketConnectionsReportArgs } from './utils/formatWebSocketConnectionsReport';
 
@@ -16,6 +18,7 @@ export type {
   KlineHandler,
   SubscribeOrderbookArgs,
   SubscribePublicTradesArgs,
+  SetOrderbookLiveSymbolArgs,
   CancelOrderItemResult,
   CancelBatchOrdersResult,
   ModifyOrderItemResult,
@@ -69,6 +72,8 @@ export type {
   OrderBookUpdateType,
   OrderBookRawLevel,
   OrderBookHandler,
+  RawOrderbookFrame,
+  RawOrderbookHandler,
   PublicTrade,
   PublicTradeHandler,
   MarkPrice,

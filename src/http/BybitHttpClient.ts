@@ -111,6 +111,10 @@ class BybitHttpClient extends BaseHttpClient {
       params.baseCoin = options.baseCoin;
     }
 
+    if (options?.orderFilter !== undefined) {
+      params.orderFilter = options.orderFilter;
+    }
+
     return params;
   }
 

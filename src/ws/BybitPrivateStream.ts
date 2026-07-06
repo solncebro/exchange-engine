@@ -3,10 +3,10 @@ import type { WebSocketOpenContext } from '@solncebro/websocket-engine';
 
 import type { ExchangeLogger, WebSocketConnectionInfo } from '../types/common';
 import { WebSocketConnectionTypeEnum } from '../types/common';
+import { authenticateBybitWebSocket } from './bybitWebSocketAuth';
 import {
   BYBIT_HEARTBEAT_CONFIG,
   BYBIT_PING_INTERVAL,
-  authenticateBybitWebSocket,
 } from './bybitWebSocketUtils';
 import type { BybitPrivateMessage, BybitPrivateStreamArgs } from './BybitPrivateStream.types';
 import { parseWebSocketMessage } from './parseWebSocketMessage';

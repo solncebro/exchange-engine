@@ -1,4 +1,4 @@
-import type { KlineInterval, MarkPriceHandler, OrderBookHandler, PublicTradeHandler, TickerBySymbol, WebSocketConnectionInfo } from './common';
+import type { KlineInterval, MarkPriceHandler, OrderBookHandler, PublicTradeHandler, RawOrderbookHandler, TickerBySymbol, WebSocketConnectionInfo } from './common';
 import type { KlineHandler } from './exchange';
 
 export interface PublicStreamLike {
@@ -16,6 +16,9 @@ export interface PublicStreamLike {
   resubscribeOrderbook?(symbol: string, depth: number): void;
   resubscribePublicTrades?(symbol: string): void;
   resubscribeMarkPrices?(): void;
+  setOrderbookLiveSymbol?(symbol: string, isLive: boolean): void;
+  subscribeRawOrderbook?(handler: RawOrderbookHandler): void;
+  unsubscribeRawOrderbook?(handler: RawOrderbookHandler): void;
   getConnectionInfoList(): WebSocketConnectionInfo[];
   awaitConnectionsReady?(): Promise<void>;
   close(): void;

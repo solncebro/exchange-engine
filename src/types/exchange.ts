@@ -13,6 +13,7 @@ import type {
   WebSocketConnectionInfo,
   OrderBook,
   OrderBookHandler,
+  RawOrderbookHandler,
   PublicTrade,
   PublicTradeHandler,
   MarkPrice,
@@ -124,6 +125,11 @@ export interface ResubscribeOrderbookArgs {
   depth: number;
 }
 
+export interface SetOrderbookLiveSymbolArgs {
+  symbol: string;
+  isLive: boolean;
+}
+
 export interface ResubscribePublicTradesArgs {
   symbol: string;
 }
@@ -173,6 +179,8 @@ export interface ExchangeClient {
   priceToPrecision(symbol: string, price: number): number;
   getMinOrderQty(symbol: string): number;
   getMinNotional(symbol: string): number;
+  getMaxOrderQty(symbol: string): number;
+  getMarketMaxOrderQty(symbol: string): number;
   fetchFundingInfo(symbol?: string): Promise<FundingInfo[]>;
   fetchPositionMode(): Promise<PositionModeEnum | undefined>;
   createOrderWebSocket(args: CreateOrderWebSocketArgs): Promise<Order>;
@@ -185,6 +193,7 @@ export interface ExchangeClient {
   cancelOrder(symbol: string, orderId: string): Promise<Order>;
   getOrder(symbol: string, orderId: string): Promise<Order>;
   fetchOpenOrders(symbol?: string): Promise<Order[]>;
+  fetchOpenConditionalOrders(settleCoin: string): Promise<Order[]>;
   modifyOrder(args: ModifyOrderArgs): Promise<Order>;
   cancelAllOrders(symbol: string): Promise<void>;
   createBatchOrders(orderList: CreateOrderWebSocketArgs[]): Promise<Order[]>;
@@ -212,8 +221,13 @@ export interface ExchangeClient {
   resubscribeMarkPrices(): void;
   subscribeMarkPrices(handler: MarkPriceHandler): void;
   unsubscribeMarkPrices(handler: MarkPriceHandler): void;
+  subscribeAllTickers(handler: (tickers: TickerBySymbol) => void, symbolList: string[]): void;
+  unsubscribeAllTickers(handler: (tickers: TickerBySymbol) => void): void;
   subscribeOrderbook(args: SubscribeOrderbookArgs): void;
   unsubscribeOrderbook(args: SubscribeOrderbookArgs): void;
+  setOrderbookLiveSymbol(args: SetOrderbookLiveSymbolArgs): void;
+  subscribeRawOrderbook(handler: RawOrderbookHandler): void;
+  unsubscribeRawOrderbook(handler: RawOrderbookHandler): void;
   subscribePublicTrades(args: SubscribePublicTradesArgs): void;
   unsubscribePublicTrades(args: SubscribePublicTradesArgs): void;
   awaitWebSocketConnectionsReady(): Promise<void>;

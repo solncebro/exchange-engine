@@ -24,7 +24,7 @@ import type {
   OrderUpdateEvent,
   PositionUpdateEvent,
 } from '../types/common';
-import { OrderTypeEnum, OrderSideEnum, PositionSideEnum } from '../types/common';
+import { OrderTypeEnum, OrderSideEnum, PositionSideEnum, OrderFilterEnum } from '../types/common';
 import type { PublicStreamLike } from '../types/stream';
 import { BybitHttpClient } from '../http/BybitHttpClient';
 import {
@@ -92,6 +92,7 @@ abstract class BybitBaseClient extends BaseExchangeClient {
       onNotify: this.onNotify,
       label: args.publicStreamLabel,
       connectionPacking: args.exchangeArgs.config.publicStreamConnectionPacking,
+      lazyOrderbookParse: args.exchangeArgs.config.lazyOrderbookParse,
     });
 
     if (isDemoMode) {
@@ -260,6 +261,13 @@ abstract class BybitBaseClient extends BaseExchangeClient {
   async fetchOpenOrders(symbol?: string): Promise<Order[]> {
     this.logger.debug('[Bybit] Fetching open orders');
     const raw = await this.httpClient.getOpenOrders(this.category, { symbol });
+
+    return raw.result.list.map(normalizeBybitOrder);
+  }
+
+  async fetchOpenConditionalOrders(settleCoin: string): Promise<Order[]> {
+    this.logger.debug('[Bybit] Fetching open conditional (stop) orders');
+    const raw = await this.httpClient.getOpenOrders(this.category, { settleCoin, orderFilter: OrderFilterEnum.StopOrder });
 
     return raw.result.list.map(normalizeBybitOrder);
   }

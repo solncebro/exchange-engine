@@ -35,14 +35,9 @@ jest.mock('@solncebro/websocket-engine', () => {
   };
 });
 
-jest.mock('../../src/ws/bybitWebSocketUtils', () => {
-  const actual = jest.requireActual('../../src/ws/bybitWebSocketUtils');
-
-  return {
-    ...actual,
-    authenticateBybitWebSocket: jest.fn().mockResolvedValue(undefined),
-  };
-});
+jest.mock('../../src/ws/bybitWebSocketAuth', () => ({
+  authenticateBybitWebSocket: jest.fn().mockResolvedValue(undefined),
+}));
 
 describe('BybitTradeStream batch operations', () => {
   const mockLogger = createMockLogger();

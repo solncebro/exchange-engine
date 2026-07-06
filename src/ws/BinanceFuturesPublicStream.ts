@@ -1,14 +1,16 @@
 import { ReliableWebSocket, WebSocketStatus } from '@solncebro/websocket-engine';
 
-import type { ExchangeLogger, KlineInterval, MarkPriceHandler, TickerBySymbol, TradeSymbolBySymbol, WebSocketConnectionInfo } from '../types/common';
+import type { ExchangeLogger, KlineInterval, MarkPriceHandler, PublicTradeHandler, TickerBySymbol, TradeSymbolBySymbol, WebSocketConnectionInfo } from '../types/common';
 import { WebSocketConnectionTypeEnum } from '../types/common';
 import type { KlineHandler } from '../types/exchange';
 import {
+  normalizeBinanceAggTradeFromStream,
   normalizeBinanceKlineWebSocketMessage,
   normalizeBinanceMarkPriceWebSocketList,
   normalizeBinanceTickers,
 } from '../normalizers/binanceNormalizer';
 import type {
+  BinanceAggTradeWebSocketRaw,
   BinanceMarkPriceWebSocketRaw,
   BinanceTicker24hrRaw,
   BinanceWebSocketKlineRaw,
@@ -16,6 +18,7 @@ import type {
 import { resolveUnifiedBinanceInterval } from './binanceWebSocketUtils';
 import type { BinanceCombinedMessage, BinanceFuturesPublicStreamArgs, FuturesConnection } from './BinanceFuturesPublicStream.types';
 import { parseWebSocketMessage } from './parseWebSocketMessage';
+import { chunkList } from '../utils/chunkList';
 
 const DEFAULT_PAUSE_BETWEEN_CONNECTIONS_MS = 1100;
 const DEFAULT_STALE_THRESHOLD_MS = 60000;
@@ -24,8 +27,11 @@ const DEFAULT_RECREATE_DEDUP_WINDOW_MS = 2000;
 const POST_RECREATE_GRACE_PERIOD_MS = 60000;
 const DEFAULT_SUBSCRIBE_BATCH_SIZE = 50;
 const DEFAULT_PAUSE_BETWEEN_SUBSCRIBE_BATCHES_MS = 200;
+const DEFAULT_MAX_STREAMS_PER_CONNECTION = 900;
 const TRADIFI_CONTRACT_TYPE = 'TRADIFI_PERPETUAL';
 const NON_KLINE_GROUP_KEY = 'tickers-markprices';
+const AGGTRADE_GROUP_KEY = 'aggTrades';
+const BINANCE_PING_REQUEST_ID = 1_000_000;
 
 const buildIntervalGroupKey = (interval: string): string =>
   `interval-${interval}`;
@@ -43,6 +49,12 @@ const extractSymbolFromStream = (stream: string): string | undefined => {
     return klineMatch[1].toUpperCase();
   }
 
+  const aggTradeMatch = stream.match(/^(.+)@aggTrade$/);
+
+  if (aggTradeMatch) {
+    return aggTradeMatch[1].toUpperCase();
+  }
+
   return undefined;
 };
 
@@ -58,6 +70,29 @@ function buildStreamName(symbol: string, interval: string, tradeSymbols: TradeSy
     : `${symbol.toLowerCase()}_perpetual@continuousKline_${interval}`;
 }
 
+function buildAggTradeStreamName(symbol: string): string {
+  return `${symbol.toLowerCase()}@aggTrade`;
+}
+
+function toAggTradeRaw(record: Record<string, unknown>): BinanceAggTradeWebSocketRaw | null {
+  if (record['e'] !== 'aggTrade' || record['s'] === undefined) {
+    return null;
+  }
+
+  return {
+    e: 'aggTrade',
+    E: Number(record['E']),
+    s: String(record['s']),
+    a: Number(record['a']),
+    p: String(record['p']),
+    q: String(record['q']),
+    f: Number(record['f']),
+    l: Number(record['l']),
+    T: Number(record['T']),
+    m: record['m'] === true,
+  };
+}
+
 class BinanceFuturesPublicStream {
   private readonly webSocketUrl: string;
   private readonly logger: ExchangeLogger;
@@ -68,10 +103,12 @@ class BinanceFuturesPublicStream {
   private readonly staleCheckIntervalMs: number;
   private readonly subscribeBatchSize: number;
   private readonly pauseBetweenSubscribeBatchesMs: number;
+  private readonly maxStreamsPerConnection: number;
   private tradeSymbols: TradeSymbolBySymbol = new Map();
   private readonly tickerHandlerSet: Set<(tickers: TickerBySymbol) => void> = new Set();
   private readonly markPriceHandlerSet: Set<MarkPriceHandler> = new Set();
   private readonly klineHandlerByKey: Map<string, Set<KlineHandler>> = new Map();
+  private readonly publicTradeHandlerBySymbol: Map<string, Set<PublicTradeHandler>> = new Map();
   private readonly connectionList: FuturesConnection[] = [];
   private isConnectScheduled = false;
   private subscriptionIdCounter = 1;
@@ -91,6 +128,7 @@ class BinanceFuturesPublicStream {
     this.subscribeBatchSize = args.subscribeBatchSize ?? DEFAULT_SUBSCRIBE_BATCH_SIZE;
     this.pauseBetweenSubscribeBatchesMs =
       args.pauseBetweenSubscribeBatchesMs ?? DEFAULT_PAUSE_BETWEEN_SUBSCRIBE_BATCHES_MS;
+    this.maxStreamsPerConnection = args.maxStreamsPerConnection ?? DEFAULT_MAX_STREAMS_PER_CONNECTION;
   }
 
   setTradeSymbols(tradeSymbols: TradeSymbolBySymbol): void {
@@ -168,9 +206,45 @@ class BinanceFuturesPublicStream {
     }
   }
 
-  resubscribeStream(symbol: string, interval: string): void {
-    const stream = buildStreamName(symbol, interval, this.tradeSymbols);
+  subscribePublicTrades(symbol: string, handler: PublicTradeHandler): void {
+    const upperSymbol = symbol.toUpperCase();
+    const handlerSet = this.publicTradeHandlerBySymbol.get(upperSymbol) ?? new Set<PublicTradeHandler>();
 
+    handlerSet.add(handler);
+    this.publicTradeHandlerBySymbol.set(upperSymbol, handlerSet);
+
+    if (this.connectionList.length > 0) {
+      this.addAggTradeStream(buildAggTradeStreamName(symbol));
+    } else {
+      this.scheduleConnect();
+    }
+  }
+
+  unsubscribePublicTrades(symbol: string, handler: PublicTradeHandler): void {
+    const upperSymbol = symbol.toUpperCase();
+    const handlerSet = this.publicTradeHandlerBySymbol.get(upperSymbol);
+
+    if (!handlerSet) {
+      return;
+    }
+
+    handlerSet.delete(handler);
+
+    if (handlerSet.size === 0) {
+      this.publicTradeHandlerBySymbol.delete(upperSymbol);
+      this.removeStreamFromConnection(buildAggTradeStreamName(symbol));
+    }
+  }
+
+  resubscribePublicTrades(symbol: string): void {
+    this.resubscribeStreamByName(buildAggTradeStreamName(symbol));
+  }
+
+  resubscribeStream(symbol: string, interval: string): void {
+    this.resubscribeStreamByName(buildStreamName(symbol, interval, this.tradeSymbols));
+  }
+
+  private resubscribeStreamByName(stream: string): void {
     for (let index = 0; index < this.connectionList.length; index++) {
       const connection = this.connectionList[index];
 
@@ -287,10 +361,17 @@ class BinanceFuturesPublicStream {
     return [...tickerStreamList, ...markPriceStreamList];
   }
 
+  private buildAggTradeStreamList(): string[] {
+    return [...this.publicTradeHandlerBySymbol.keys()].map((symbol) =>
+      buildAggTradeStreamName(symbol),
+    );
+  }
+
   private async createConnections(): Promise<void> {
     const streamListByInterval = this.buildStreamListByInterval();
     const nonKlineStreamList = this.buildNonKlineStreamList();
-    let totalStreamCount = nonKlineStreamList.length;
+    const aggTradeStreamList = this.buildAggTradeStreamList();
+    let totalStreamCount = nonKlineStreamList.length + aggTradeStreamList.length;
 
     for (const [, streamList] of streamListByInterval) {
       totalStreamCount += streamList.length;
@@ -310,16 +391,29 @@ class BinanceFuturesPublicStream {
       isFirstConnection = false;
     }
 
-    for (const [interval, streamList] of streamListByInterval) {
+    if (aggTradeStreamList.length > 0) {
       if (!isFirstConnection && this.pauseBetweenConnectionsMs > 0) {
         await pause(this.pauseBetweenConnectionsMs);
       }
 
       this.createConnection({
-        streamList,
-        groupKey: buildIntervalGroupKey(interval),
+        streamList: aggTradeStreamList,
+        groupKey: AGGTRADE_GROUP_KEY,
       });
       isFirstConnection = false;
+    }
+
+    for (const [interval, streamList] of streamListByInterval) {
+      const groupKey = buildIntervalGroupKey(interval);
+
+      for (const streamChunk of chunkList(streamList, this.maxStreamsPerConnection)) {
+        if (!isFirstConnection && this.pauseBetweenConnectionsMs > 0) {
+          await pause(this.pauseBetweenConnectionsMs);
+        }
+
+        this.createConnection({ streamList: streamChunk, groupKey });
+        isFirstConnection = false;
+      }
     }
 
     this.logger.info(
@@ -409,6 +503,20 @@ class BinanceFuturesPublicStream {
         }
       },
       onNotify: this.onNotify,
+      heartbeat: {
+        buildPayload: () => ({
+          method: 'LIST_SUBSCRIPTIONS',
+          id: BINANCE_PING_REQUEST_ID,
+        }),
+        isResponse: (message) => {
+          const record = message as Record<string, unknown>;
+
+          return (
+            record['id'] === BINANCE_PING_REQUEST_ID &&
+            Array.isArray(record['result'])
+          );
+        },
+      },
       configuration: {
         pingInterval: 30000,
       },
@@ -420,12 +528,13 @@ class BinanceFuturesPublicStream {
     connection: FuturesConnection,
     streamList: string[],
   ): Promise<void> {
-    const batchCount = Math.ceil(streamList.length / this.subscribeBatchSize);
+    let batchCount = 0;
+    let sentCount = 0;
 
-    for (let batchIndex = 0; batchIndex < batchCount; batchIndex++) {
-      const batchStart = batchIndex * this.subscribeBatchSize;
-      const batchEnd = batchStart + this.subscribeBatchSize;
-      const batch = streamList.slice(batchStart, batchEnd);
+    while (sentCount < streamList.length) {
+      const batch = streamList.slice(sentCount, sentCount + this.subscribeBatchSize);
+      sentCount += batch.length;
+      batchCount++;
 
       try {
         context.send({
@@ -435,19 +544,19 @@ class BinanceFuturesPublicStream {
         });
       } catch (error) {
         this.logger.warn(
-          `BinanceFuturesPublicStream: ${connection.label} SUBSCRIBE batch ${batchIndex + 1}/${batchCount} failed: ${error instanceof Error ? error.message : String(error)}`,
+          `BinanceFuturesPublicStream: ${connection.label} SUBSCRIBE batch ${batchCount} failed: ${error instanceof Error ? error.message : String(error)}`,
         );
       }
 
-      const isLastBatch = batchIndex === batchCount - 1;
+      const hasMoreStreams = sentCount < streamList.length;
 
-      if (!isLastBatch && this.pauseBetweenSubscribeBatchesMs > 0) {
+      if (hasMoreStreams && this.pauseBetweenSubscribeBatchesMs > 0) {
         await pause(this.pauseBetweenSubscribeBatchesMs);
       }
     }
 
     this.logger.info(
-      `BinanceFuturesPublicStream: ${connection.label} sent ${batchCount} SUBSCRIBE batch(es) for ${streamList.length} streams`,
+      `BinanceFuturesPublicStream: ${connection.label} sent ${batchCount} SUBSCRIBE batch(es) for ${sentCount} streams`,
     );
   }
 
@@ -655,16 +764,15 @@ class BinanceFuturesPublicStream {
     this.sendDynamicSubscribe(targetConnection, stream);
   }
 
-  private addStreamToIntervalGroup(interval: KlineInterval, stream: string): void {
-    const groupKey = buildIntervalGroupKey(interval);
+  private addAggTradeStream(stream: string): void {
     const targetConnection = this.connectionList.find(
-      (connection) => connection.groupKey === groupKey,
+      (connection) => connection.groupKey === AGGTRADE_GROUP_KEY,
     );
 
     if (!targetConnection) {
       this.createConnection({
         streamList: [stream],
-        groupKey,
+        groupKey: AGGTRADE_GROUP_KEY,
       });
 
       return;
@@ -678,27 +786,43 @@ class BinanceFuturesPublicStream {
     this.sendDynamicSubscribe(targetConnection, stream);
   }
 
-  private sendDynamicSubscribe(connection: FuturesConnection, stream: string): void {
-    const subscriptionId = this.subscriptionIdCounter++;
-    const message = {
-      method: 'SUBSCRIBE',
-      params: [stream],
-      id: subscriptionId,
-    };
+  private addStreamToIntervalGroup(interval: KlineInterval, stream: string): void {
+    const groupKey = buildIntervalGroupKey(interval);
+    const groupConnectionList = this.connectionList.filter(
+      (connection) => connection.groupKey === groupKey,
+    );
 
-    if (connection.resolveReady !== undefined) {
-      connection.readyPromise.then(() => {
-        try {
-          connection.webSocket.sendToConnectedSocket(message);
-        } catch {
-          this.logger.warn(
-            `BinanceFuturesPublicStream: ${connection.label} deferred SUBSCRIBE failed for ${stream}`,
-          );
-        }
+    if (groupConnectionList.some((connection) => connection.streamList.includes(stream))) {
+      return;
+    }
+
+    const targetConnection = groupConnectionList.find(
+      (connection) => connection.streamList.length < this.maxStreamsPerConnection,
+    );
+
+    if (!targetConnection) {
+      this.createConnection({
+        streamList: [stream],
+        groupKey,
       });
 
       return;
     }
+
+    targetConnection.streamList.push(stream);
+    this.sendDynamicSubscribe(targetConnection, stream);
+  }
+
+  private sendDynamicSubscribe(connection: FuturesConnection, stream: string): void {
+    if (connection.resolveReady !== undefined) {
+      return;
+    }
+
+    const message = {
+      method: 'SUBSCRIBE',
+      params: [stream],
+      id: this.subscriptionIdCounter++,
+    };
 
     try {
       connection.webSocket.sendToConnectedSocket(message);
@@ -763,6 +887,14 @@ class BinanceFuturesPublicStream {
         const symbol = klineMatch[1].toUpperCase();
         const interval = resolveUnifiedBinanceInterval(klineMatch[2]);
         result.push(`Klines ${symbol} ${interval}`);
+
+        continue;
+      }
+
+      const aggTradeMatch = stream.match(/^(.+)@aggTrade$/);
+
+      if (aggTradeMatch) {
+        result.push(`Trades ${aggTradeMatch[1].toUpperCase()}`);
       }
     }
 
@@ -790,6 +922,25 @@ class BinanceFuturesPublicStream {
       for (const handler of handlerSet) {
         handler(symbol, kline);
       }
+    }
+  }
+
+  private handleAggTradeMessage(record: Record<string, unknown>): void {
+    const raw = toAggTradeRaw(record);
+
+    if (raw === null) {
+      return;
+    }
+
+    const trade = normalizeBinanceAggTradeFromStream(raw);
+    const handlerSet = this.publicTradeHandlerBySymbol.get(trade.symbol);
+
+    if (!handlerSet) {
+      return;
+    }
+
+    for (const handler of handlerSet) {
+      handler(trade.symbol, [trade]);
     }
   }
 
@@ -857,6 +1008,12 @@ class BinanceFuturesPublicStream {
       return;
     }
 
+    if (message.stream && message.stream.includes('@aggTrade')) {
+      this.handleAggTradeMessage(message.data as Record<string, unknown>);
+
+      return;
+    }
+
     if (message.stream && message.stream.includes('@continuousKline_')) {
       this.handleKlineStream(message, '@continuousKline_', true);
     } else if (message.stream && message.stream.includes('@kline_')) {
@@ -896,6 +1053,13 @@ class BinanceFuturesPublicStream {
 
   private handleRawObjectMessage(messageRecord: Record<string, unknown>): void {
     const eventType = messageRecord['e'];
+
+    if (eventType === 'aggTrade') {
+      this.handleAggTradeMessage(messageRecord);
+
+      return;
+    }
+
     const isContinuousKline =
       eventType === 'continuous_kline' || eventType === 'continuousKline';
     const isKline = eventType === 'kline';

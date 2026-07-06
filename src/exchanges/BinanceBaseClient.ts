@@ -211,6 +211,13 @@ abstract class BinanceBaseClient<T extends BinanceBaseHttpClient> extends BaseEx
     return rawList.map(normalizeBinanceOrder);
   }
 
+  async fetchOpenConditionalOrders(_settleCoin: string): Promise<Order[]> {
+    this.logger.debug('[Binance] Fetching open conditional (stop) orders');
+    const rawList = await this.httpClient.getOpenOrders(undefined);
+
+    return rawList.map(normalizeBinanceOrder).filter((order) => order.stopPrice > 0);
+  }
+
   async fetchOrderBook(symbol: string, limit?: number): Promise<OrderBook> {
     this.logger.debug(`[Binance] Fetching order book for ${symbol}`);
     const raw = await this.httpClient.fetchOrderBook(symbol, limit);

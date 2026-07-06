@@ -22,10 +22,10 @@ import type {
   BybitTradeOrderData,
   BybitTradeResponseHeader,
 } from './BybitTradeStream.types';
+import { authenticateBybitWebSocket } from './bybitWebSocketAuth';
 import {
   BYBIT_HEARTBEAT_CONFIG,
   BYBIT_PING_INTERVAL,
-  authenticateBybitWebSocket,
 } from './bybitWebSocketUtils';
 import { parseWebSocketMessage } from './parseWebSocketMessage';
 

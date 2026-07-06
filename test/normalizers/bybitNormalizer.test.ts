@@ -9,6 +9,7 @@ import {
   normalizeBybitBalances,
   normalizeBybitOrderBook,
   normalizeBybitOrderBookUpdate,
+  parseBybitOrderbookRawFrame,
   normalizeBybitPublicTradeList,
   normalizeBybitPublicTradeFromStream,
   normalizeBybitOpenInterest,
@@ -298,6 +299,50 @@ describe('normalizeBybitTickers', () => {
     const result = normalizeBybitTickers(BYBIT_RAW_TICKER_LIST);
 
     expect(result.get('ETHUSDT')!.timestamp).toBe(9999999999999);
+  });
+
+  it('extracts bid1/ask1 (price + size) — premium feed depends on these', () => {
+    const result = normalizeBybitTickers([
+      {
+        symbol: 'BTCUSDT',
+        lastPrice: '65432.10',
+        prevPrice24h: '63900.00',
+        highPrice24h: '66000.00',
+        lowPrice24h: '63500.00',
+        price24hPcnt: '0.0235',
+        volume24h: '12345.67',
+        turnover24h: '805000000.00',
+        bid1Price: '65432.00',
+        bid1Size: '3.970',
+        ask1Price: '65432.20',
+        ask1Size: '0.307',
+      },
+    ]);
+
+    const ticker = result.get('BTCUSDT')!;
+    expect(ticker.bid1Price).toBeCloseTo(65432.0);
+    expect(ticker.bid1Size).toBeCloseTo(3.97);
+    expect(ticker.ask1Price).toBeCloseTo(65432.2);
+    expect(ticker.ask1Size).toBeCloseTo(0.307);
+  });
+
+  it('leaves bid1/ask1 undefined when the delta omits them (not zeroed)', () => {
+    const result = normalizeBybitTickers([
+      {
+        symbol: 'BTCUSDT',
+        lastPrice: '65432.10',
+        prevPrice24h: '63900.00',
+        highPrice24h: '66000.00',
+        lowPrice24h: '63500.00',
+        price24hPcnt: '0.0235',
+        volume24h: '12345.67',
+        turnover24h: '805000000.00',
+      },
+    ]);
+
+    const ticker = result.get('BTCUSDT')!;
+    expect(ticker.bid1Price).toBeUndefined();
+    expect(ticker.ask1Price).toBeUndefined();
   });
 });
 
@@ -882,6 +927,75 @@ describe('normalizeBybitOrderBookUpdate', () => {
     );
 
     expect(result.eventTimestamp).toBe(1700000000222);
+  });
+});
+
+describe('parseBybitOrderbookRawFrame', () => {
+  function buildRawFrame(overrides: Record<string, unknown> = {}): string {
+    return JSON.stringify({
+      topic: 'orderbook.200.BTCUSDT',
+      type: 'delta',
+      ts: 1700000000123,
+      data: BYBIT_RAW_ORDER_BOOK_STREAM,
+      ...overrides,
+    });
+  }
+
+  it('parses a shelved raw frame into a normalized OrderBookUpdate', () => {
+    const result = parseBybitOrderbookRawFrame({
+      raw: buildRawFrame(),
+      symbol: 'BTCUSDT',
+      receivedTimestamp: 1700000000050,
+    });
+
+    expect(result).toBeDefined();
+    expect(result?.symbol).toBe('BTCUSDT');
+    expect(result?.updateType).toBe('delta');
+    expect(result?.askList).toEqual([['65001.00', '0.800'], ['65002.00', '1.200']]);
+    expect(result?.updateId).toBe(999999);
+    // eventTimestamp comes from the envelope ts, receivedTimestamp from the caller.
+    expect(result?.eventTimestamp).toBe(1700000000123);
+    expect(result?.receivedTimestamp).toBe(1700000000050);
+  });
+
+  it('resolves snapshot updateType from the envelope type', () => {
+    const result = parseBybitOrderbookRawFrame({
+      raw: buildRawFrame({ type: 'snapshot' }),
+      symbol: 'BTCUSDT',
+      receivedTimestamp: 0,
+    });
+
+    expect(result?.updateType).toBe('snapshot');
+  });
+
+  it('uses the caller-supplied symbol (consistent with the cheaply-extracted shelf symbol)', () => {
+    const result = parseBybitOrderbookRawFrame({
+      raw: buildRawFrame(),
+      symbol: 'ETHUSDT',
+      receivedTimestamp: 0,
+    });
+
+    expect(result?.symbol).toBe('ETHUSDT');
+  });
+
+  it('returns undefined on malformed JSON', () => {
+    const result = parseBybitOrderbookRawFrame({
+      raw: '{not valid json',
+      symbol: 'BTCUSDT',
+      receivedTimestamp: 0,
+    });
+
+    expect(result).toBeUndefined();
+  });
+
+  it('returns undefined when the frame has no data object', () => {
+    const result = parseBybitOrderbookRawFrame({
+      raw: JSON.stringify({ topic: 'orderbook.200.BTCUSDT', type: 'delta', ts: 1 }),
+      symbol: 'BTCUSDT',
+      receivedTimestamp: 0,
+    });
+
+    expect(result).toBeUndefined();
   });
 });
 

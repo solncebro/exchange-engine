@@ -13,6 +13,7 @@ import type {
   ResubscribeKlinesArgs,
   ResubscribeOrderbookArgs,
   ResubscribePublicTradesArgs,
+  SetOrderbookLiveSymbolArgs,
   SubscribeOrderbookArgs,
   SubscribePublicTradesArgs,
 } from '../types/exchange';
@@ -33,6 +34,7 @@ import type {
   PublicTrade,
   MarkPrice,
   MarkPriceHandler,
+  RawOrderbookHandler,
   OpenInterest,
   FeeRate,
   Income,
@@ -151,6 +153,14 @@ abstract class BaseExchangeClient implements ExchangeClient {
     this.getPublicStream().unsubscribeKlines(args.symbol, args.interval, args.handler);
   }
 
+  subscribeAllTickers(handler: (tickers: TickerBySymbol) => void, symbolList: string[]): void {
+    this.getPublicStream().subscribeAllTickers(handler, symbolList);
+  }
+
+  unsubscribeAllTickers(handler: (tickers: TickerBySymbol) => void): void {
+    this.getPublicStream().unsubscribeAllTickers?.(handler);
+  }
+
   resubscribeKlines(args: ResubscribeKlinesArgs): void {
     this.getPublicStream().resubscribeStream?.(args.symbol, args.interval);
   }
@@ -197,6 +207,18 @@ abstract class BaseExchangeClient implements ExchangeClient {
     }
 
     publicStream.unsubscribeOrderbook(args.symbol, args.depth, args.handler);
+  }
+
+  setOrderbookLiveSymbol(args: SetOrderbookLiveSymbolArgs): void {
+    this.getPublicStream().setOrderbookLiveSymbol?.(args.symbol, args.isLive);
+  }
+
+  subscribeRawOrderbook(handler: RawOrderbookHandler): void {
+    this.getPublicStream().subscribeRawOrderbook?.(handler);
+  }
+
+  unsubscribeRawOrderbook(handler: RawOrderbookHandler): void {
+    this.getPublicStream().unsubscribeRawOrderbook?.(handler);
   }
 
   subscribePublicTrades(args: SubscribePublicTradesArgs): void {
@@ -257,6 +279,36 @@ abstract class BaseExchangeClient implements ExchangeClient {
     }
 
     return parseFloat(tradeSymbol.filter.minNotional);
+  }
+
+  getMaxOrderQty(symbol: string): number {
+    const tradeSymbol = this.getTradeSymbolOrWarn(symbol, 'getMaxOrderQty');
+
+    if (!tradeSymbol) {
+      return 0;
+    }
+
+    return parseFloat(tradeSymbol.filter.maxQty);
+  }
+
+  getMarketMaxOrderQty(symbol: string): number {
+    const tradeSymbol = this.getTradeSymbolOrWarn(symbol, 'getMarketMaxOrderQty');
+
+    if (!tradeSymbol) {
+      return 0;
+    }
+
+    const marketMaxQty = tradeSymbol.filter.marketMaxQty;
+
+    if (marketMaxQty !== undefined && marketMaxQty !== '') {
+      const parsed = parseFloat(marketMaxQty);
+
+      if (Number.isFinite(parsed) && parsed > 0) {
+        return parsed;
+      }
+    }
+
+    return parseFloat(tradeSymbol.filter.maxQty);
   }
 
   private getTradeSymbolOrWarn(symbol: string, methodName: string): TradeSymbol | null {
@@ -330,6 +382,10 @@ abstract class BaseExchangeClient implements ExchangeClient {
   }
 
   async fetchOpenOrders(_symbol?: string): Promise<Order[]> {
+    throw new Error(`Not supported for ${this.marketLabel} market`);
+  }
+
+  async fetchOpenConditionalOrders(_settleCoin: string): Promise<Order[]> {
     throw new Error(`Not supported for ${this.marketLabel} market`);
   }
 

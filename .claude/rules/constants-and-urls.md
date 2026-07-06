@@ -111,6 +111,19 @@ amountToPrecision(tradeSymbol, amount): number → roundToStep(amount, filter.st
 priceToPrecision(tradeSymbol, price): number → roundToStep(price, filter.tickSize)
 ```
 
+## WebSocket sharding и Binance rate-limit константы (0.15.0–0.16.0)
+
+| Константа | Значение | Где |
+|-----------|----------|-----|
+| DEFAULT_MAX_STREAMS_PER_CONNECTION | 900 | `src/ws/BinanceFuturesPublicStream.ts` (не в `src/constants/`) — дефолт для `maxStreamsPerConnection`, под лимит Binance 1024 стрима/соединение |
+| BINANCE_REQUEST_WEIGHT_LIMIT_PER_MIN | 2400 | `src/http/binanceRateLimit.ts` |
+| BINANCE_WEIGHT_THROTTLE_RATIO | 0.8 | `src/http/binanceRateLimit.ts` — порог троттлинга = `LIMIT × RATIO` = 1920 |
+| BINANCE_WEIGHT_NEAR_CAP_COOLDOWN_MS | 2000 | `src/http/binanceRateLimit.ts` — пауза перед следующим `get()` при приближении к порогу |
+| BINANCE_BAN_DEFAULT_COOLDOWN_MS | 30000 | `src/http/binanceRateLimit.ts` — cooldown на HTTP 418, если нет `Retry-After` |
+| BINANCE_BAN_MAX_COOLDOWN_MS | 60000 | `src/http/binanceRateLimit.ts` — потолок cooldown даже если `Retry-After` больше |
+
+Подробности логики — `http-layer.md` (раздел «Rate-limit awareness») и `websocket-layer-binance.md` (раздел «Binance Futures Public Stream»).
+
 ## Kline Loader (src/utils/klineLoader.ts)
 
 ```

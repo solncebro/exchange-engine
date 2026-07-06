@@ -11,6 +11,12 @@ import { buildBinanceSignedParams, buildBinanceAuthHeaders } from '../auth/binan
 import { ExchangeError } from '../errors/ExchangeError';
 import { applyTimeRangeOptions } from '../utils/httpParams';
 import { BaseHttpClient } from './BaseHttpClient';
+import {
+  BINANCE_REQUEST_WEIGHT_LIMIT_PER_MIN,
+  parseRetryAfterMs,
+  parseUsedWeight1m,
+  resolveRateLimitCooldownMs,
+} from './binanceRateLimit';
 import type {
   BinanceEndpoints,
   BinanceErrorResponse,
@@ -22,10 +28,40 @@ import type {
 abstract class BinanceBaseHttpClient extends BaseHttpClient {
   protected readonly secret: string;
   protected abstract readonly endpoints: BinanceEndpoints;
+  private weightCooldownUntilMs = 0;
 
   constructor(args: BinanceHttpClientArgs, timeout: number) {
     super({ baseUrl: args.baseUrl, apiKey: args.apiKey, logger: args.logger, timeout, httpsAgent: args.httpsAgent });
     this.secret = args.secret;
+  }
+
+  protected override async beforeRequest(): Promise<void> {
+    const waitMs = this.weightCooldownUntilMs - Date.now();
+
+    if (waitMs > 0) {
+      await new Promise<void>((resolve) => setTimeout(resolve, waitMs));
+    }
+  }
+
+  protected override onResponse(status: number | undefined, headers: unknown): void {
+    const usedWeight = parseUsedWeight1m(headers);
+    const cooldownMs = resolveRateLimitCooldownMs({
+      status,
+      usedWeight,
+      retryAfterMs: parseRetryAfterMs(headers),
+    });
+
+    if (cooldownMs <= 0) {
+      return;
+    }
+
+    this.weightCooldownUntilMs = Date.now() + cooldownMs;
+
+    if (status === 418) {
+      this.logger.error(`Binance HTTP 418 — IP banned; backing off reads for ${cooldownMs}ms`);
+    } else {
+      this.logger.warn(`Binance REQUEST_WEIGHT near cap (used ${usedWeight}/${BINANCE_REQUEST_WEIGHT_LIMIT_PER_MIN} per min) — throttling reads for ${cooldownMs}ms`);
+    }
   }
 
   protected async signedGet<T>(

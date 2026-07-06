@@ -4,6 +4,7 @@ import { BybitPublicStream } from '../../src/ws/BybitPublicStream';
 import { createMockLogger } from '../fixtures/mockLogger';
 
 let capturedOnMessage: ((message: any) => void) | undefined;
+let capturedParseMessage: ((rawData: any) => any) | undefined;
 let capturedOnReconnectSuccess: (() => void) | undefined;
 let _capturedOnOpen: (() => Promise<void>) | undefined;
 
@@ -21,6 +22,7 @@ jest.mock('@solncebro/websocket-engine', () => {
     ...actual,
     ReliableWebSocket: jest.fn().mockImplementation((args: any) => {
       capturedOnMessage = args.onMessage;
+      capturedParseMessage = args.parseMessage;
       capturedOnReconnectSuccess = args.onReconnectSuccess;
       _capturedOnOpen = args.onOpen;
 
@@ -43,6 +45,10 @@ const MOCK_TICKER_RAW: BybitTickerRaw = {
   price24hPcnt: '0.025',
   volume24h: '1000',
   turnover24h: '50000000',
+  bid1Price: '49999',
+  bid1Size: '1.5',
+  ask1Price: '50001',
+  ask1Size: '2.0',
 };
 
 const MOCK_KLINE_RAW: BybitWebSocketKlineRaw = {
@@ -64,6 +70,7 @@ describe('BybitPublicStream', () => {
     jest.clearAllMocks();
     mockContextSend.mockClear();
     capturedOnMessage = undefined;
+    capturedParseMessage = undefined;
     capturedOnReconnectSuccess = undefined;
     _capturedOnOpen = undefined;
   });
@@ -115,7 +122,36 @@ describe('BybitPublicStream', () => {
       expect(handler).toHaveBeenCalledTimes(1);
       const tickerMap = handler.mock.calls[0][0];
       expect(tickerMap).toBeInstanceOf(Map);
-      expect(tickerMap.get('BTCUSDT')).toBeDefined();
+      const ticker = tickerMap.get('BTCUSDT');
+      expect(ticker).toBeDefined();
+      // bid1/ask1 must survive normalization — the premium feed reads exactly these.
+      expect(ticker.bid1Price).toBeCloseTo(49999);
+      expect(ticker.ask1Price).toBeCloseTo(50001);
+      expect(ticker.bid1Size).toBeCloseTo(1.5);
+      expect(ticker.ask1Size).toBeCloseTo(2.0);
+    });
+
+    it('ref-counts tickers.{symbol}: stays subscribed while either markPrice OR ticker handler remains', async () => {
+      const stream = new BybitPublicStream({ url: 'wss://stream.bybit.com/v5/public/linear', logger: mockLogger, onNotify: undefined, label: 'test' });
+      const tickerHandler = jest.fn();
+      const markPriceHandler = jest.fn();
+
+      // The same tickers.{symbol} topic feeds both consumers (Bybit V5 has no aggregate ticker topic).
+      stream.subscribeAllTickers(tickerHandler, ['BTCUSDT']);
+      stream.subscribeMarkPrices(markPriceHandler, ['BTCUSDT']);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      const activeSubscriptionSet = (stream as unknown as { activeSubscriptionSet: Set<string> }).activeSubscriptionSet;
+      expect(activeSubscriptionSet.has('tickers.BTCUSDT')).toBe(true);
+
+      // Drop the ticker consumer — mark price still needs the topic → it must stay subscribed.
+      stream.unsubscribeAllTickers(tickerHandler);
+      expect(activeSubscriptionSet.has('tickers.BTCUSDT')).toBe(true);
+
+      // Drop the last remaining consumer (mark price) → only now is the topic released.
+      stream.unsubscribeMarkPrices(markPriceHandler);
+      expect(activeSubscriptionSet.has('tickers.BTCUSDT')).toBe(false);
     });
   });
 
@@ -262,6 +298,135 @@ describe('BybitPublicStream', () => {
         expect.objectContaining({ topic: 'tickers.linear', error: expect.any(Error) }),
         'BybitPublicStream: error handling message',
       );
+    });
+  });
+
+  describe('lazyOrderbookParse', () => {
+    const ORDERBOOK_RAW = JSON.stringify({
+      topic: 'orderbook.200.BTCUSDT',
+      type: 'delta',
+      ts: 1700000000123,
+      data: { s: 'BTCUSDT', b: [['100', '1']], a: [['101', '2']], u: 5, seq: 9 },
+    });
+
+    async function setupLazyStream(lazy: boolean) {
+      const stream = new BybitPublicStream({
+        url: 'wss://stream.bybit.com/v5/public/linear',
+        logger: mockLogger,
+        onNotify: undefined,
+        label: 'test',
+        lazyOrderbookParse: lazy,
+      });
+      const orderbookHandler = jest.fn();
+      const rawHandler = jest.fn();
+      stream.subscribeOrderbook('BTCUSDT', 200, orderbookHandler);
+      stream.subscribeRawOrderbook(rawHandler);
+
+      await Promise.resolve();
+
+      return { stream, orderbookHandler, rawHandler };
+    }
+
+    it('lazy ON: non-live orderbook frame is shelved raw, body NOT parsed, not dispatched', async () => {
+      const { orderbookHandler, rawHandler } = await setupLazyStream(true);
+
+      const message = capturedParseMessage!(Buffer.from(ORDERBOOK_RAW));
+
+      // The ~200-level body was NOT JSON.parsed — only the symbol was extracted from the head.
+      expect(message.__rawOrderbook).toBeDefined();
+      expect(message.__rawOrderbook.symbol).toBe('BTCUSDT');
+      expect(message.__rawOrderbook.raw).toBe(ORDERBOOK_RAW);
+      expect(typeof message.__rawOrderbook.receivedTimestamp).toBe('number');
+      expect(message.data).toBeUndefined();
+
+      capturedOnMessage!(message);
+
+      expect(rawHandler).toHaveBeenCalledTimes(1);
+      expect(rawHandler).toHaveBeenCalledWith(
+        expect.objectContaining({ symbol: 'BTCUSDT', raw: ORDERBOOK_RAW }),
+      );
+      expect(orderbookHandler).not.toHaveBeenCalled();
+    });
+
+    it('lazy ON: live symbol frame is shelved raw AND fully parsed/dispatched', async () => {
+      const { stream, orderbookHandler, rawHandler } = await setupLazyStream(true);
+      stream.setOrderbookLiveSymbol('BTCUSDT', true);
+
+      const message = capturedParseMessage!(Buffer.from(ORDERBOOK_RAW));
+      capturedOnMessage!(message);
+
+      expect(rawHandler).toHaveBeenCalledTimes(1);
+      expect(orderbookHandler).toHaveBeenCalledTimes(1);
+      const [symbol, update] = orderbookHandler.mock.calls[0];
+      expect(symbol).toBe('BTCUSDT');
+      expect(update.updateType).toBe('delta');
+      expect(update.askList).toEqual([['101', '2']]);
+      expect(update.updateId).toBe(5);
+      // eventTimestamp comes from the envelope `ts`, not the (absent) data.ts.
+      expect(update.eventTimestamp).toBe(1700000000123);
+    });
+
+    it('lazy ON: removing a symbol from the live-set stops full parsing', async () => {
+      const { stream, orderbookHandler } = await setupLazyStream(true);
+      stream.setOrderbookLiveSymbol('BTCUSDT', true);
+      stream.setOrderbookLiveSymbol('BTCUSDT', false);
+
+      capturedOnMessage!(capturedParseMessage!(Buffer.from(ORDERBOOK_RAW)));
+
+      expect(orderbookHandler).not.toHaveBeenCalled();
+    });
+
+    it('lazy ON: non-orderbook (ticker) frame is parsed normally, never raw-shelved', async () => {
+      const { rawHandler } = await setupLazyStream(true);
+      const tickerRaw = JSON.stringify({ topic: 'tickers.linear', data: [MOCK_TICKER_RAW] });
+
+      const message = capturedParseMessage!(Buffer.from(tickerRaw));
+
+      expect(message.__rawOrderbook).toBeUndefined();
+      expect(message.topic).toBe('tickers.linear');
+      expect(Array.isArray(message.data)).toBe(true);
+
+      capturedOnMessage!(message);
+
+      expect(rawHandler).not.toHaveBeenCalled();
+    });
+
+    it('lazy OFF: orderbook frame is parsed normally and raw handler is never called', async () => {
+      const { orderbookHandler, rawHandler } = await setupLazyStream(false);
+
+      const message = capturedParseMessage!(Buffer.from(ORDERBOOK_RAW));
+
+      expect(message.__rawOrderbook).toBeUndefined();
+      expect(message.topic).toBe('orderbook.200.BTCUSDT');
+      expect(message.data).toBeDefined();
+
+      capturedOnMessage!(message);
+
+      expect(rawHandler).not.toHaveBeenCalled();
+      expect(orderbookHandler).toHaveBeenCalledTimes(1);
+    });
+
+    it('lazy ON: topic beyond the scanned head falls back to a full parse (safe, no saving)', async () => {
+      const { orderbookHandler, rawHandler } = await setupLazyStream(true);
+      // Force the topic past FRAME_HEAD_SCAN_LENGTH by padding a leading field.
+      const padded = JSON.stringify({
+        pad: 'x'.repeat(300),
+        topic: 'orderbook.200.BTCUSDT',
+        type: 'delta',
+        ts: 1700000000123,
+        data: { s: 'BTCUSDT', b: [], a: [['101', '2']], u: 5 },
+      });
+
+      const message = capturedParseMessage!(Buffer.from(padded));
+
+      // Not recognized as lazy (topic not in head) → fully parsed, processed normally.
+      expect(message.__rawOrderbook).toBeUndefined();
+      expect(message.data).toBeDefined();
+
+      capturedOnMessage!(message);
+
+      expect(rawHandler).not.toHaveBeenCalled();
+      expect(orderbookHandler).toHaveBeenCalledTimes(1);
     });
   });
 

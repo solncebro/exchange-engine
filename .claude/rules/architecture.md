@@ -20,23 +20,25 @@ Exchange (фабрика)
 │   │   └── BybitSpot
 │
 ├── HTTP-клиенты (src/http/)
-│   ├── BaseHttpClient (retry, rate limits, axios, executeRequest)
-│   ├── BinanceBaseHttpClient (signing, signRequest, buildOptionalSymbolParams)
+│   ├── BaseHttpClient (retry, rate limits, axios, executeRequest, beforeRequest/onResponse хуки)
+│   ├── BinanceBaseHttpClient (signing, signRequest, buildOptionalSymbolParams, проактивный троттлинг через binanceRateLimit.ts)
 │   │   ├── BinanceFuturesHttpClient (фьючерсные эндпоинты)
 │   │   └── BinanceSpotHttpClient (спотовые эндпоинты)
-│   └── BybitHttpClient (единый для spot/linear, buildCategoryParams)
+│   ├── BybitHttpClient (единый для spot/linear, buildCategoryParams)
+│   └── binanceRateLimit.ts — чистые функции: расчёт cooldown по REQUEST_WEIGHT / HTTP 418 (без класса, только для Binance)
 │
 ├── Нормализаторы (src/normalizers/)
 │   ├── binanceNormalizer.ts — raw Binance → унифицированные типы
 │   └── bybitNormalizer.ts — raw Bybit → унифицированные типы
 │
 ├── WebSocket (src/ws/)
-│   ├── BinanceFuturesPublicStream — klines + тикеры (market/ws + SUBSCRIBE)
+│   ├── BinanceFuturesPublicStream — klines + тикеры (market/ws + SUBSCRIBE) + публичные сделки (@aggTrade), auto-шардинг соединений
 │   ├── BinanceSpotPublicStream — klines + тикеры (динамические подписки)
 │   ├── BinanceUserDataStream — listenKey user data
-│   ├── BybitPublicStream — klines + тикеры (topic-based), 1s klines через TradeToKlineAggregator
+│   ├── BybitPublicStream — klines + тикеры (topic-based), 1s klines через TradeToKlineAggregator, опциональный ленивый парсинг orderbook (lazyOrderbookParse)
 │   ├── TradeToKlineAggregator — агрегация трейдов в 1-секундные klines
 │   ├── BybitPrivateStream — приватные события
+│   ├── bybitWebSocketAuth.ts — authenticateBybitWebSocket (общая для BybitPrivateStream/BybitTradeStream)
 │   ├── BaseTradeStream<T> — абстрактная база для trade WS
 │   │   ├── BinanceTradeStream — ордера через WS (Binance spot + futures)
 │   │   └── BybitTradeStream — ордера через WS (только production)
@@ -90,6 +92,10 @@ exchange.close()  // → закрывает оба
 ```
 
 При `ExchangeNameEnum.Bybit` создаёт `BybitLinear` + `BybitSpot`.
+
+## Subpath-экспорт `./public` (src/public.ts, 0.16.0)
+
+Облегчённая точка входа `@solncebro/exchange-engine/public` (`package.json` → `exports["./public"]`) — только публичные стримы (`BybitPublicStream`, `BinanceFuturesPublicStream`), нормализаторы klines/tradeSymbols и нужные константы/типы. Не тянет `Exchange`/`ExchangeClient`, HTTP-клиенты, trade/user-data стримы — для потребителей, которым нужны только публичные market-data потоки без веса всего клиента (signing, order-методы и т.п.).
 
 ## Ключевые принципы
 
