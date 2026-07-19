@@ -13,7 +13,7 @@
 Реализует все `protected fetchAndNormalize*()` методы через `BybitHttpClient` + `bybitNormalizer`.
 
 Реализует `createOrderWebSocket()` через `BybitTradeStream` с fallback на REST:
-1. Формирует params через `buildBybitOrderParams()`: `{ category, symbol, orderType, side, qty, ... }`
+1. Формирует params через `buildBybitOrderParams()`: `{ category, symbol, orderType, side, qty, ... }`. `price` прикладывается **только** к limit-like типам (`isLimitLike = Limit | StopLimit | TakeProfitLimit`) — Market-ордер price на wire не несёт, даже если `args.price` задан (вызывающий код может переиспользовать limit-параметры для market-piece; стрей price на market-запросе — мусор на проводе, не команда биржи).
 2. `submitOrder(orderParams, args: CreateOrderWebSocketArgs)` — принимает аргументы как второй параметр
 3. Если `tradeStream !== null && tradeStream.isConnected()` → отправляет через WebSocket; на WS-пути `Order.rateLimit` snapshot из ответа переносится на пересобранный Order (не теряется)
 4. Иначе fallback: `httpClient.createOrder()` → `buildBybitOrderFromCreateResponse()`

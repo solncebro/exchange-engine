@@ -381,6 +381,10 @@ abstract class BaseExchangeClient implements ExchangeClient {
     throw new Error(`Not supported for ${this.marketLabel} market`);
   }
 
+  async getOrderByClientOrderId(_symbol: string, _clientOrderId: string): Promise<Order> {
+    throw new Error(`Not supported for ${this.marketLabel} market`);
+  }
+
   async fetchOpenOrders(_symbol?: string): Promise<Order[]> {
     throw new Error(`Not supported for ${this.marketLabel} market`);
   }

@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.0] - 2026-07-20 — Признак isTradifi: токенизированные акции и сырьё распознаются и на Bybit
+
+### Added
+
+- **Нормализованный признак `isTradifi: boolean` в `TradeSymbol`.** Токенизированные TradFi-перпы (акции, ETF, сырьё/металлы) теперь помечаются на обеих биржах единым полем. Binance помечает их `contractType: 'TRADIFI_PERPETUAL'`; Bybit держит обычный `contractType: 'LinearPerpetual'`, и единственный маркер — `symbolType: 'stock'` (96 токенизированных акций/ETF на 15.07.2026, первые с 21.04.2026) или `'commodity'` (нефть BZ/CL, золото, серебро). `symbolType: 'innovation'` — обычная крипта из Innovation Zone, не TradFi. До этого фильтр `excludeTradifi` в trade-engine ловил только Binance-признак, и все акции Bybit (включая IBMUSDT) проходили в фид и детекцию стратегий. `buildStreamName` Binance-потока переведён с локальной проверки `contractType` на новое поле — единая точка правды. (`src/types/common.ts`, `src/normalizers/bybitNormalizer.ts`, `src/normalizers/binanceNormalizer.ts`, `src/ws/BinanceFuturesPublicStream.ts`)
+
+### Fixed
+
+- **Bybit ticker delta затирала `indexPrice` в `0`.** Bybit шлёт тикер-дельты только с изменившимися полями — кадр с `markPrice`, но без `indexPrice`, раньше приводил к `indexPrice: 0` на выходе `extractMarkPriceUpdates`. Теперь per-symbol хранится последний известный индекс (`lastIndexPriceBySymbol`), и дельта без индекса несёт последнее известное значение; `0` отдаётся только пока индекс ни разу не приходил. Обнаружено при разборе инцидента OPGUSDT 2026-07-07 (coin-listing): нулевой индекс отключал компонент `Max(Index, Mark×(1+X))` price-limit формулы. (`src/ws/BybitPublicStream.ts`)
+- **Market-ордер Bybit (WS) нёс `price`, если он был передан в `args`.** `buildBybitOrderParams` теперь прикладывает `price` только к limit-like типам (`Limit`/`StopLimit`/`TakeProfitLimit`) — market-запрос никогда не несёт price на wire, даже если вызывающий код передал стрей/устаревшее значение (например переиспользуя limit-параметры для market-piece). (`src/exchanges/BybitBaseClient.ts`)
+- **Stale-watcher Binance Futures public держал процесс Node живым.** Фоновый `setInterval`, проверяющий залипшие соединения, теперь `unref`-нут — housekeeping-таймер больше не мешает процессу-потребителю завершиться после того, как тот закрыл все свои соединения (в рабочем приложении event loop держат сами открытые WebSocket-соединения, поведение не меняется). Устраняет также утечку таймеров в тестах (Jest force-exit worker). (`src/ws/BinanceFuturesPublicStream.ts`)
+
+### Changed
+
+- **BREAKING — минимальная версия Node поднята `>=18.0.0` → `>=22.0.0`** (`package.json` → `engines.node`). Библиотека (через `@solncebro/websocket-engine`) полагается на глобальный `WebSocket`, стабильный только с Node 22 — прежняя граница `18` была неточной и могла падать в рантайме на Node 18/20 (`ReferenceError: WebSocket is not defined`). `engines` теперь отражает фактически поддерживаемый рантайм.
+- **Зависимость `@solncebro/websocket-engine` обновлена `^0.3.0` → `^0.4.0`.** Обратно совместимо: публичный API пакета не изменился (потребляются `ReliableWebSocket`, `WebSocketStatus` + типы, все без изменений). 0.4.0 несёт внутренний фикс переподключения (отсоединение мёртвого сокета, чтобы пара событий `error`+`close` не сбрасывала только что взведённый reconnect-таймер) и убирает неиспользуемую транзитивную зависимость `ws`. (`package.json`)
+
 ## [0.16.0] - 2026-07-06 — Public-stream efficiency: ленивый стакан, bid/ask тикера, Binance aggTrade
 
 Эффективность публичных потоков и поддержка расчёта premium из тикера. Все находки подтверждены по коду (`файл:строка`). Раздел не дублирует Binance-feeder-объём 0.15.0 (авто-шардинг, залп `SUBSCRIBE`, учёт REST-веса, хуки `beforeRequest`/`onResponse`) — он ниже.

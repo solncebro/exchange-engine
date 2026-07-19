@@ -112,6 +112,33 @@ describe('normalizeBybitTradeSymbols', () => {
     expect(result.get('BTCUSDT')!.isActive).toBe(false);
   });
 
+  it('marks tokenized-stock perpetual (symbolType=stock) as tradifi', () => {
+    const rawList = [{ ...BYBIT_RAW_INSTRUMENT_LIST[0], symbolType: 'stock' }];
+    const result = normalizeBybitTradeSymbols(rawList);
+
+    expect(result.get('BTCUSDT')!.isTradifi).toBe(true);
+  });
+
+  it('marks commodity perpetual (symbolType=commodity) as tradifi', () => {
+    const rawList = [{ ...BYBIT_RAW_INSTRUMENT_LIST[0], symbolType: 'commodity' }];
+    const result = normalizeBybitTradeSymbols(rawList);
+
+    expect(result.get('BTCUSDT')!.isTradifi).toBe(true);
+  });
+
+  it('keeps innovation-zone crypto as non-tradifi', () => {
+    const rawList = [{ ...BYBIT_RAW_INSTRUMENT_LIST[0], symbolType: 'innovation' }];
+    const result = normalizeBybitTradeSymbols(rawList);
+
+    expect(result.get('BTCUSDT')!.isTradifi).toBe(false);
+  });
+
+  it('keeps ordinary crypto perpetual as non-tradifi', () => {
+    const result = normalizeBybitTradeSymbols(BYBIT_RAW_INSTRUMENT_LIST);
+
+    expect(result.get('BTCUSDT')!.isTradifi).toBe(false);
+  });
+
   it('parses contractSize', () => {
     const result = normalizeBybitTradeSymbols(BYBIT_RAW_INSTRUMENT_LIST);
 
@@ -191,6 +218,47 @@ describe('normalizeBybitTradeSymbols', () => {
 
     expect(btc.filter.marketMaxQty).toBe('150.000');
     expect(btc.filter.postOnlyMaxQty).toBe('1500.000');
+  });
+
+  it('SPOT caps: maps maxMarketOrderQty → marketMaxQty and maxLimitOrderQty → maxQty (live V5 spot field names; maxOrderQty is deprecated by Bybit)', () => {
+    // Real live shape of /v5/market/instruments-info?category=spot (BTCUSDT, 2026-07-07):
+    const rawSpot = [{
+      symbol: 'BTCUSDT',
+      status: 'Trading',
+      baseCoin: 'BTC',
+      quoteCoin: 'USDT',
+      lotSizeFilter: {
+        basePrecision: '0.000001',
+        minOrderQty: '0.000001',
+        maxOrderQty: '230',
+        minOrderAmt: '5',
+        maxLimitOrderQty: '230',
+        maxMarketOrderQty: '120',
+      },
+      priceFilter: { tickSize: '0.1' },
+    }];
+    const result = normalizeBybitTradeSymbols(rawSpot);
+    const spot = result.get('BTCUSDT')!;
+
+    expect(spot.type).toBe(TradeSymbolTypeEnum.Spot);
+    expect(spot.filter.marketMaxQty).toBe('120'); // spot market cap — was silently lost before
+    expect(spot.filter.maxQty).toBe('230');
+  });
+
+  it('SPOT caps: falls back to deprecated maxOrderQty when maxLimitOrderQty is absent', () => {
+    const rawSpot = [{
+      symbol: 'OLDUSDT',
+      status: 'Trading',
+      baseCoin: 'OLD',
+      quoteCoin: 'USDT',
+      lotSizeFilter: { basePrecision: '0.01', minOrderQty: '0.01', maxOrderQty: '10000', minOrderAmt: '5' },
+      priceFilter: { tickSize: '0.0001' },
+    }];
+    const result = normalizeBybitTradeSymbols(rawSpot);
+    const spot = result.get('OLDUSDT')!;
+
+    expect(spot.filter.maxQty).toBe('10000');
+    expect(spot.filter.marketMaxQty).toBeUndefined(); // no market cap known — split guard stays off
   });
 
   it('builds leverageFilter from raw data', () => {

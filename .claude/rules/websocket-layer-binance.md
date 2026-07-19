@@ -5,7 +5,7 @@
 ## Binance Futures Public Stream
 
 - **URL**: `wss://fstream.binance.com/market/ws` (demo: `wss://fstream.binancefuture.com/market/ws`) — один endpoint без списка стримов в query; подписка только через JSON после `onOpen`
-- **Группировка соединений**: одно соединение на не-kline стримы (`!miniTicker@arr`, при необходимости `!markPrice@arr@1s`); одно соединение на все `@aggTrade` стримы (`groupKey = 'aggTrades'`); kline-интервалы — отдельная группа на interval, шардируемая на несколько соединений при превышении `maxStreamsPerConnection` (см. «Шардинг соединений» ниже). TRADIFI perpetual использует `{symbol}@kline_{interval}` вместо `continuousKline`
+- **Группировка соединений**: одно соединение на не-kline стримы (`!miniTicker@arr`, при необходимости `!markPrice@arr@1s`); одно соединение на все `@aggTrade` стримы (`groupKey = 'aggTrades'`); kline-интервалы — отдельная группа на interval, шардируемая на несколько соединений при превышении `maxStreamsPerConnection` (см. «Шардинг соединений» ниже). TRADIFI perpetual (по `TradeSymbol.isTradifi`) использует `{symbol}@kline_{interval}` вместо `continuousKline`
 - **Kline стрим**: `{symbol}_perpetual@continuousKline_{interval}` или spot-формат для TRADIFI
 - **Тикер стрим**: `!miniTicker@arr`
 - **Mark/index стрим** (если есть подписчики `subscribeMarkPrices`): `!markPrice@arr@1s` — в `subscriptionList` как `MarkPrices`; payload → `MarkPriceUpdate[]`

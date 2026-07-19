@@ -120,6 +120,22 @@ describe('normalizeBinanceTradeSymbols', () => {
     expect(symbol.isLinear).toBe(false);
   });
 
+  it('marks TRADIFI_PERPETUAL (tokenized equity) as tradifi and still swap/linear', () => {
+    const info = { symbols: [{ ...BINANCE_RAW_EXCHANGE_INFO.symbols[0], contractType: 'TRADIFI_PERPETUAL' }] };
+    const result = normalizeBinanceTradeSymbols(info);
+    const symbol = result.get('BTCUSDT')!;
+
+    expect(symbol.isTradifi).toBe(true);
+    expect(symbol.type).toBe(TradeSymbolTypeEnum.Swap);
+    expect(symbol.isLinear).toBe(true);
+  });
+
+  it('keeps ordinary crypto PERPETUAL as non-tradifi', () => {
+    const result = normalizeBinanceTradeSymbols(BINANCE_RAW_EXCHANGE_INFO);
+
+    expect(result.get('BTCUSDT')!.isTradifi).toBe(false);
+  });
+
   it('falls back filter fields to 0 when no matching filters exist', () => {
     const info = { symbols: [BINANCE_RAW_SYMBOL_NO_FILTERS] };
     const result = normalizeBinanceTradeSymbols(info);

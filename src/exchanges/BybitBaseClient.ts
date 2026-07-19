@@ -180,7 +180,10 @@ abstract class BybitBaseClient extends BaseExchangeClient {
       orderParams.qty = String(this.amountToPrecision(args.symbol, args.amount));
     }
 
-    if (args.price !== undefined && args.price > 0) {
+    // Price applies to limit-like orders only. Market orders must not carry a price:
+    // callers often reuse limit-priced params for market pieces, and a stray (stale)
+    // price on a market request is wire garbage at best.
+    if (isLimitLike && args.price !== undefined && args.price > 0) {
       orderParams.price = String(this.priceToPrecision(args.symbol, args.price));
     }
 
@@ -256,6 +259,26 @@ abstract class BybitBaseClient extends BaseExchangeClient {
     }
 
     throw new Error(`Order ${orderId} not found for ${symbol}`);
+  }
+
+  async getOrderByClientOrderId(symbol: string, clientOrderId: string): Promise<Order> {
+    this.logger.debug(`[Bybit] Fetching order by client id ${clientOrderId} for ${symbol}`);
+
+    const realtimeRaw = await this.httpClient.getOpenOrders(this.category, { symbol, orderLinkId: clientOrderId });
+    const realtimeOrder = realtimeRaw.result.list[0];
+
+    if (realtimeOrder) {
+      return normalizeBybitOrder(realtimeOrder);
+    }
+
+    const historyRaw = await this.httpClient.getOrderHistory(this.category, { symbol, orderLinkId: clientOrderId });
+    const historyOrder = historyRaw.result.list[0];
+
+    if (historyOrder) {
+      return normalizeBybitOrder(historyOrder);
+    }
+
+    throw new Error(`Order with client id ${clientOrderId} not found for ${symbol}`);
   }
 
   async fetchOpenOrders(symbol?: string): Promise<Order[]> {

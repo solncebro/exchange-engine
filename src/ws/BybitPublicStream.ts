@@ -66,6 +66,12 @@ class BybitPublicStream {
   private readonly onNotify?: (message: string) => void | Promise<void>;
   private readonly tickerHandlerSet: Set<(tickers: TickerBySymbol) => void> = new Set();
   private readonly markPriceHandlerSet: Set<MarkPriceHandler> = new Set();
+  /**
+   * Last known index price per symbol. Bybit ticker deltas carry only the CHANGED
+   * fields, so a frame with markPrice but no indexPrice must NOT reset the index to 0 —
+   * doing so broke the price-limit boundary math downstream (OPGUSDT 2026-07-07).
+   */
+  private readonly lastIndexPriceBySymbol: Map<string, number> = new Map();
   private readonly klineHandlerByKey: Map<string, Set<KlineHandler>> = new Map();
   private readonly orderBookHandlerByTopic: Map<string, Set<OrderBookHandler>> = new Map();
   private readonly publicTradeHandlerBySymbol: Map<string, Set<PublicTradeHandler>> = new Map();
@@ -1026,6 +1032,15 @@ class BybitPublicStream {
     const result: MarkPriceUpdate[] = [];
 
     for (const raw of rawList) {
+      // Remember the index FIRST — even index-only deltas (no markPrice) must update it.
+      if (raw.indexPrice !== undefined) {
+        const parsedIndexPrice = parseFloat(raw.indexPrice);
+
+        if (Number.isFinite(parsedIndexPrice) && parsedIndexPrice > 0) {
+          this.lastIndexPriceBySymbol.set(raw.symbol, parsedIndexPrice);
+        }
+      }
+
       if (raw.markPrice === undefined) {
         continue;
       }
@@ -1039,7 +1054,7 @@ class BybitPublicStream {
       result.push({
         symbol: raw.symbol,
         markPrice,
-        indexPrice: raw.indexPrice !== undefined ? parseFloat(raw.indexPrice) : 0,
+        indexPrice: this.lastIndexPriceBySymbol.get(raw.symbol),
         timestamp: raw.time ?? messageTs ?? Date.now(),
       });
     }

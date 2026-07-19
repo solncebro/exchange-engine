@@ -65,17 +65,29 @@ const flushAsync = async (): Promise<void> => {
   }
 };
 
+// Every stream created in a test is tracked here so afterEach can close it and stop its
+// stale-watcher setInterval — otherwise the timers leak and Jest force-exits the worker.
+const createdStreamList: BinanceFuturesPublicStream[] = [];
+
+const trackStream = (stream: BinanceFuturesPublicStream): BinanceFuturesPublicStream => {
+  createdStreamList.push(stream);
+
+  return stream;
+};
+
 const createStreamForTest = (args: {
   url: string;
   mockLogger: ReturnType<typeof createMockLogger>;
 }): BinanceFuturesPublicStream =>
-  new BinanceFuturesPublicStream({
-    webSocketUrl: args.url,
-    logger: args.mockLogger,
-    onNotify: undefined,
-    label: 'test',
-    pauseBetweenConnectionsMs: 0,
-  });
+  trackStream(
+    new BinanceFuturesPublicStream({
+      webSocketUrl: args.url,
+      logger: args.mockLogger,
+      onNotify: undefined,
+      label: 'test',
+      pauseBetweenConnectionsMs: 0,
+    }),
+  );
 
 describe('BinanceFuturesPublicStream', () => {
   const mockLogger = createMockLogger();
@@ -85,6 +97,17 @@ describe('BinanceFuturesPublicStream', () => {
     jest.clearAllMocks();
     capturedOnMessage = undefined;
     mockSend.mockReset();
+  });
+
+  afterEach(async () => {
+    // Let any deferred connect microtask run so the stale-watcher timer exists before close().
+    await flushAsync();
+
+    for (const stream of createdStreamList) {
+      stream.close();
+    }
+
+    createdStreamList.length = 0;
   });
 
   describe('subscribeAllTickers', () => {
@@ -317,14 +340,16 @@ describe('BinanceFuturesPublicStream', () => {
 
   describe('connection sharding (per-connection stream cap)', () => {
     const buildShardedStream = (maxStreamsPerConnection: number): BinanceFuturesPublicStream =>
-      new BinanceFuturesPublicStream({
-        webSocketUrl: url,
-        logger: mockLogger,
-        onNotify: undefined,
-        label: 'test',
-        pauseBetweenConnectionsMs: 0,
-        maxStreamsPerConnection,
-      });
+      trackStream(
+        new BinanceFuturesPublicStream({
+          webSocketUrl: url,
+          logger: mockLogger,
+          onNotify: undefined,
+          label: 'test',
+          pauseBetweenConnectionsMs: 0,
+          maxStreamsPerConnection,
+        }),
+      );
 
     it('shards one interval across multiple connections when it exceeds the per-connection cap', async () => {
       const { ReliableWebSocket } = require('@solncebro/websocket-engine');

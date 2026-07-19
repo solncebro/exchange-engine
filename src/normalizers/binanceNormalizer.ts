@@ -368,6 +368,9 @@ export function parseBinanceOrderRateLimit(raw: BinanceExchangeInfoRaw): OrderRa
   };
 }
 
+// Binance marks tokenized TradFi perpetuals (tokenized equities, metals) with this contractType.
+const TRADIFI_PERPETUAL_CONTRACT_TYPE = 'TRADIFI_PERPETUAL';
+
 export function normalizeBinanceTradeSymbols(raw: BinanceExchangeInfoRaw): TradeSymbolBySymbol {
   const result = new Map<string, TradeSymbol>();
 
@@ -379,7 +382,7 @@ export function normalizeBinanceTradeSymbols(raw: BinanceExchangeInfoRaw): Trade
     const notionalFilter = extractFilter(symbol.filters, 'NOTIONAL');
 
     const rawContractType = symbol.contractType ?? '';
-    const isPerp = rawContractType === 'PERPETUAL' || rawContractType === 'TRADIFI_PERPETUAL';
+    const isPerp = rawContractType === 'PERPETUAL' || rawContractType === TRADIFI_PERPETUAL_CONTRACT_TYPE;
     const isSpot = rawContractType === '' || rawContractType === undefined;
 
     let tradeSymbolType: TradeSymbolTypeEnum = TradeSymbolTypeEnum.Future;
@@ -400,6 +403,7 @@ export function normalizeBinanceTradeSymbols(raw: BinanceExchangeInfoRaw): Trade
       isLinear: isPerp,
       contractSize: 1,
       contractType: rawContractType,
+      isTradifi: rawContractType === TRADIFI_PERPETUAL_CONTRACT_TYPE,
       filter: {
         tickSize: priceFilter?.tickSize ?? '0',
         stepSize: lotSizeFilter?.stepSize ?? '0',
@@ -788,7 +792,7 @@ export function normalizeBinanceMarkPriceList(rawList: BinanceMarkPriceRaw[]): M
   return rawList.map((raw) => ({
     symbol: raw.symbol,
     markPrice: parseFloat(raw.markPrice),
-    indexPrice: parseFloat(raw.indexPrice),
+    indexPrice: raw.indexPrice !== undefined ? parseFloat(raw.indexPrice) : undefined,
     lastFundingRate: parseFloat(raw.lastFundingRate),
     nextFundingTime: raw.nextFundingTime,
     timestamp: raw.time,

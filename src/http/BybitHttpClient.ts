@@ -103,6 +103,10 @@ class BybitHttpClient extends BaseHttpClient {
       params.orderId = options.orderId;
     }
 
+    if (options?.orderLinkId !== undefined) {
+      params.orderLinkId = options.orderLinkId;
+    }
+
     if (options?.settleCoin !== undefined) {
       params.settleCoin = options.settleCoin;
     }

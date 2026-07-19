@@ -202,6 +202,10 @@ abstract class BinanceBaseHttpClient extends BaseHttpClient {
     return this.signedGet<BinanceOrderResponseRaw>(this.endpoints.order, { symbol, orderId });
   }
 
+  async getOrderByClientOrderId(symbol: string, clientOrderId: string): Promise<BinanceOrderResponseRaw> {
+    return this.signedGet<BinanceOrderResponseRaw>(this.endpoints.order, { symbol, origClientOrderId: clientOrderId });
+  }
+
   async getOpenOrders(symbol?: string): Promise<BinanceOrderResponseRaw[]> {
     return this.signedGet<BinanceOrderResponseRaw[]>(this.endpoints.openOrders, this.buildOptionalSymbolParams(symbol));
   }

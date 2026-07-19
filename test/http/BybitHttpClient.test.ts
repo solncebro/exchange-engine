@@ -336,6 +336,14 @@ describe('BybitHttpClient', () => {
       expect(options.params.symbol).toBe('BTCUSDT');
       expect(options.params.limit).toBe(10);
     });
+
+    it('includes orderLinkId when provided', async () => {
+      await client.getOpenOrders('linear', { symbol: 'BTCUSDT', orderLinkId: 'kf-abc-e0' });
+
+      const [, options] = mockInstance.get.mock.calls[0];
+
+      expect(options.params.orderLinkId).toBe('kf-abc-e0');
+    });
   });
 
   describe('getOrderHistory', () => {
@@ -355,6 +363,14 @@ describe('BybitHttpClient', () => {
 
       expect(options.params.symbol).toBe('BTCUSDT');
       expect(options.params.limit).toBe(20);
+    });
+
+    it('includes orderLinkId when provided', async () => {
+      await client.getOrderHistory('linear', { symbol: 'BTCUSDT', orderLinkId: 'kf-abc-x1' });
+
+      const [, options] = mockInstance.get.mock.calls[0];
+
+      expect(options.params.orderLinkId).toBe('kf-abc-x1');
     });
   });
 

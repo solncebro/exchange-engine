@@ -228,6 +228,20 @@ describe('BinanceBaseHttpClient', () => {
     });
   });
 
+  describe('getOrderByClientOrderId', () => {
+    it('calls signedGet on order endpoint with origClientOrderId', async () => {
+      await client.getOrderByClientOrderId('BTCUSDT', 'kf-abc-e0');
+
+      const [url, options] = mockInstance.get.mock.calls[0];
+
+      expect(url).toBe('/test/order');
+      expect(options.params.symbol).toBe('BTCUSDT');
+      expect(options.params.origClientOrderId).toBe('kf-abc-e0');
+      expect(options.params.orderId).toBeUndefined();
+      expect(options.params.signature).toBeDefined();
+    });
+  });
+
   describe('getOpenOrders', () => {
     it('calls signedGet on openOrders endpoint', async () => {
       await client.getOpenOrders('BTCUSDT');

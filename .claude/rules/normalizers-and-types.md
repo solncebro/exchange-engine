@@ -45,6 +45,7 @@ BinanceTicker24hrRaw { symbol, lastPrice: string, priceChangePercent: string, ti
   - Пробрасывает `pricePrecision`, `quantityPrecision`, `onboardDate → launchTimestamp`, `triggerProtect`, `liquidationFee`, `orderTypes → orderTypeList`, `timeInForce → timeInForceList`
   - Сохраняет сырой payload в `info`
   - Определяет тип: PERPETUAL/TRADIFI_PERPETUAL → Swap, пустой/отсутствует contractType → Spot, остальное → Future
+  - `isTradifi`: `contractType === 'TRADIFI_PERPETUAL'` (токенизированные акции/металлы Binance)
   - `extractFilter<T>()` — generic helper с дискриминированным union по `filterType`, возвращает точный тип фильтра
 - `normalizeBinanceTickers(rawList)` → `TickerBySymbol` (Map)
 - `normalizeBinanceKlines(rawList)` → `Kline[]` — массив массивов → массив объектов, parseFloat для строк
@@ -117,6 +118,7 @@ WebSocket:
 - `normalizeBybitTradeSymbols(rawList)` → `TradeSymbolBySymbol` (Map)
   - `isActive`: `status === 'Trading'` или `status === 'PreLaunch'`
   - LinearPerpetual/LinearFutures → Swap, пустой contractType → Spot, остальное → Future
+  - `isTradifi`: `symbolType` ∈ {`stock`, `commodity`} — Bybit листит токенизированные акции/ETF и сырьё (нефть, золото, серебро) с обычным `contractType: 'LinearPerpetual'`, единственный маркер — `symbolType`; `innovation` — обычная крипта, не TradFi
   - `stepSize` берётся из `qtyStep` (linear) или `basePrecision` (spot)
   - `minNotional` берётся из `minNotionalValue` или `minOrderAmt`
   - `filter`: пробрасывает `priceFilter.minPrice/maxPrice`, `lotSizeFilter.maxMktOrderQty → marketMaxQty`, `lotSizeFilter.postOnlyMaxOrderQty → postOnlyMaxQty`
@@ -208,7 +210,7 @@ WebSocket:
 ### Интерфейсы:
 - `Ticker` — `{ symbol, lastPrice, openPrice, highPrice, lowPrice, priceChangePercent, volume, quoteVolume, timestamp, markPrice?, indexPrice?, bid1Price?, bid1Size?, ask1Price?, ask1Size?, fundingRate?, nextFundingTime? }` (последние 8 полей заполняются Bybit tickers, когда биржа их прислала)
 - `Kline` — `{ openTimestamp, openPrice, highPrice, lowPrice, closePrice, volume, closeTimestamp, quoteAssetVolume, numberOfTrades, takerBuyBaseAssetVolume, takerBuyQuoteAssetVolume, isClosed?: boolean }`
-- `TradeSymbol` — `{ symbol, baseAsset, quoteAsset, settle, isActive, type, isLinear, contractSize, contractType, filter, leverageFilter?, priceLimitRisk?, pricePrecision?, quantityPrecision?, funding?, launchTimestamp?, triggerProtect?, liquidationFee?, orderTypeList?, timeInForceList?, info? }`
+- `TradeSymbol` — `{ symbol, baseAsset, quoteAsset, settle, isActive, type, isLinear, contractSize, contractType, isTradifi, filter, leverageFilter?, priceLimitRisk?, pricePrecision?, quantityPrecision?, funding?, launchTimestamp?, triggerProtect?, liquidationFee?, orderTypeList?, timeInForceList?, info? }`
 - `TradeSymbolFilter` — `{ tickSize, stepSize, minQty, maxQty, minNotional, minPrice?, maxPrice?, maxNotional?, marketMinQty?, marketMaxQty?, marketStepSize?, postOnlyMaxQty? }` (все string)
 - `LeverageFilter` — `{ minLeverage, maxLeverage, leverageStep }` (все string)
 - `PriceLimitRisk` — дискриминированное объединение по `source`:

@@ -690,6 +690,47 @@ describe('BybitLinear', () => {
     });
   });
 
+  describe('getOrderByClientOrderId', () => {
+    it('returns order from realtime by orderLinkId', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValueOnce({
+        data: { result: { list: [BYBIT_RAW_ORDER_RESPONSE] } },
+      });
+
+      const result = await client.getOrderByClientOrderId('BTCUSDT', 'kf-abc-e0');
+
+      const [, options] = mockInstance.get.mock.calls[0];
+
+      expect(options.params.orderLinkId).toBe('kf-abc-e0');
+      expect(result.id).toBe('abc-123-def');
+      expect(mockInstance.get).toHaveBeenCalledTimes(1);
+    });
+
+    it('falls back to history when not found in realtime', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get
+        .mockResolvedValueOnce({ data: { result: { list: [] } } })
+        .mockResolvedValueOnce({ data: { result: { list: [BYBIT_RAW_ORDER_RESPONSE] } } });
+
+      const result = await client.getOrderByClientOrderId('BTCUSDT', 'kf-abc-e0');
+
+      expect(result.id).toBe('abc-123-def');
+      expect(mockInstance.get).toHaveBeenCalledTimes(2);
+    });
+
+    it('throws when order not found in both realtime and history', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get
+        .mockResolvedValueOnce({ data: { result: { list: [] } } })
+        .mockResolvedValueOnce({ data: { result: { list: [] } } });
+
+      await expect(client.getOrderByClientOrderId('BTCUSDT', 'missing')).rejects.toThrow(
+        'Order with client id missing not found for BTCUSDT',
+      );
+      expect(mockInstance.get).toHaveBeenCalledTimes(2);
+    });
+  });
+
   describe('fetchOpenOrders', () => {
     it('returns array of normalized orders', async () => {
       const { client, mockInstance } = createClient();

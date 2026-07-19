@@ -201,6 +201,10 @@ export interface TradeSymbol {
   isLinear: boolean;
   contractSize: number;
   contractType: string;
+  // Tokenized traditional-finance perpetual (equities, commodities/metals) rather than a crypto
+  // asset. Binance marks these with contractType TRADIFI_PERPETUAL; Bybit keeps an ordinary
+  // LinearPerpetual contractType and marks them with symbolType 'stock' / 'commodity'.
+  isTradifi: boolean;
   filter: TradeSymbolFilter;
   leverageFilter?: LeverageFilter;
   priceLimitRisk?: PriceLimitRisk;
@@ -405,7 +409,8 @@ export type PublicTradeHandler = (symbol: string, tradeList: PublicTrade[]) => v
 export interface MarkPrice {
   symbol: string;
   markPrice: number;
-  indexPrice: number;
+  /** Index price. `undefined` = not present in the exchange payload (never a fake 0). */
+  indexPrice?: number;
   lastFundingRate: number;
   nextFundingTime: number;
   timestamp: number;
@@ -414,7 +419,12 @@ export interface MarkPrice {
 export interface MarkPriceUpdate {
   symbol: string;
   markPrice: number;
-  indexPrice: number;
+  /**
+   * Index price. `undefined` = not known (never received for this symbol yet).
+   * NEVER a zero placeholder: a fake 0 silently disabled the Max(Index, …) component
+   * of the price-limit boundary math downstream (OPGUSDT 2026-07-07).
+   */
+  indexPrice?: number;
   timestamp: number;
 }
 

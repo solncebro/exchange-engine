@@ -23,12 +23,15 @@ import {
 } from '../fixtures/binanceRaw';
 import { MarginModeEnum, OrderSideEnum, OrderTypeEnum, PositionModeEnum, PositionSideEnum, TimeInForceEnum, TradeSymbolTypeEnum, WorkingTypeEnum } from '../../src/types/common';
 import { BinanceFuturesPublicStream } from '../../src/ws/BinanceFuturesPublicStream';
+import { BinanceUserDataStream } from '../../src/ws/BinanceUserDataStream';
 
 jest.mock('axios');
 jest.mock('../../src/ws/BinanceFuturesPublicStream');
 jest.mock('../../src/ws/BinanceTradeStream');
+jest.mock('../../src/ws/BinanceUserDataStream');
 
 const mockedAxios = axios as jest.Mocked<typeof axios>;
+const MockedUserDataStream = BinanceUserDataStream as jest.MockedClass<typeof BinanceUserDataStream>;
 
 function createClient(isDemoMode = false) {
   const mockInstance = createMockAxiosInstance();
@@ -833,6 +836,22 @@ describe('BinanceFutures', () => {
     });
   });
 
+  describe('getOrderByClientOrderId', () => {
+    it('returns normalized order queried by client order id', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: BINANCE_RAW_ORDER_RESPONSE });
+
+      const result = await client.getOrderByClientOrderId('BTCUSDT', 'kf-abc-e0');
+
+      const [, options] = mockInstance.get.mock.calls[0];
+
+      expect(options.params.origClientOrderId).toBe('kf-abc-e0');
+      expect(result.id).toBe('123456789');
+      expect(result.symbol).toBe('BTCUSDT');
+      expect(result.side).toBe(OrderSideEnum.Buy);
+    });
+  });
+
   describe('fetchOpenOrders', () => {
     it('returns array of normalized orders', async () => {
       const { client, mockInstance } = createClient();
@@ -1359,6 +1378,51 @@ describe('BinanceFutures', () => {
       const result = await client.getOrderRateLimit();
 
       expect(result).toEqual({ writeRequestsPerSecond: 20, source: 'binance-exchange-info' });
+    });
+  });
+
+  describe('connectUserDataStream keepAlive recovery', () => {
+    const createHandler = () => ({
+      onOrderUpdate: jest.fn(),
+      onPositionUpdate: jest.fn(),
+    });
+
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    it('recreates the stream with a fresh listenKey after a keepAlive failure', async () => {
+      jest.useFakeTimers();
+
+      const { client, mockInstance } = createClient();
+      mockInstance.post.mockResolvedValue({ data: { listenKey: 'lk-1' } });
+      mockInstance.put.mockRejectedValue(new Error('keepAlive failed'));
+
+      await client.connectUserDataStream(createHandler());
+
+      expect(MockedUserDataStream).toHaveBeenCalledTimes(1);
+
+      await jest.advanceTimersByTimeAsync(30 * 60 * 1000);
+      await jest.advanceTimersByTimeAsync(1);
+
+      expect(MockedUserDataStream).toHaveBeenCalledTimes(2);
+      const listenKeyPostCallList = mockInstance.post.mock.calls.filter(([url]) =>
+        String(url).includes('listenKey')
+      );
+      expect(listenKeyPostCallList.length).toBe(2);
+    });
+
+    it('does not recreate the stream while keepAlive succeeds', async () => {
+      jest.useFakeTimers();
+
+      const { client, mockInstance } = createClient();
+      mockInstance.post.mockResolvedValue({ data: { listenKey: 'lk-1' } });
+      mockInstance.put.mockResolvedValue({ data: {} });
+
+      await client.connectUserDataStream(createHandler());
+      await jest.advanceTimersByTimeAsync(30 * 60 * 1000);
+
+      expect(MockedUserDataStream).toHaveBeenCalledTimes(1);
     });
   });
 });

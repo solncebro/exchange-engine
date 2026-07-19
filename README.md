@@ -4,17 +4,13 @@ Universal TypeScript client library for cryptocurrency trading on Binance and By
 
 ## Latest Release
 
-Current version: `0.14.0`
+Current version: `0.18.0`
 
-- **Batch order modification** — new `ExchangeClient.modifyBatchOrders(orderList)` with per-order success/error result. REST: Binance Futures (`PUT /fapi/v1/batchOrders`), Bybit Linear/Spot (`POST /v5/order/amend-batch`). Bybit Trade WebSocket: `order.amend-batch`.
-- **WebSocket batch operations (Bybit)** — `BybitTradeStream` now supports `order.create-batch` / `order.amend-batch` / `order.cancel-batch`. With an active `tradeStream`, all three batch methods in `BybitBaseClient` route through WebSocket; otherwise REST. Demo mode stays REST-only.
-- **Automatic batch chunking** — `createBatchOrders` / `modifyBatchOrders` / `cancelBatchOrders` auto-split input per exchange limits (Binance Futures: 5/5/10; Bybit Linear: 20; Bybit Spot: 10). No need to worry about exchange caps.
-- **Order rate-limit visibility** — two levels:
-  - Static per-UID: new `ExchangeClient.getOrderRateLimit(): Promise<OrderRateLimit>`. Binance — parsed from `exchangeInfo.rateLimits[]`, Bybit — documented constant `10 RPS` (linear createOrder/cancel/amend, counted per batch item).
-  - Runtime per-response: `Order.rateLimit?: OrderRateLimitSnapshot { limit, remaining, resetMs }` auto-populated for single-order operations via WS Trade Stream (Bybit — from `X-Bapi-Limit*` headers, Binance — from `message.rateLimits[]`).
-- **Bybit V5 public subscriptions** — new `subscribeOrderbook(symbol, depth, handler)` / `subscribePublicTrades(symbol, handler)` for topics `orderbook.{depth}.{symbol}` and `publicTrade.{symbol}`. Custom publicTrade subscriber coexists with `TradeToKlineAggregator` (1s klines).
-- **WebSocket Trade Stream refactor** — `PendingRequest` is now kind-tagged (enum `PendingRequestKind`), shared generic `sendRequest<TResult>(...)` in `BaseTradeStream`. Single-order behavior and public API unchanged.
-- **BREAKING** — `ExchangeClient.cancelBatchOrders(symbol, orderIdList)` return type changed from `Promise<void>` to `Promise<CancelBatchOrdersResult>` (`= CancelOrderItemResult[]`) — per-order success/error result instead of silent void.
+- **`isTradifi: boolean` on `TradeSymbol`** — tokenized TradFi perpetuals (stocks, ETFs, commodities/metals) are now flagged uniformly across both exchanges. Binance marks them via `contractType: 'TRADIFI_PERPETUAL'`; Bybit keeps a regular `contractType: 'LinearPerpetual'`, so the only marker is `symbolType` (`'stock'` / `'commodity'`; `'innovation'` is ordinary crypto). Binance stream name selection now reads this single field instead of an inline `contractType` check.
+- **Fix — Bybit ticker delta no longer zeroes `indexPrice`** — Bybit sends ticker deltas with only changed fields, so a frame carrying `markPrice` but not `indexPrice` used to emit `indexPrice: 0`. The last known index is now retained per symbol (`lastIndexPriceBySymbol`); `0` is emitted only until the first index ever arrives.
+- **Fix — Bybit market order (WS) no longer carries `price`** — `buildBybitOrderParams` applies `price` only to limit-like types (`Limit` / `StopLimit` / `TakeProfitLimit`); a market request never puts price on the wire, even when the caller passed a stray/reused value.
+
+Previously in `0.16.0` — public-stream efficiency: opt-in lazy orderbook parse (`ExchangeConfig.lazyOrderbookParse`, Bybit), best bid/ask level 1 on `Ticker` (`bid1Price`/`ask1Price`/…) with a live `subscribeAllTickers` stream, Binance Futures public trades via `@aggTrade`, `fetchOpenConditionalOrders(settleCoin)`, `getMaxOrderQty` / `getMarketMaxOrderQty`, and the lightweight `@solncebro/exchange-engine/public` subpath export.
 
 Full release notes: [CHANGELOG.md](./CHANGELOG.md)
 

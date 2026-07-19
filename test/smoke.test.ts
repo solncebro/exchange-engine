@@ -321,6 +321,7 @@ const _tradeSymbol: TradeSymbol = {
   isLinear:     true,
   contractSize: 1,
   contractType: 'PERPETUAL',
+  isTradifi:    false,
   filter:       _tradeSymbolFilter,
 };
 

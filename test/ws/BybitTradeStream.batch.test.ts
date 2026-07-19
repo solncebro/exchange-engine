@@ -224,6 +224,33 @@ describe('BybitTradeStream batch operations', () => {
       ).rejects.toThrow('WebSocket is not connected');
       expect((stream as any).pendingBatchContextByReqId.size).toBe(0);
     });
+
+    it('propagates the X-Bapi-Limit header as rateLimit on every item (consumer budget accounting)', async () => {
+      await connectStream();
+
+      const promise = stream.modifyBatchOrders('linear', ['1'], [{ symbol: 'BTCUSDT', orderId: '1', price: '30000' }]);
+
+      await jest.advanceTimersByTimeAsync(0);
+
+      const sentMessage = mockWebSocket.sendToConnectedSocket.mock.calls[0][0];
+      capturedOnMessage!({
+        op: 'order.amend-batch',
+        reqId: sentMessage.reqId,
+        retCode: 0,
+        retMsg: 'OK',
+        data: { list: [{ orderId: '1' }] },
+        retExtInfo: { list: [{ code: 0, msg: 'OK' }] },
+        header: {
+          'X-Bapi-Limit': '10',
+          'X-Bapi-Limit-Status': '7',
+          'X-Bapi-Limit-Reset-Timestamp': '1700000000500',
+        },
+      } as BybitBatchTradeMessage);
+
+      const result = await promise;
+
+      expect(result[0].rateLimit).toEqual({ limit: 10, remaining: 7, resetMs: 1700000000500 });
+    });
   });
 
   describe('cancelBatchOrders', () => {
@@ -273,6 +300,33 @@ describe('BybitTradeStream batch operations', () => {
 
       await expect(promise).rejects.toThrow('Top-level failure');
       expect((stream as any).pendingBatchContextByReqId.size).toBe(0);
+    });
+
+    it('propagates the X-Bapi-Limit header as rateLimit on every item (consumer budget accounting)', async () => {
+      await connectStream();
+
+      const promise = stream.cancelBatchOrders('linear', ['o-1'], [{ category: 'linear', symbol: 'BTCUSDT', orderId: 'o-1' }]);
+
+      await jest.advanceTimersByTimeAsync(0);
+
+      const sentMessage = mockWebSocket.sendToConnectedSocket.mock.calls[0][0];
+      capturedOnMessage!({
+        op: 'order.cancel-batch',
+        reqId: sentMessage.reqId,
+        retCode: 0,
+        retMsg: 'OK',
+        data: { list: [{ orderId: 'o-1' }] },
+        retExtInfo: { list: [{ code: 0, msg: 'OK' }] },
+        header: {
+          'X-Bapi-Limit': '10',
+          'X-Bapi-Limit-Status': '6',
+          'X-Bapi-Limit-Reset-Timestamp': '1700000000700',
+        },
+      } as BybitBatchTradeMessage);
+
+      const result = await promise;
+
+      expect(result[0].rateLimit).toEqual({ limit: 10, remaining: 6, resetMs: 1700000000700 });
     });
   });
 

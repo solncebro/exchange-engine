@@ -155,6 +155,59 @@ describe('BybitPublicStream', () => {
     });
   });
 
+  describe('mark price index continuity (delta frames carry only changed fields)', () => {
+    const emitTicker = (data: Partial<BybitTickerRaw>) => {
+      capturedOnMessage!({
+        topic: 'tickers.BTCUSDT',
+        data: { symbol: 'BTCUSDT', ...data },
+        ts: 1700000000000,
+      });
+    };
+
+    it('a delta WITHOUT indexPrice must carry the last known index, not 0 (OPGUSDT root cause: zero index broke the price-limit boundary)', async () => {
+      const stream = new BybitPublicStream({ url: 'wss://stream.bybit.com/v5/public/linear', logger: mockLogger, onNotify: undefined, label: 'test' });
+      const updates: MarkPriceUpdate[] = [];
+      stream.subscribeMarkPrices(list => updates.push(...list), ['BTCUSDT']);
+      await Promise.resolve();
+
+      // Snapshot: both fields present.
+      emitTicker({ markPrice: '50000', indexPrice: '50100' });
+      // Delta: mark changed, index NOT included in the frame (exchange sends changed fields only).
+      emitTicker({ markPrice: '50050' });
+
+      expect(updates).toHaveLength(2);
+      expect(updates[0].indexPrice).toBeCloseTo(50100);
+      expect(updates[1].markPrice).toBeCloseTo(50050);
+      expect(updates[1].indexPrice).toBeCloseTo(50100); // last known — NOT zero
+    });
+
+    it('an index-only delta (no markPrice) is remembered and used by the next mark delta', async () => {
+      const stream = new BybitPublicStream({ url: 'wss://stream.bybit.com/v5/public/linear', logger: mockLogger, onNotify: undefined, label: 'test' });
+      const updates: MarkPriceUpdate[] = [];
+      stream.subscribeMarkPrices(list => updates.push(...list), ['BTCUSDT']);
+      await Promise.resolve();
+
+      emitTicker({ markPrice: '50000', indexPrice: '50100' });
+      emitTicker({ indexPrice: '50200' }); // index moved, mark unchanged → no emit, but must be remembered
+      emitTicker({ markPrice: '50075' }); // mark delta without index
+
+      expect(updates).toHaveLength(2);
+      expect(updates[1].indexPrice).toBeCloseTo(50200);
+    });
+
+    it('never-seen index is emitted as undefined — NEVER a fake 0 placeholder', async () => {
+      const stream = new BybitPublicStream({ url: 'wss://stream.bybit.com/v5/public/linear', logger: mockLogger, onNotify: undefined, label: 'test' });
+      const updates: MarkPriceUpdate[] = [];
+      stream.subscribeMarkPrices(list => updates.push(...list), ['BTCUSDT']);
+      await Promise.resolve();
+
+      emitTicker({ markPrice: '50000' }); // no index ever seen yet
+
+      expect(updates).toHaveLength(1);
+      expect(updates[0].indexPrice).toBeUndefined();
+    });
+  });
+
   describe('subscribeKlines', () => {
     it('converts interval and subscribes with correct topic', async () => {
       const stream = new BybitPublicStream({ url: 'wss://stream.bybit.com/v5/public/linear', logger: mockLogger, onNotify: undefined, label: 'test' });

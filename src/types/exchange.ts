@@ -23,6 +23,7 @@ import type {
   Income,
   ClosedPnl,
   UserDataStreamHandlerArgs,
+  OrderRateLimitSnapshot,
 } from './common';
 import {
   MarginModeEnum,
@@ -139,6 +140,8 @@ export interface CancelOrderItemResult {
   isSuccess: boolean;
   errorCode: number | null;
   errorText: string | null;
+  /** Rate-limit budget snapshot from the response header (WS path), when present. */
+  rateLimit?: OrderRateLimitSnapshot;
 }
 
 export type CancelBatchOrdersResult = CancelOrderItemResult[];
@@ -148,6 +151,8 @@ export interface ModifyOrderItemResult {
   isSuccess: boolean;
   errorCode: number | null;
   errorText: string | null;
+  /** Rate-limit budget snapshot from the response header (WS path), when present. */
+  rateLimit?: OrderRateLimitSnapshot;
 }
 
 export type ModifyBatchOrdersResult = ModifyOrderItemResult[];
@@ -192,6 +197,7 @@ export interface ExchangeClient {
 
   cancelOrder(symbol: string, orderId: string): Promise<Order>;
   getOrder(symbol: string, orderId: string): Promise<Order>;
+  getOrderByClientOrderId(symbol: string, clientOrderId: string): Promise<Order>;
   fetchOpenOrders(symbol?: string): Promise<Order[]>;
   fetchOpenConditionalOrders(settleCoin: string): Promise<Order[]>;
   modifyOrder(args: ModifyOrderArgs): Promise<Order>;

@@ -11,6 +11,7 @@ export const BTCUSDT_TRADE_SYMBOL: TradeSymbol = {
   isLinear: true,
   contractSize: 1,
   contractType: 'PERPETUAL',
+  isTradifi: false,
   filter: {
     tickSize: '0.10',
     stepSize: '0.001',
@@ -30,6 +31,7 @@ export const ETHUSDT_TRADE_SYMBOL: TradeSymbol = {
   isLinear: true,
   contractSize: 1,
   contractType: 'PERPETUAL',
+  isTradifi: false,
   filter: {
     tickSize: '0.01',
     stepSize: '0.01',
@@ -49,6 +51,7 @@ export const BTCUSDT_SPOT_TRADE_SYMBOL: TradeSymbol = {
   isLinear: false,
   contractSize: 1,
   contractType: '',
+  isTradifi: false,
   filter: {
     tickSize: '0.01',
     stepSize: '0.001',
@@ -68,6 +71,7 @@ export const MISSING_FILTER_TRADE_SYMBOL: TradeSymbol = {
   isLinear: true,
   contractSize: 1,
   contractType: 'PERPETUAL',
+  isTradifi: false,
   filter: {
     tickSize: '0',
     stepSize: '0',

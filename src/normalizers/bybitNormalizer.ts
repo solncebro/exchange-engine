@@ -37,6 +37,10 @@ interface BybitLotSizeFilterRaw {
   minOrderAmt?: string;
   postOnlyMaxOrderQty?: string;
   maxMktOrderQty?: string;
+  // Spot field names (V5 spot instruments-info). Bybit docs: maxOrderQty/maxOrderAmt are
+  // deprecated for spot — maxLimitOrderQty / maxMarketOrderQty are the live caps.
+  maxLimitOrderQty?: string;
+  maxMarketOrderQty?: string;
 }
 
 interface BybitPriceFilterRaw {
@@ -256,6 +260,11 @@ export interface BybitTransactionLogRaw {
 
 const LINEAR_CONTRACT_TYPES = new Set(['LinearPerpetual', 'LinearFutures']);
 
+// Bybit lists tokenized TradFi perpetuals with the ordinary contractType 'LinearPerpetual';
+// the only marker is symbolType: 'stock' (tokenized equities/ETFs) or 'commodity' (oil, metals).
+// symbolType 'innovation' is regular crypto from Bybit's Innovation Zone — not TradFi.
+const TRADIFI_SYMBOL_TYPES = new Set(['stock', 'commodity']);
+
 function buildBybitLeverageFilter(raw: BybitInstrumentInfoRaw): LeverageFilter | undefined {
   const source = raw.leverageFilter;
 
@@ -343,17 +352,26 @@ export function normalizeBybitTradeSymbols(rawList: BybitInstrumentInfoRaw[]): T
       isLinear,
       contractSize: parseFloat(raw.contractSize ?? '1'),
       contractType: raw.contractType ?? '',
+      isTradifi: TRADIFI_SYMBOL_TYPES.has(raw.symbolType ?? ''),
       filter: {
         tickSize: raw.priceFilter?.tickSize ?? '0',
         stepSize: raw.lotSizeFilter?.qtyStep ?? raw.lotSizeFilter?.basePrecision ?? '0',
         minQty: raw.lotSizeFilter?.minOrderQty ?? '0',
-        maxQty: raw.lotSizeFilter?.maxOrderQty ?? '0',
+        // Spot: maxOrderQty is deprecated by Bybit — maxLimitOrderQty is the live limit cap.
+        maxQty: raw.lotSizeFilter?.maxLimitOrderQty ?? raw.lotSizeFilter?.maxOrderQty ?? '0',
         minNotional: raw.lotSizeFilter?.minNotionalValue
           ?? raw.lotSizeFilter?.minOrderAmt
           ?? '0',
         ...(raw.priceFilter?.minPrice !== undefined ? { minPrice: raw.priceFilter.minPrice } : {}),
         ...(raw.priceFilter?.maxPrice !== undefined ? { maxPrice: raw.priceFilter.maxPrice } : {}),
-        ...(raw.lotSizeFilter?.maxMktOrderQty !== undefined ? { marketMaxQty: raw.lotSizeFilter.maxMktOrderQty } : {}),
+        // Market-order cap: linear names it maxMktOrderQty, spot names it maxMarketOrderQty.
+        // Missing either → no marketMaxQty → the market-split guard would not engage, and an
+        // over-cap spot market order would be rejected at the worst possible moment.
+        ...(raw.lotSizeFilter?.maxMktOrderQty !== undefined
+          ? { marketMaxQty: raw.lotSizeFilter.maxMktOrderQty }
+          : raw.lotSizeFilter?.maxMarketOrderQty !== undefined
+            ? { marketMaxQty: raw.lotSizeFilter.maxMarketOrderQty }
+            : {}),
         ...(raw.lotSizeFilter?.postOnlyMaxOrderQty !== undefined ? { postOnlyMaxQty: raw.lotSizeFilter.postOnlyMaxOrderQty } : {}),
       },
     };
@@ -822,7 +840,7 @@ export function normalizeBybitMarkPriceList(rawList: BybitTickerRaw[]): MarkPric
   return rawList.map((raw) => ({
     symbol: raw.symbol,
     markPrice: parseFloat(raw.markPrice ?? '0'),
-    indexPrice: parseFloat(raw.indexPrice ?? '0'),
+    indexPrice: raw.indexPrice !== undefined ? parseFloat(raw.indexPrice) : undefined,
     lastFundingRate: parseFloat(raw.fundingRate ?? '0'),
     nextFundingTime: parseFloat(raw.nextFundingTime ?? '0'),
     timestamp: raw.time ?? Date.now(),

@@ -253,6 +253,19 @@ describe('buildBinanceOrderParams — spot', () => {
 });
 
 describe('buildBybitOrderParams — linear (futures)', () => {
+  it('Market order must NOT carry a price field even when orderParams.price is set (stray price on a market request is wire garbage)', () => {
+    const client = createBybitLinear();
+    const params = callBybitBuild(client, {
+      symbol: 'BTCUSDT',
+      side: OrderSideEnum.Buy,
+      amount: 1,
+      price: 100, // stale reference price from the original orderParams
+      type: OrderTypeEnum.Market,
+    });
+    expect(params.orderType).toBe('Market');
+    expect(params.price).toBeUndefined();
+  });
+
   it('open long hedge: positionIdx=1, no reduceOnly', () => {
     const client = createBybitLinear();
     const params = callBybitBuild(client, {

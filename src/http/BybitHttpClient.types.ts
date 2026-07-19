@@ -20,6 +20,7 @@ export interface SymbolLimitFilterArgs {
   symbol?: string;
   limit?: number;
   orderId?: string;
+  orderLinkId?: string;
   settleCoin?: string;
   baseCoin?: string;
   orderFilter?: string;

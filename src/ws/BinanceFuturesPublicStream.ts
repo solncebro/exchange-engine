@@ -28,7 +28,6 @@ const POST_RECREATE_GRACE_PERIOD_MS = 60000;
 const DEFAULT_SUBSCRIBE_BATCH_SIZE = 50;
 const DEFAULT_PAUSE_BETWEEN_SUBSCRIBE_BATCHES_MS = 200;
 const DEFAULT_MAX_STREAMS_PER_CONNECTION = 900;
-const TRADIFI_CONTRACT_TYPE = 'TRADIFI_PERPETUAL';
 const NON_KLINE_GROUP_KEY = 'tickers-markprices';
 const AGGTRADE_GROUP_KEY = 'aggTrades';
 const BINANCE_PING_REQUEST_ID = 1_000_000;
@@ -63,7 +62,7 @@ const pause = (durationMs: number): Promise<void> =>
 
 function buildStreamName(symbol: string, interval: string, tradeSymbols: TradeSymbolBySymbol): string {
   const tradeSymbol = tradeSymbols.get(symbol.toUpperCase());
-  const isTradifi = tradeSymbol?.contractType === TRADIFI_CONTRACT_TYPE;
+  const isTradifi = tradeSymbol?.isTradifi === true;
 
   return isTradifi
     ? `${symbol.toLowerCase()}@kline_${interval}`
@@ -572,6 +571,11 @@ class BinanceFuturesPublicStream {
         );
       });
     }, this.staleCheckIntervalMs);
+
+    // Housekeeping watchdog must not keep the Node process alive on its own — the running
+    // application is kept alive by its open WebSocket connections, and unref lets a consumer
+    // that has torn everything else down exit cleanly instead of hanging on this timer.
+    this.staleCheckTimerId.unref?.();
   }
 
   private async checkStaleConnections(): Promise<void> {

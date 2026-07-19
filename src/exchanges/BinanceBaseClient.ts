@@ -39,6 +39,7 @@ import { BaseExchangeClient } from './BaseExchangeClient';
 import type { BinanceBaseClientArgs } from './BinanceBaseClient.types';
 
 const LISTEN_KEY_KEEPALIVE_INTERVAL_MS = 30 * 60 * 1000;
+const USER_DATA_STREAM_RECREATE_RETRY_MS = 60 * 1000;
 
 abstract class BinanceBaseClient<T extends BinanceBaseHttpClient> extends BaseExchangeClient {
   protected readonly exchangeLabel = 'Binance';
@@ -50,6 +51,7 @@ abstract class BinanceBaseClient<T extends BinanceBaseHttpClient> extends BaseEx
   private readonly userDataWebSocketUrl: string;
   private listenKey: string | null = null;
   private listenKeyKeepAliveTimer: ReturnType<typeof setInterval> | null = null;
+  private userDataStreamRecreateTimer: ReturnType<typeof setTimeout> | null = null;
   private userDataStreamConnecting = false;
 
   constructor(args: BinanceBaseClientArgs<T>) {
@@ -204,6 +206,13 @@ abstract class BinanceBaseClient<T extends BinanceBaseHttpClient> extends BaseEx
     return normalizeBinanceOrder(raw);
   }
 
+  async getOrderByClientOrderId(symbol: string, clientOrderId: string): Promise<Order> {
+    this.logger.debug(`[Binance] Fetching order by client id ${clientOrderId} for ${symbol}`);
+    const raw = await this.httpClient.getOrderByClientOrderId(symbol, clientOrderId);
+
+    return normalizeBinanceOrder(raw);
+  }
+
   async fetchOpenOrders(symbol?: string): Promise<Order[]> {
     this.logger.debug('[Binance] Fetching open orders');
     const rawList = await this.httpClient.getOpenOrders(symbol);
@@ -301,6 +310,7 @@ abstract class BinanceBaseClient<T extends BinanceBaseHttpClient> extends BaseEx
         if (this.listenKey) {
           this.httpClient.keepAliveListenKey(this.listenKey).catch((error) => {
             this.logger.error(`[${this.exchangeLabel}] Failed to keep alive listenKey: ${error instanceof Error ? error.message : String(error)}`);
+            this.scheduleUserDataStreamRecreate(handler, 0);
           });
         }
       }, LISTEN_KEY_KEEPALIVE_INTERVAL_MS);
@@ -311,7 +321,39 @@ abstract class BinanceBaseClient<T extends BinanceBaseHttpClient> extends BaseEx
     }
   }
 
+  private scheduleUserDataStreamRecreate(handler: UserDataStreamHandlerArgs, delayMs: number): void {
+    if (this.userDataStreamRecreateTimer) {
+      return;
+    }
+
+    this.userDataStreamRecreateTimer = setTimeout(() => {
+      this.userDataStreamRecreateTimer = null;
+      void this.recreateUserDataStream(handler);
+    }, delayMs);
+  }
+
+  private async recreateUserDataStream(handler: UserDataStreamHandlerArgs): Promise<void> {
+    if (this.userDataStreamConnecting) {
+      return;
+    }
+
+    this.logger.warn(`[${this.exchangeLabel}] Recreating user data stream after listenKey keepAlive failure (${this.marketLabel})`);
+    this.disconnectUserDataStream();
+
+    try {
+      await this.connectUserDataStream(handler);
+    } catch (error) {
+      this.logger.error(`[${this.exchangeLabel}] Failed to recreate user data stream: ${error instanceof Error ? error.message : String(error)}`);
+      this.scheduleUserDataStreamRecreate(handler, USER_DATA_STREAM_RECREATE_RETRY_MS);
+    }
+  }
+
   disconnectUserDataStream(): void {
+    if (this.userDataStreamRecreateTimer) {
+      clearTimeout(this.userDataStreamRecreateTimer);
+      this.userDataStreamRecreateTimer = null;
+    }
+
     if (this.listenKeyKeepAliveTimer) {
       clearInterval(this.listenKeyKeepAliveTimer);
       this.listenKeyKeepAliveTimer = null;

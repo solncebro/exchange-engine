@@ -359,8 +359,9 @@ class BybitTradeStream extends BaseTradeStream<BybitTradeAnyMessage> {
     }
 
     const extInfoList = message.retExtInfo?.list ?? [];
+    const rateLimit = parseBybitHeaderRateLimit(message.header);
     const resultList: ModifyBatchOrdersResult = context.originalOrderIdList.map((orderId, index) => {
-      return buildItemResult<ModifyOrderItemResult>(orderId, extInfoList[index]);
+      return buildItemResult<ModifyOrderItemResult>(orderId, extInfoList[index], rateLimit);
     });
     pending.resolve(resultList);
   }
@@ -417,8 +418,9 @@ class BybitTradeStream extends BaseTradeStream<BybitTradeAnyMessage> {
     }
 
     const extInfoList = message.retExtInfo?.list ?? [];
+    const rateLimit = parseBybitHeaderRateLimit(message.header);
     const resultList: CancelBatchOrdersResult = context.originalOrderIdList.map((orderId, index) => {
-      return buildItemResult<CancelOrderItemResult>(orderId, extInfoList[index]);
+      return buildItemResult<CancelOrderItemResult>(orderId, extInfoList[index], rateLimit);
     });
     pending.resolve(resultList);
   }
@@ -427,6 +429,7 @@ class BybitTradeStream extends BaseTradeStream<BybitTradeAnyMessage> {
 function buildItemResult<TResult extends { orderId: string; isSuccess: boolean; errorCode: number | null; errorText: string | null }>(
   orderId: string,
   extInfo: BybitBatchOrderExtInfo | undefined,
+  rateLimit?: OrderRateLimitSnapshot,
 ): TResult {
   const hasCode = extInfo !== undefined && typeof extInfo.code === 'number';
   const code = hasCode ? extInfo.code : null;
@@ -438,6 +441,7 @@ function buildItemResult<TResult extends { orderId: string; isSuccess: boolean; 
     isSuccess,
     errorCode: isSuccess ? null : code,
     errorText: isSuccess ? null : (msg ?? 'Unknown error'),
+    ...(rateLimit !== undefined ? { rateLimit } : {}),
   } as TResult;
 }
 
