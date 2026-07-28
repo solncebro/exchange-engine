@@ -414,14 +414,16 @@ fetchFeeRate(symbol?: string): Promise<FeeRate[]>
 ### `fetchIncome()`
 
 ```typescript
-fetchIncome(options?: FetchPageWithLimitArgs): Promise<Income[]>
+fetchIncome(options?: FetchIncomeArgs): Promise<Income[]>
 ```
 
 Получает историю доходов/расходов (комиссии, фандинг, PnL).
 
 | Параметр | Тип | Обязательный | Описание |
 |---|---|:---:|---|
-| `options` | `FetchPageWithLimitArgs` | нет | `startTime`, `endTime`, `limit` |
+| `options` | `FetchIncomeArgs` | нет | `startTime`, `endTime`, `limit`, `incomeType?: 'funding'` |
+
+С `incomeType: 'funding'` возвращаются только фандинг-платежи окна. Binance фильтрует на стороне биржи (`incomeType=FUNDING_FEE`). Bybit пробрасывает окно времени в журнал транзакций и фильтрует локально (типы `FUNDING`/`SETTLEMENT`); `limit` клампится к 50 (максимум журнала), а если сырой ответ упёрся в лимит страницы — метод бросает ошибку, чтобы не вернуть неполную сумму.
 
 **Возврат:** `Income[]` — массив записей.
 
@@ -826,7 +828,7 @@ cancelBatchOrders(symbol: string, orderIdList: string[]): Promise<CancelBatchOrd
 | Параметр | Тип | Обязательный | Описание |
 |---|---|:---:|---|
 | `symbol` | `string` | да | Торговый символ |
-| `orderIdList` | `string[]` | да | Массив ID ордеров |
+| `orderIdList` | `string[]` | да | Массив ID ордеров. На Binance значения обязаны быть числовыми строками (биржа принимает только числовой `orderId`) — нечисловой элемент на биржу не отправляется и возвращается неуспешным, порядок результатов сохраняется. На Bybit идентификаторы строковые по своей природе |
 
 **Возврат:** `CancelOrderItemResult[]` — массив, индексы соответствуют порядку входного `orderIdList`. Каждый элемент:
 - `orderId: string`

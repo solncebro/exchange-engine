@@ -3,6 +3,7 @@ import type {
   ExchangeClient,
   ExchangeArgs,
   FetchAllKlinesOptions,
+  FetchIncomeArgs,
   FetchPageWithLimitArgs,
   ModifyBatchOrderArgs,
   ModifyBatchOrdersResult,
@@ -437,7 +438,7 @@ abstract class BaseExchangeClient implements ExchangeClient {
     throw new Error(`Not supported for ${this.marketLabel} market`);
   }
 
-  async fetchIncome(_options?: FetchPageWithLimitArgs): Promise<Income[]> {
+  async fetchIncome(_options?: FetchIncomeArgs): Promise<Income[]> {
     throw new Error(`Not supported for ${this.marketLabel} market`);
   }
 

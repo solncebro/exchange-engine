@@ -893,6 +893,51 @@ describe('BybitLinear', () => {
       expect(result[1].incomeType).toBe('FUNDING');
       expect(result[1].income).toBe(0.5);
     });
+
+    it('passes the time window and clamps the limit for the transaction log request', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({
+        data: { result: { list: BYBIT_RAW_TRANSACTION_LOG_LIST } },
+      });
+
+      await client.fetchIncome({ startTime: 1000, endTime: 2000, limit: 100 });
+
+      const [, options] = mockInstance.get.mock.calls.at(-1);
+
+      expect(options.params.startTime).toBe(1000);
+      expect(options.params.endTime).toBe(2000);
+      expect(options.params.limit).toBe(50);
+    });
+
+    it('keeps only funding rows inside the window for the funding filter', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({
+        data: { result: { list: BYBIT_RAW_TRANSACTION_LOG_LIST } },
+      });
+
+      const result = await client.fetchIncome({
+        startTime: 1700000000500,
+        endTime: 1700000002000,
+        limit: 100,
+        incomeType: 'funding',
+      });
+
+      expect(result).toHaveLength(1);
+      expect(result[0].incomeType).toBe('FUNDING');
+      expect(result[0].income).toBe(0.5);
+    });
+
+    it('throws for the funding filter when the transaction log hits the page limit', async () => {
+      const { client, mockInstance } = createClient();
+      const fullPageList = Array.from({ length: 50 }, () => BYBIT_RAW_TRANSACTION_LOG_LIST[0]);
+      mockInstance.get.mockResolvedValue({
+        data: { result: { list: fullPageList } },
+      });
+
+      await expect(
+        client.fetchIncome({ startTime: 1000, limit: 100, incomeType: 'funding' }),
+      ).rejects.toThrow('transaction log hit the page limit');
+    });
   });
 
   describe('fetchClosedPnl', () => {

@@ -2,6 +2,7 @@ import type {
   CancelBatchOrdersResult,
   CreateOrderWebSocketArgs,
   ExchangeArgs,
+  FetchIncomeArgs,
   FetchPageWithLimitArgs,
   ModifyBatchOrderArgs,
   ModifyBatchOrdersResult,
@@ -39,6 +40,7 @@ import {
 } from '../constants/binance';
 import { BINANCE_ORDER_SIDE_REVERSE } from '../constants/mappings';
 import { chunkList as chunkListUtil } from '../utils/chunkList';
+import { isBinanceNumericOrderId } from '../utils/binanceOrderId';
 import { BinanceBaseClient } from './BinanceBaseClient';
 import { BaseExchangeClient } from './BaseExchangeClient';
 import type { AxiosLikeError, BinanceModifyBatchOrderParams, BinanceModifyOrderParams } from './BinanceFutures.types';
@@ -331,13 +333,36 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
     }
 
     const aggregatedResultList: CancelBatchOrdersResult = [];
+    const chunkedOrderIdList = chunkListUtil(orderIdList, BINANCE_FUTURES_CANCEL_BATCH_CHUNK_SIZE);
 
-    for (let chunkStart = 0; chunkStart < orderIdList.length; chunkStart += BINANCE_FUTURES_CANCEL_BATCH_CHUNK_SIZE) {
-      const chunk = orderIdList.slice(chunkStart, chunkStart + BINANCE_FUTURES_CANCEL_BATCH_CHUNK_SIZE);
-      const rawList = await this.httpClient.cancelBatchOrders(symbol, chunk);
+    for (const chunk of chunkedOrderIdList) {
+      const sendableOrderIdList = chunk.filter((orderId) => isBinanceNumericOrderId(orderId));
+      const rawList =
+        sendableOrderIdList.length > 0 ? await this.httpClient.cancelBatchOrders(symbol, sendableOrderIdList) : [];
 
-      chunk.forEach((requestedOrderId, indexInChunk) => {
-        const rawItem = rawList[indexInChunk];
+      let sentIndex = 0;
+
+      for (const requestedOrderId of chunk) {
+        if (!isBinanceNumericOrderId(requestedOrderId)) {
+          this.logger.warn(
+            { symbol, orderId: requestedOrderId },
+            '[Binance] cancelBatchOrders: non-numeric orderId skipped',
+          );
+
+          aggregatedResultList.push({
+            orderId: requestedOrderId,
+            isSuccess: false,
+            errorCode: null,
+            errorText: 'Binance requires a numeric orderId',
+          });
+
+          continue;
+        }
+
+        const rawItem = rawList[sentIndex];
+
+        sentIndex += 1;
+
         const code = typeof rawItem?.['code'] === 'number' ? (rawItem['code'] as number) : null;
         const msg = typeof rawItem?.['msg'] === 'string' ? (rawItem['msg'] as string) : null;
         const status = typeof rawItem?.['status'] === 'string' ? (rawItem['status'] as string) : null;
@@ -349,7 +374,7 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
           errorCode: isSuccess ? null : code,
           errorText: isSuccess ? null : (msg ?? 'Unknown error'),
         });
-      });
+      }
     }
 
     return aggregatedResultList;
@@ -445,7 +470,7 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
     return normalizeBinanceCommissionRate(raw);
   }
 
-  async fetchIncome(options?: FetchPageWithLimitArgs): Promise<Income[]> {
+  async fetchIncome(options?: FetchIncomeArgs): Promise<Income[]> {
     this.logger.debug('[Binance] Fetching income');
     const rawList = await this.httpClient.fetchIncome(options);
 

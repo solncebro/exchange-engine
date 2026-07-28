@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.2] - 2026-07-28 — Фильтр типа дохода в fetchIncome (предохранитель по фандинг-платежам)
+
+### Added
+
+- **`fetchIncome` принимает `FetchIncomeArgs` с опциональным `incomeType: 'funding'`.** Потребителю (kliner: предохранитель «фандинг обязан быть 0» в дневном отчёте) нужен полный список фандинг-платежей за окно суток; без серверного фильтра список всех типов дохода в насыщенные дни превышает лимит страницы и фандинг-записи молча теряются. Binance: фильтр пробрасывается на биржу как `incomeType=FUNDING_FEE` (значение подтверждено живым ответом прода). Bybit: в `fetchTransactionLog` пробрасываются `startTime`/`endTime` (новый `FetchTransactionLogArgs`), `limit` клампится к максимуму биржи (50, `BYBIT_TRANSACTION_LOG_MAX_LIMIT`); фильтр по типу применяется локально по множеству `{FUNDING, SETTLEMENT}` с дублирующим локальным фильтром по окну времени; если сырой ответ упёрся в лимит страницы — метод бросает ошибку (честный отказ вместо неполной суммы). Обратная совместимость полная: без `incomeType` поведение прежнее. (`src/types/exchange.ts`, `src/http/BinanceFuturesHttpClient.ts`, `src/exchanges/BinanceFutures.ts`, `src/http/BybitHttpClient.ts`, `src/exchanges/BybitBaseClient.ts`, `src/constants/bybit.ts`)
+
+## [0.18.1] - 2026-07-27 — Фикс: пакетная отмена ордеров на Binance Futures не работала никогда
+
+### Fixed
+
+- **`cancelBatchOrders` на Binance Futures всегда падал с `-1130 «Data sent for parameter 'orderidlist' is not valid»`.** Параметр собирался как `JSON.stringify(orderIdList)`, где список — строки, поэтому на wire уходило `["123","456"]`; Binance для `DELETE /fapi/v1/batchOrders` требует массив чисел `[123,456]` и отвергает весь запрос. Ошибка приходила из `validateResponse` исключением, поэтому per-order маппинг не выполнялся вовсе — отмена пакета не работала ни разу с момента появления метода. Сериализация вынесена в `serializeBinanceOrderIdList` (`src/utils/binanceOrderId.ts`): значения склеиваются как числа без кавычек, точность больших целых не теряется (в отличие от `Number`), а нечисловой идентификатор бросает исключение вместо тихой порчи запроса (`JSON.stringify([NaN])` дал бы `[null]`). (`src/http/BinanceFuturesHttpClient.ts`, `src/utils/binanceOrderId.ts`)
+- **Нечисловой `orderId` в пакете больше не ломает соответствие результатов.** `BinanceFutures.cancelBatchOrders` маппит ответ биржи по позиции в чанке, поэтому нечисловые идентификаторы теперь не отправляются, но занимают своё место в результате как неуспешные (`errorText: 'Binance requires a numeric orderId'`) — порядок и соответствие остальных элементов сохраняются. Ручное чанкование заменено на общий `chunkList`, как в соседних batch-методах. Публичный контракт `cancelBatchOrders(symbol, orderIdList: string[])` не изменён: Bybit оперирует строковыми идентификаторами, конвертация локальна для Binance. (`src/exchanges/BinanceFutures.ts`)
+
 ## [0.18.0] - 2026-07-20 — Признак isTradifi: токенизированные акции и сырьё распознаются и на Bybit
 
 ### Added

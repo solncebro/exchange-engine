@@ -9,9 +9,10 @@ import type {
   BinanceCommissionRateRaw,
   BinanceIncomeRaw,
 } from '../normalizers/binanceNormalizer';
-import type { FetchPageWithLimitArgs } from '../types/exchange';
+import type { FetchIncomeArgs, FetchPageWithLimitArgs } from '../types/exchange';
 import { BINANCE_REQUEST_TIMEOUT } from '../constants/binance';
 import { applyTimeRangeOptions } from '../utils/httpParams';
+import { serializeBinanceOrderIdList } from '../utils/binanceOrderId';
 import type { BinanceEndpoints, BinanceHttpClientArgs } from './BinanceBaseHttpClient';
 import { BinanceBaseHttpClient } from './BinanceBaseHttpClient';
 
@@ -97,7 +98,7 @@ class BinanceFuturesHttpClient extends BinanceBaseHttpClient {
   ): Promise<Array<Record<string, unknown>>> {
     return this.signedDelete<Array<Record<string, unknown>>>(
       '/fapi/v1/batchOrders',
-      { symbol, orderIdList: JSON.stringify(orderIdList) },
+      { symbol, orderIdList: serializeBinanceOrderIdList(orderIdList) },
     );
   }
 
@@ -119,10 +120,14 @@ class BinanceFuturesHttpClient extends BinanceBaseHttpClient {
   }
 
   async fetchIncome(
-    options?: FetchPageWithLimitArgs,
+    options?: FetchIncomeArgs,
   ): Promise<BinanceIncomeRaw[]> {
     const params: Record<string, string | number | boolean> = {};
     applyTimeRangeOptions(params, options);
+
+    if (options?.incomeType === 'funding') {
+      params.incomeType = 'FUNDING_FEE';
+    }
 
     return this.signedGet<BinanceIncomeRaw[]>('/fapi/v1/income', params);
   }

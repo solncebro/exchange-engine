@@ -1017,12 +1017,52 @@ describe('BinanceFutures', () => {
         ],
       });
 
-      const result = await client.cancelBatchOrders('BTCUSDT', ['order-1', 'order-2']);
+      const result = await client.cancelBatchOrders('BTCUSDT', ['1001', '1002']);
 
       expect(result).toEqual([
-        { orderId: 'order-1', isSuccess: true, errorCode: null, errorText: null },
-        { orderId: 'order-2', isSuccess: true, errorCode: null, errorText: null },
+        { orderId: '1001', isSuccess: true, errorCode: null, errorText: null },
+        { orderId: '1002', isSuccess: true, errorCode: null, errorText: null },
       ]);
+    });
+
+    it('sends orderIdList as a JSON array of numbers', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.delete.mockResolvedValue({
+        data: [{ orderId: 1, status: 'CANCELED' }],
+      });
+
+      await client.cancelBatchOrders('BTCUSDT', ['1870270071']);
+
+      expect(mockInstance.delete.mock.calls[0][1].params.orderIdList).toBe('[1870270071]');
+    });
+
+    it('skips non-numeric orderIds without breaking result alignment', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.delete.mockResolvedValue({
+        data: [
+          { orderId: 1, status: 'CANCELED' },
+          { code: -2011, msg: 'Unknown order sent.' },
+        ],
+      });
+
+      const result = await client.cancelBatchOrders('BTCUSDT', ['1001', 'order-x', '1002']);
+
+      expect(mockInstance.delete.mock.calls[0][1].params.orderIdList).toBe('[1001,1002]');
+      expect(result).toEqual([
+        { orderId: '1001', isSuccess: true, errorCode: null, errorText: null },
+        { orderId: 'order-x', isSuccess: false, errorCode: null, errorText: 'Binance requires a numeric orderId' },
+        { orderId: '1002', isSuccess: false, errorCode: -2011, errorText: 'Unknown order sent.' },
+      ]);
+    });
+
+    it('does not call httpClient when the whole chunk is non-numeric', async () => {
+      const { client, mockInstance } = createClient();
+
+      const result = await client.cancelBatchOrders('BTCUSDT', ['order-x', 'order-y']);
+
+      expect(mockInstance.delete).not.toHaveBeenCalled();
+      expect(result.every((entry) => !entry.isSuccess)).toBe(true);
+      expect(result).toHaveLength(2);
     });
 
     it('maps all-failure batch with code -2011 Unknown order', async () => {
@@ -1034,17 +1074,17 @@ describe('BinanceFutures', () => {
         ],
       });
 
-      const result = await client.cancelBatchOrders('BTCUSDT', ['order-1', 'order-2']);
+      const result = await client.cancelBatchOrders('BTCUSDT', ['1001', '1002']);
 
       expect(result).toEqual([
-        { orderId: 'order-1', isSuccess: false, errorCode: -2011, errorText: 'Unknown order sent.' },
-        { orderId: 'order-2', isSuccess: false, errorCode: -2011, errorText: 'Unknown order sent.' },
+        { orderId: '1001', isSuccess: false, errorCode: -2011, errorText: 'Unknown order sent.' },
+        { orderId: '1002', isSuccess: false, errorCode: -2011, errorText: 'Unknown order sent.' },
       ]);
     });
 
     it('maps mixed success/failure (10 success + 2 fail) across two chunks', async () => {
       const { client, mockInstance } = createClient();
-      const orderIdList = Array.from({ length: 12 }, (_, index) => `order-${index + 1}`);
+      const orderIdList = Array.from({ length: 12 }, (_, index) => `${1001 + index}`);
       const firstChunkData = Array.from({ length: 10 }, (_, index) => ({
         orderId: index + 1,
         status: 'CANCELED',
@@ -1064,13 +1104,13 @@ describe('BinanceFutures', () => {
       expect(result).toHaveLength(12);
       expect(result.slice(0, 10).every((entry) => entry.isSuccess)).toBe(true);
       expect(result[10]).toEqual({
-        orderId: 'order-11',
+        orderId: '1011',
         isSuccess: false,
         errorCode: -2011,
         errorText: 'Unknown order sent.',
       });
       expect(result[11]).toEqual({
-        orderId: 'order-12',
+        orderId: '1012',
         isSuccess: false,
         errorCode: -1003,
         errorText: 'Too many requests; current limit is 1200 request weight per 1 MINUTE.',
@@ -1079,10 +1119,10 @@ describe('BinanceFutures', () => {
 
     it('chunks 25 orderIds into 3 HTTP calls of size 10/10/5', async () => {
       const { client, mockInstance } = createClient();
-      const orderIdList = Array.from({ length: 25 }, (_, index) => `order-${index + 1}`);
+      const orderIdList = Array.from({ length: 25 }, (_, index) => `${1001 + index}`);
 
       mockInstance.delete.mockImplementation(async (_url: string, options: any) => {
-        const requestList = JSON.parse(options.params.orderIdList) as string[];
+        const requestList = JSON.parse(options.params.orderIdList) as number[];
         const data = requestList.map((_orderId, index) => ({ orderId: index + 1, status: 'CANCELED' }));
 
         return { data };
@@ -1099,24 +1139,24 @@ describe('BinanceFutures', () => {
       const thirdCallParams = JSON.parse(mockInstance.delete.mock.calls[2][1].params.orderIdList);
 
       expect(firstCallParams).toHaveLength(10);
-      expect(firstCallParams[0]).toBe('order-1');
-      expect(firstCallParams[9]).toBe('order-10');
+      expect(firstCallParams[0]).toBe(1001);
+      expect(firstCallParams[9]).toBe(1010);
       expect(secondCallParams).toHaveLength(10);
-      expect(secondCallParams[0]).toBe('order-11');
-      expect(secondCallParams[9]).toBe('order-20');
+      expect(secondCallParams[0]).toBe(1011);
+      expect(secondCallParams[9]).toBe(1020);
       expect(thirdCallParams).toHaveLength(5);
-      expect(thirdCallParams[0]).toBe('order-21');
-      expect(thirdCallParams[4]).toBe('order-25');
+      expect(thirdCallParams[0]).toBe(1021);
+      expect(thirdCallParams[4]).toBe(1025);
     });
 
     it('falls back to "Unknown error" when response item is missing fields', async () => {
       const { client, mockInstance } = createClient();
       mockInstance.delete.mockResolvedValue({ data: [{}] });
 
-      const result = await client.cancelBatchOrders('BTCUSDT', ['order-1']);
+      const result = await client.cancelBatchOrders('BTCUSDT', ['1001']);
 
       expect(result).toEqual([
-        { orderId: 'order-1', isSuccess: false, errorCode: null, errorText: 'Unknown error' },
+        { orderId: '1001', isSuccess: false, errorCode: null, errorText: 'Unknown error' },
       ]);
     });
   });

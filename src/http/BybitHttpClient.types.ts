@@ -36,6 +36,11 @@ export interface CategoryFilterArgs {
   limit?: number;
 }
 
+export interface FetchTransactionLogArgs extends CategoryFilterArgs {
+  startTime?: number;
+  endTime?: number;
+}
+
 export interface FetchBybitKlineArgs {
   category: string;
   symbol: string;

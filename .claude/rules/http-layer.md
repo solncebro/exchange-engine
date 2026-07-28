@@ -142,10 +142,10 @@ order, openOrders, allOrders, account, listenKey
 - `modifyOrder(params)` → `BinanceOrderResponseRaw` — PUT с ручным signing через `buildBinanceSignedParams`
 - `cancelAllOrders(symbol)` → signedDelete `/fapi/v1/allOpenOrders`
 - `createBatchOrders(orderList)` → `BinanceOrderResponseRaw[]` — signedPost `/fapi/v1/batchOrders`. Max 5 ордеров на запрос (chunking — на уровне `BinanceFutures.createBatchOrders`)
-- `cancelBatchOrders(symbol, orderIdList)` → signedDelete `/fapi/v1/batchOrders`. Max 10 ордеров (chunking — на уровне `BinanceFutures.cancelBatchOrders`)
+- `cancelBatchOrders(symbol, orderIdList)` → signedDelete `/fapi/v1/batchOrders`. Max 10 ордеров (chunking — на уровне `BinanceFutures.cancelBatchOrders`). Параметр `orderIdList` сериализуется через `serializeBinanceOrderIdList` (`src/utils/binanceOrderId.ts`) — массив **чисел** без кавычек (`[123,456]`), НЕ `JSON.stringify` строкового массива: строковый вариант (`["123"]`) Binance отвергает кодом `-1130` («Data sent for parameter 'orderidlist' is not valid»), и весь запрос падает исключением из `validateResponse`. Нечисловой идентификатор бросает ошибку в сериализаторе (защита от `JSON.stringify([NaN]) === '[null]'`)
 - `modifyBatchOrders(orderList)` → `Array<Record<string, unknown>>` (смесь успехов и ошибок per-order; элементы с `code < 0` — ошибки) — PUT `/fapi/v1/batchOrders` с ручным signing через `buildBinanceSignedParams` (аналогично `modifyOrder`). Max 5 ордеров (chunking — на уровне `BinanceFutures.modifyBatchOrders`)
 - `fetchCommissionRate(symbol?)` → `BinanceCommissionRateRaw` — signedGet `/fapi/v1/commissionRate`
-- `fetchIncome(options?)` → `BinanceIncomeRaw[]` — signedGet `/fapi/v1/income`
+- `fetchIncome(options?: FetchIncomeArgs)` → `BinanceIncomeRaw[]` — signedGet `/fapi/v1/income`. При `options.incomeType === 'funding'` добавляет параметр `incomeType=FUNDING_FEE` (пробрасывается на биржу для серверной фильтрации)
 - `modifyPositionMargin(symbol, amount, type)` → signedPost `/fapi/v1/positionMargin`
 
 ## BinanceSpotHttpClient
@@ -194,7 +194,7 @@ order, openOrders, allOrders, account, listenKey
 - `getPositionList(category, options?)` → `BybitListResponse<BybitPositionRaw>` — GET `/v5/position/list`
 - `getClosedPnl(category, options?)` → `BybitListResponse<BybitClosedPnlRaw>` — GET `/v5/position/closed-pnl`
 - `fetchFeeRate(category, options?)` → `BybitListResponse<BybitFeeRateRaw>` — GET `/v5/account/fee-rate`
-- `fetchTransactionLog(options?)` → `BybitListResponse<BybitTransactionLogRaw>` — GET `/v5/account/transaction-log`
+- `fetchTransactionLog(options?: FetchTransactionLogArgs)` → `BybitListResponse<BybitTransactionLogRaw>` — GET `/v5/account/transaction-log`. `FetchTransactionLogArgs extends CategoryFilterArgs` добавляет `startTime?`/`endTime?`, пробрасываемые как есть в params
 - `setLeverage(args)` → POST `/v5/position/set-leverage`
 - `switchIsolated(args)` → POST `/v5/position/switch-isolated`
 - `fetchWalletBalance(accountType)` → `BybitResponse<BybitWalletBalanceRaw>` — GET `/v5/account/wallet-balance`
@@ -234,5 +234,5 @@ async fetchSomething(symbol: string, options?: FetchPageWithLimitArgs): Promise<
 Типы вынесены в co-located `.types.ts` файлы:
 - `BaseHttpClient.types.ts` — BaseHttpClientArgs
 - `BinanceBaseHttpClient.types.ts` — BinanceEndpoints, BinanceHttpClientArgs, BinanceErrorResponse, BinanceListenKeyResponse
-- `BybitHttpClient.types.ts` — BybitHttpClientArgs, BybitApiResponse, BybitListResponse, BybitResponse, BybitOrderBookRaw (дублируется из normalizer), FetchBybitKlineArgs, SetBybitLeverageArgs, SwitchBybitIsolatedArgs, SymbolFilterArgs, SymbolLimitFilterArgs (`orderFilter?: string` — 0.16.0, для `fetchOpenConditionalOrders`), PeriodFilterArgs, CategoryFilterArgs, BybitAmendBatchOrderRaw, BybitAmendBatchOrderExtInfo, BybitAmendBatchOrdersResponse (структура аналогична `BybitCancelBatchOrdersResponse`: `result.list[]` — основные данные с `orderId`/`orderLinkId`, `retExtInfo.list[]` — per-order success/error через `{ code, msg }`)
+- `BybitHttpClient.types.ts` — BybitHttpClientArgs, BybitApiResponse, BybitListResponse, BybitResponse, BybitOrderBookRaw (дублируется из normalizer), FetchBybitKlineArgs, SetBybitLeverageArgs, SwitchBybitIsolatedArgs, SymbolFilterArgs, SymbolLimitFilterArgs (`orderFilter?: string` — 0.16.0, для `fetchOpenConditionalOrders`), PeriodFilterArgs, CategoryFilterArgs, FetchTransactionLogArgs (`extends CategoryFilterArgs`, добавляет `startTime?`/`endTime?` — 0.18.2, для `fetchTransactionLog`), BybitAmendBatchOrderRaw, BybitAmendBatchOrderExtInfo, BybitAmendBatchOrdersResponse (структура аналогична `BybitCancelBatchOrdersResponse`: `result.list[]` — основные данные с `orderId`/`orderLinkId`, `retExtInfo.list[]` — per-order success/error через `{ code, msg }`)
 - `binanceRateLimit.ts` (не `.types.ts`, но чистый модуль без класса) — константы + чистые функции `parseUsedWeight1m`, `parseRetryAfterMs`, `resolveRateLimitCooldownMs` для проактивного троттлинга Binance (см. «Rate-limit awareness» выше)

@@ -4,7 +4,15 @@ Universal TypeScript client library for cryptocurrency trading on Binance and By
 
 ## Latest Release
 
-Current version: `0.18.0`
+Current version: `0.18.2`
+
+- **`fetchIncome` income-type filter** — `fetchIncome({ incomeType: 'funding' })` returns only funding payments for the requested window: Binance filters server-side (`incomeType=FUNDING_FEE`), Bybit forwards the time window to the transaction log and filters locally, throwing when the page limit would make the result incomplete.
+
+Previously in `0.18.1`:
+
+- **Fix — batch order cancel on Binance Futures never worked** — `orderIdList` was sent as a JSON array of strings (`["123"]`), while Binance requires numbers (`[123]`) and rejected every request with `-1130`. Serialization moved to `serializeBinanceOrderIdList`; non-numeric ids are no longer sent and come back as per-order failures without breaking result alignment. The public `cancelBatchOrders(symbol, orderIdList: string[])` contract is unchanged (Bybit uses string ids).
+
+Previously in `0.18.0`:
 
 - **`isTradifi: boolean` on `TradeSymbol`** — tokenized TradFi perpetuals (stocks, ETFs, commodities/metals) are now flagged uniformly across both exchanges. Binance marks them via `contractType: 'TRADIFI_PERPETUAL'`; Bybit keeps a regular `contractType: 'LinearPerpetual'`, so the only marker is `symbolType` (`'stock'` / `'commodity'`; `'innovation'` is ordinary crypto). Binance stream name selection now reads this single field instead of an inline `contractType` check.
 - **Fix — Bybit ticker delta no longer zeroes `indexPrice`** — Bybit sends ticker deltas with only changed fields, so a frame carrying `markPrice` but not `indexPrice` used to emit `indexPrice: 0`. The last known index is now retained per symbol (`lastIndexPriceBySymbol`); `0` is emitted only until the first index ever arrives.

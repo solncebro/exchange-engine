@@ -54,7 +54,7 @@ BaseExchangeClient (abstract, implements ExchangeClient)
   fetchMarkPrice(symbol?): Promise<MarkPrice[]>
   fetchOpenInterest(symbol): Promise<OpenInterest>
   fetchFeeRate(symbol?): Promise<FeeRate[]>
-  fetchIncome(options?): Promise<Income[]>
+  fetchIncome(options?: FetchIncomeArgs): Promise<Income[]>
   fetchClosedPnl(symbol?, options?): Promise<ClosedPnl[]>
 
 Trade WebSocket:
@@ -254,6 +254,13 @@ ExchangeLogger поддерживает overloaded signatures:
 - `price?: number` — новая цена
 - `amount?: number` — новый объём
 - `triggerPrice?: number` — новая триггер-цена
+
+## FetchIncomeArgs (extends FetchPageWithLimitArgs)
+
+- `startTime?: number` / `endTime?: number` / `limit?: number` — унаследованы из `FetchPageWithLimitArgs`
+- `incomeType?: IncomeTypeFilter` — на 0.18.2 единственное значение `'funding'`. Без поля — поведение как раньше (весь доход без фильтра по типу)
+- Binance: `incomeType: 'funding'` пробрасывается на биржу как `incomeType=FUNDING_FEE` в `/fapi/v1/income`
+- Bybit: фильтр по типу применяется локально (не на биржу) — подробности в `exchange-layer-bybit.md`, раздел про `fetchIncome`
 
 ## SubscribeOrderbookArgs
 

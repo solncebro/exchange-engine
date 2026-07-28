@@ -1,6 +1,7 @@
 import type {
   CancelBatchOrdersResult,
   CreateOrderWebSocketArgs,
+  FetchIncomeArgs,
   FetchPageWithLimitArgs,
   ModifyBatchOrderArgs,
   ModifyBatchOrdersResult,
@@ -50,11 +51,14 @@ import {
   BYBIT_TRADE_WEBSOCKET_URL,
   BYBIT_PRIVATE_WEBSOCKET_URL,
   BYBIT_DEMO_PRIVATE_WEBSOCKET_URL,
+  BYBIT_TRANSACTION_LOG_MAX_LIMIT,
 } from '../constants/bybit';
 import { BYBIT_ORDER_STATUS } from '../constants/mappings';
 import { chunkList as chunkListUtil } from '../utils/chunkList';
 import { BaseExchangeClient } from './BaseExchangeClient';
 import type { BybitBaseClientArgs } from './BybitBaseClient.types';
+
+const BYBIT_FUNDING_INCOME_TYPE_SET = new Set(['FUNDING', 'SETTLEMENT']);
 
 abstract class BybitBaseClient extends BaseExchangeClient {
   protected readonly exchangeLabel = 'Bybit';
@@ -499,11 +503,37 @@ abstract class BybitBaseClient extends BaseExchangeClient {
     return params;
   }
 
-  async fetchIncome(options?: FetchPageWithLimitArgs): Promise<Income[]> {
+  async fetchIncome(options?: FetchIncomeArgs): Promise<Income[]> {
     this.logger.debug('[Bybit] Fetching income');
-    const raw = await this.httpClient.fetchTransactionLog({ category: this.category, limit: options?.limit });
+    const limit =
+      options?.limit !== undefined
+        ? Math.min(options.limit, BYBIT_TRANSACTION_LOG_MAX_LIMIT)
+        : undefined;
+    const raw = await this.httpClient.fetchTransactionLog({
+      category: this.category,
+      limit,
+      startTime: options?.startTime,
+      endTime: options?.endTime,
+    });
+    const rawList = raw.result.list;
+    const incomeList = normalizeBybitIncomeList(rawList);
 
-    return normalizeBybitIncomeList(raw.result.list);
+    if (options?.incomeType !== 'funding') {
+      return incomeList;
+    }
+
+    if (limit !== undefined && rawList.length >= limit) {
+      throw new Error(
+        '[Bybit] transaction log hit the page limit — the funding income filter would be incomplete',
+      );
+    }
+
+    return incomeList.filter(
+      (income) =>
+        BYBIT_FUNDING_INCOME_TYPE_SET.has(income.incomeType) &&
+        (options.startTime === undefined || income.timestamp >= options.startTime) &&
+        (options.endTime === undefined || income.timestamp <= options.endTime),
+    );
   }
 
   async fetchClosedPnl(symbol?: string, options?: FetchPageWithLimitArgs): Promise<ClosedPnl[]> {

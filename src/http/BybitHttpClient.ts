@@ -27,8 +27,8 @@ import type {
   BybitListResponse,
   BybitOrderBookRaw,
   BybitResponse,
-  CategoryFilterArgs,
   FetchBybitKlineArgs,
+  FetchTransactionLogArgs,
   FetchPageWithLimitArgs,
   PeriodFilterArgs,
   SetBybitLeverageArgs,
@@ -372,7 +372,7 @@ class BybitHttpClient extends BaseHttpClient {
   }
 
   async fetchTransactionLog(
-    options?: CategoryFilterArgs,
+    options?: FetchTransactionLogArgs,
   ): Promise<BybitListResponse<BybitTransactionLogRaw>> {
     const params: Record<string, string | number | boolean> = {};
 
@@ -382,6 +382,14 @@ class BybitHttpClient extends BaseHttpClient {
 
     if (options?.limit !== undefined) {
       params.limit = options.limit;
+    }
+
+    if (options?.startTime !== undefined) {
+      params.startTime = options.startTime;
+    }
+
+    if (options?.endTime !== undefined) {
+      params.endTime = options.endTime;
     }
 
     return this.authenticatedGet('/v5/account/transaction-log', params);

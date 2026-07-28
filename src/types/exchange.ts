@@ -72,6 +72,12 @@ export interface FetchPageWithLimitArgs {
   limit?: number;
 }
 
+export type IncomeTypeFilter = 'funding';
+
+export interface FetchIncomeArgs extends FetchPageWithLimitArgs {
+  incomeType?: IncomeTypeFilter;
+}
+
 export type KlineHandler = (symbol: string, kline: Kline) => void;
 
 export interface SubscribeKlinesArgs {
@@ -213,7 +219,7 @@ export interface ExchangeClient {
   fetchOpenInterest(symbol: string): Promise<OpenInterest>;
 
   fetchFeeRate(symbol?: string): Promise<FeeRate[]>;
-  fetchIncome(options?: FetchPageWithLimitArgs): Promise<Income[]>;
+  fetchIncome(options?: FetchIncomeArgs): Promise<Income[]>;
   fetchClosedPnl(symbol?: string, options?: FetchPageWithLimitArgs): Promise<ClosedPnl[]>;
 
   setPositionMode(mode: PositionModeEnum): Promise<void>;

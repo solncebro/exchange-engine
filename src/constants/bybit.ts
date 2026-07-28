@@ -31,3 +31,5 @@ export const BYBIT_KLINE_INTERVAL: Record<string, string> = {
   '1w': 'W',
   '1M': 'M',
 };
+
+export const BYBIT_TRANSACTION_LOG_MAX_LIMIT = 50;

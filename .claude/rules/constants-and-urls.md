@@ -38,6 +38,7 @@
 | BYBIT_RECV_WINDOW | 7000 ms (используется в REST-подписи) |
 | BYBIT_REQUEST_TIMEOUT | 30000 ms |
 | BYBIT_PING_INTERVAL | 20000 ms |
+| BYBIT_TRANSACTION_LOG_MAX_LIMIT | 50 (максимум `limit` для `/v5/account/transaction-log`, `fetchIncome` клампит к этому значению) |
 
 ## Конвертация интервалов Bybit
 

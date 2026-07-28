@@ -163,16 +163,23 @@ describe('BinanceFuturesHttpClient', () => {
   });
 
   describe('cancelBatchOrders', () => {
-    it('calls signedDelete /fapi/v1/batchOrders with stringified order ids', async () => {
-      const orderIdList = ['111', '222'];
-      await client.cancelBatchOrders('BTCUSDT', orderIdList);
+    it('calls signedDelete /fapi/v1/batchOrders with numeric order ids', async () => {
+      await client.cancelBatchOrders('BTCUSDT', ['111', '222']);
 
       const [url, options] = mockInstance.delete.mock.calls[0];
 
       expect(url).toBe('/fapi/v1/batchOrders');
       expect(options.params.symbol).toBe('BTCUSDT');
-      expect(options.params.orderIdList).toBe(JSON.stringify(orderIdList));
+      expect(options.params.orderIdList).toBe('[111,222]');
       expect(options.params.signature).toBeDefined();
+    });
+
+    it('throws and sends nothing when an order id is not numeric', async () => {
+      await expect(client.cancelBatchOrders('BTCUSDT', ['111', 'order-x'])).rejects.toThrow(
+        'Binance orderIdList expects numeric ids',
+      );
+
+      expect(mockInstance.delete).not.toHaveBeenCalled();
     });
   });
 
@@ -213,6 +220,22 @@ describe('BinanceFuturesHttpClient', () => {
       expect(options.params.startTime).toBe(1000);
       expect(options.params.endTime).toBe(2000);
       expect(options.params.limit).toBe(50);
+    });
+
+    it('maps the funding income filter to the FUNDING_FEE income type', async () => {
+      await client.fetchIncome({ startTime: 1000, incomeType: 'funding' });
+
+      const [, options] = mockInstance.get.mock.calls[0];
+
+      expect(options.params.incomeType).toBe('FUNDING_FEE');
+    });
+
+    it('sends no income type when the filter is omitted', async () => {
+      await client.fetchIncome({ startTime: 1000 });
+
+      const [, options] = mockInstance.get.mock.calls[0];
+
+      expect(options.params.incomeType).toBeUndefined();
     });
   });
 
