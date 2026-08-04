@@ -376,6 +376,23 @@ describe('normalizeBinancePosition', () => {
     expect(result.side).toBe(PositionSideEnum.Both);
   });
 
+  it('returns zero leverage when the response has no leverage field', () => {
+    const raw = { ...BINANCE_RAW_POSITION_RISK };
+
+    delete raw.leverage;
+
+    const result = normalizeBinancePosition(raw);
+
+    expect(result.leverage).toBe(0);
+  });
+
+  it('returns zero leverage when the leverage field is not a number', () => {
+    const raw = { ...BINANCE_RAW_POSITION_RISK, leverage: '' };
+    const result = normalizeBinancePosition(raw);
+
+    expect(result.leverage).toBe(0);
+  });
+
   it('maps ISOLATED marginType', () => {
     const result = normalizeBinancePosition(BINANCE_RAW_POSITION_RISK);
 

@@ -23,7 +23,7 @@ BinanceTicker24hrRaw { symbol, lastPrice: string, priceChangePercent: string, ti
 - `BinanceTicker24hrRaw` — `{ symbol, lastPrice, openPrice, highPrice, lowPrice, priceChangePercent, volume, quoteVolume, time }`
 - `BinanceWebSocketKlineRaw` — `{ t, o, h, l, c, v, T, q, n, V, Q, i?, f?, L?, x, B? }` (короткие ключи, `x: boolean` — isClosed)
 - `BinanceContinuousKlineMessageRaw` — `{ e, E, ps, ct, k: BinanceWebSocketKlineRaw }`
-- `BinancePositionRiskRaw` — `{ symbol, positionSide, positionAmt, entryPrice, markPrice, unRealizedProfit, leverage, marginType, liquidationPrice, notional, isolatedMargin, [key: string]: unknown }`
+- `BinancePositionRiskRaw` — `{ symbol, positionSide, positionAmt, entryPrice, markPrice, unRealizedProfit, leverage?, marginType, liquidationPrice, notional, isolatedMargin, [key: string]: unknown }`
 - `BinanceOrderResponseRaw` — `{ orderId, clientOrderId, symbol, side, type, timeInForce, origQty, executedQty, price, avgPrice, stopPrice, cumQuote, status, reduceOnly, time, updateTime }`
 - `BinanceAccountRaw` — `{ balances: BinanceBalanceRaw[] }` (BinanceBalanceRaw — internal: `{ asset, free, locked }`)
 - `BinanceFuturesAccountRaw` — `{ assets: BinanceFuturesAssetRaw[] }` (BinanceFuturesAssetRaw — internal: `{ asset, walletBalance, availableBalance }`)
@@ -54,6 +54,7 @@ BinanceTicker24hrRaw { symbol, lastPrice: string, priceChangePercent: string, ti
   - Маппинг через `BINANCE_POSITION_SIDE` (LONG→long, SHORT→short, BOTH→both)
   - `marginType === 'ISOLATED' ? MarginModeEnum.Isolated : MarginModeEnum.Cross`
   - NaN liquidationPrice → 0
+  - Отсутствующий/невалидный leverage → 0
   - Сохраняет raw в `info`
 - `normalizeBinanceOrder(raw)` → `Order`
   - Маппинг через `BINANCE_ORDER_SIDE`, `BINANCE_ORDER_TYPE` и `BINANCE_ORDER_STATUS` (константы из `src/constants/mappings.ts`); `side` с fallback `?? OrderSideEnum.Buy` (не утекает `undefined` в non-optional поле)

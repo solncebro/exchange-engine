@@ -242,7 +242,7 @@ export interface BinancePositionRiskRaw {
   entryPrice: string;
   markPrice: string;
   unRealizedProfit: string;
-  leverage: string;
+  leverage?: string;
   marginType: string;
   liquidationPrice: string;
   notional: string;
@@ -543,6 +543,8 @@ export function normalizeBinancePosition(raw: BinancePositionRiskRaw): Position 
   const liquidationPriceRaw = parseFloat(raw.liquidationPrice);
   const rawContracts = parseFloat(raw.positionAmt);
   const safeContracts = Number.isFinite(rawContracts) ? Math.abs(rawContracts) : 0;
+  const rawLeverage = parseFloat(raw.leverage ?? '');
+  const safeLeverage = Number.isFinite(rawLeverage) ? rawLeverage : 0;
 
   return {
     symbol: raw.symbol,
@@ -552,7 +554,7 @@ export function normalizeBinancePosition(raw: BinancePositionRiskRaw): Position 
     entryPrice: parseFloat(raw.entryPrice),
     markPrice: parseFloat(raw.markPrice),
     unrealizedPnl: parseFloat(raw.unRealizedProfit),
-    leverage: parseFloat(raw.leverage),
+    leverage: safeLeverage,
     marginMode,
     liquidationPrice: isNaN(liquidationPriceRaw) ? 0 : liquidationPriceRaw,
     info: raw,

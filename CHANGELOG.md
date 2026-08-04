@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.3] - 2026-08-04 — Фикс: нормализация позиции Binance падала при отсутствии leverage в ответе биржи
+
+### Fixed
+
+- **`normalizeBinancePosition` бросала `NaN` в поле `leverage`, если Binance не прислал поле `leverage` в ответе.** `BinancePositionRiskRaw.leverage` помечено опциональным (`leverage?: string`), а нормализатор теперь безопасно парсит значение и подставляет `0`, если поле отсутствует или не является числом — как уже делалось для `liquidationPrice`. (`src/normalizers/binanceNormalizer.ts`)
+
 ## [0.18.2] - 2026-07-28 — Фильтр типа дохода в fetchIncome (предохранитель по фандинг-платежам)
 
 ### Added
