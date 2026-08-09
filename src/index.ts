@@ -19,6 +19,8 @@ export type {
   SubscribeOrderbookArgs,
   SubscribePublicTradesArgs,
   SetOrderbookLiveSymbolArgs,
+  CreateOrderItemResult,
+  CreateBatchOrdersResult,
   CancelOrderItemResult,
   CancelBatchOrdersResult,
   ModifyOrderItemResult,

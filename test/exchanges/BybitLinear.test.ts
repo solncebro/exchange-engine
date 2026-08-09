@@ -584,13 +584,58 @@ describe('BybitLinear', () => {
     });
   });
 
+  // На едином счёте Bybit режим маржи — свойство ВСЕГО счёта, а не символа (проверено
+  // живым чтением 08.08.2026: marginMode=ISOLATED_MARGIN, unifiedMarginStatus=5).
+  // Раньше просьба переключить режим молча ничего не делала: попросили изолированную
+  // маржу перед рискованным входом — счёт остался как был, и узнать об этом было неоткуда.
   describe('setMarginMode', () => {
-    it('is a no-op for Bybit Unified Account', async () => {
+    function armAccountInfo(mockInstance: Record<string, jest.Mock>, marginMode: string): void {
+      mockInstance.get.mockResolvedValue({ data: { retCode: 0, result: { marginMode } } });
+      mockInstance.post.mockResolvedValue({ data: { retCode: 0, result: {} } });
+    }
+
+    it('actually switches the account to isolated margin', async () => {
       const { client, mockInstance } = createClient();
+      armAccountInfo(mockInstance, 'REGULAR_MARGIN');
+
+      await client.setMarginMode(MarginModeEnum.Isolated, 'BTCUSDT');
+
+      const [path, body] = mockInstance.post.mock.calls[0];
+
+      expect(path).toBe('/v5/account/set-margin-mode');
+      expect(body.setMarginMode).toBe('ISOLATED_MARGIN');
+    });
+
+    it('switches back to cross margin under the exchange wording for it', async () => {
+      const { client, mockInstance } = createClient();
+      armAccountInfo(mockInstance, 'ISOLATED_MARGIN');
+
+      await client.setMarginMode(MarginModeEnum.Cross, 'BTCUSDT');
+
+      const [, body] = mockInstance.post.mock.calls[0];
+
+      expect(body.setMarginMode).toBe('REGULAR_MARGIN');
+    });
+
+    it('writes nothing when the account is already in the requested mode', async () => {
+      const { client, mockInstance } = createClient();
+      armAccountInfo(mockInstance, 'ISOLATED_MARGIN');
 
       await client.setMarginMode(MarginModeEnum.Isolated, 'BTCUSDT');
 
       expect(mockInstance.post).not.toHaveBeenCalled();
+    });
+
+    it('warns that the switch reaches the whole account, not just the requested symbol', async () => {
+      const mockInstance = createMockAxiosInstance();
+      mockedAxios.create.mockReturnValue(mockInstance as any);
+      const logger = createMockLogger();
+      const client = new BybitLinear({ config: { apiKey: 'k', secret: 's' }, logger });
+      armAccountInfo(mockInstance, 'REGULAR_MARGIN');
+
+      await client.setMarginMode(MarginModeEnum.Isolated, 'BTCUSDT');
+
+      expect(logger.warn).toHaveBeenCalled();
     });
   });
 
@@ -927,6 +972,73 @@ describe('BybitLinear', () => {
       expect(result[0].income).toBe(0.5);
     });
 
+    // Проверено на живом счёте 08.08.2026: в записи журнала cashFlow — реализованный итог
+    // БЕЗ комиссии, комиссия лежит отдельным полем, и тождество change = cashFlow + funding − fee
+    // сошлось до восьмого знака. Тем самым оба вида значат ровно то же, что у соседней биржи.
+    it('reports the realized result of trades, commission excluded', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({
+        data: { result: { list: [
+          { symbol: 'ICNTUSDT', type: 'TRADE', qty: '10', cashFlow: '-134.42656869', fee: '0.34382205', funding: '0', currency: 'USDT', transactionTime: '1700000000000', tradeId: 't1', orderId: 'o1' },
+          { symbol: 'ETHUSDT', type: 'FUNDING', qty: '0', cashFlow: '0.50', fee: '0', funding: '0.5', currency: 'USDT', transactionTime: '1700000001000', tradeId: '', orderId: '' },
+        ] } },
+      });
+
+      const result = await client.fetchIncome({ incomeType: 'realizedPnl' });
+
+      expect(result).toHaveLength(1);
+      expect(result[0].symbol).toBe('ICNTUSDT');
+      expect(result[0].income).toBeCloseTo(-134.42656869, 8);
+    });
+
+    it('reports commission with the same sign as the neighbouring exchange: charged means negative', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({
+        data: { result: { list: [
+          { symbol: 'ICNTUSDT', type: 'TRADE', qty: '10', cashFlow: '-134.42656869', fee: '0.34382205', funding: '0', currency: 'USDT', transactionTime: '1700000000000', tradeId: 't1', orderId: 'o1' },
+          { symbol: 'ETHUSDT', type: 'FUNDING', qty: '0', cashFlow: '0.50', fee: '0', funding: '0.5', currency: 'USDT', transactionTime: '1700000001000', tradeId: '', orderId: '' },
+        ] } },
+      });
+
+      const result = await client.fetchIncome({ incomeType: 'commission' });
+
+      expect(result).toHaveLength(1);
+      expect(result[0].income).toBeCloseTo(-0.34382205, 8);
+    });
+
+    it('asks for the largest page the exchange allows when the caller named no limit', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: { result: { list: [] } } });
+
+      await client.fetchIncome();
+
+      const [, options] = mockInstance.get.mock.calls.at(-1);
+
+      // Умолчание биржи — 20 записей. Молча отдать первые 20 из окна и выдать это за ответ
+      // хуже, чем отказать: потребитель посчитает по неполным данным и не узнает об этом.
+      expect(options.params.limit).toBe(50);
+    });
+
+    it('refuses a full page instead of silently answering with a truncated one', async () => {
+      const { client, mockInstance } = createClient();
+      const fullPageList = Array.from({ length: 50 }, () => BYBIT_RAW_TRANSACTION_LOG_LIST[0]);
+      mockInstance.get.mockResolvedValue({ data: { result: { list: fullPageList } } });
+
+      await expect(client.fetchIncome()).rejects.toThrow();
+    });
+
+    it('narrows the answer to the requested symbol', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({
+        data: { result: { list: BYBIT_RAW_TRANSACTION_LOG_LIST } },
+      });
+
+      const result = await client.fetchIncome({ symbol: 'ETHUSDT' });
+
+      expect(result).toHaveLength(1);
+      expect(result[0].symbol).toBe('ETHUSDT');
+    });
+
     it('throws for the funding filter when the transaction log hits the page limit', async () => {
       const { client, mockInstance } = createClient();
       const fullPageList = Array.from({ length: 50 }, () => BYBIT_RAW_TRANSACTION_LOG_LIST[0]);
@@ -936,7 +1048,7 @@ describe('BybitLinear', () => {
 
       await expect(
         client.fetchIncome({ startTime: 1000, limit: 100, incomeType: 'funding' }),
-      ).rejects.toThrow('transaction log hit the page limit');
+      ).rejects.toThrow('full page');
     });
   });
 
@@ -960,6 +1072,36 @@ describe('BybitLinear', () => {
     });
   });
 
+  // Обе ручки границы времени принимают и УВАЖАЮТ — проверено живым запросом 08.08.2026:
+  // узкое окно вернуло одну запись вместо пяти. Раньше окно молча выбрасывалось, и «сделки
+  // за вчера» отдавали последние N записей независимо от дат.
+  describe('time window is passed to the exchange, not dropped', () => {
+    it('asks order history for the requested window', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: { retCode: 0, result: { list: [] } } });
+
+      await client.fetchOrderHistory('BTCUSDT', { startTime: 1000, endTime: 2000, limit: 30 });
+
+      const [, options] = mockInstance.get.mock.calls.at(-1);
+
+      expect(options.params.startTime).toBe(1000);
+      expect(options.params.endTime).toBe(2000);
+      expect(options.params.limit).toBe(30);
+    });
+
+    it('asks closed PnL for the requested window', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: { retCode: 0, result: { list: [] } } });
+
+      await client.fetchClosedPnl('BTCUSDT', { startTime: 1000, endTime: 2000, limit: 20 });
+
+      const [, options] = mockInstance.get.mock.calls.at(-1);
+
+      expect(options.params.startTime).toBe(1000);
+      expect(options.params.endTime).toBe(2000);
+    });
+  });
+
   describe('createBatchOrders', () => {
     it('returns array of orders', async () => {
       const { client, mockInstance } = createClient();
@@ -974,8 +1116,53 @@ describe('BybitLinear', () => {
       ]);
 
       expect(result).toHaveLength(1);
-      expect(result[0].id).toBe('batch-1');
-      expect(result[0].symbol).toBe('BTCUSDT');
+      expect(result[0].isSuccess).toBe(true);
+      expect(result[0].order?.id).toBe('batch-1');
+      expect(result[0].order?.symbol).toBe('BTCUSDT');
+      expect(result[0].errorText).toBeNull();
+    });
+
+    it('reports a rejected order as rejected: a failure used to come back as an open order with a junk id', async () => {
+      const { client, mockInstance } = createClient();
+      client.tradeSymbols.set('BTCUSDT', BTCUSDT_TRADE_SYMBOL);
+
+      mockInstance.post.mockResolvedValue({
+        data: {
+          retCode: 0,
+          result: { list: [{ orderId: 'batch-1' }, { orderId: '' }] },
+          retExtInfo: { list: [{ code: 0, msg: 'OK' }, { code: 110007, msg: 'Insufficient available balance' }] },
+        },
+      });
+
+      const result = await client.createBatchOrders([
+        { symbol: 'BTCUSDT', type: OrderTypeEnum.Market, side: OrderSideEnum.Buy, amount: 0.001 },
+        { symbol: 'BTCUSDT', type: OrderTypeEnum.Market, side: OrderSideEnum.Buy, amount: 0.002 },
+      ]);
+
+      expect(result).toHaveLength(2);
+      expect(result[0].isSuccess).toBe(true);
+      expect(result[0].order?.id).toBe('batch-1');
+      expect(result[1].isSuccess).toBe(false);
+      expect(result[1].order).toBeNull();
+      expect(result[1].errorCode).toBe(110007);
+      expect(result[1].errorText).toBe('Insufficient available balance');
+    });
+
+    it('never reports success on a missing order id, even when the exchange sent no per-order status', async () => {
+      const { client, mockInstance } = createClient();
+      client.tradeSymbols.set('BTCUSDT', BTCUSDT_TRADE_SYMBOL);
+
+      mockInstance.post.mockResolvedValue({
+        data: { retCode: 0, result: { list: [{}] } },
+      });
+
+      const result = await client.createBatchOrders([
+        { symbol: 'BTCUSDT', type: OrderTypeEnum.Market, side: OrderSideEnum.Buy, amount: 0.001 },
+      ]);
+
+      expect(result[0].isSuccess).toBe(false);
+      expect(result[0].order).toBeNull();
+      expect(result[0].errorText).not.toBeNull();
     });
   });
 
@@ -1258,8 +1445,8 @@ describe('BybitLinear', () => {
       expect(mockInstance.post.mock.calls[0][1].request).toHaveLength(20);
       expect(mockInstance.post.mock.calls[1][1].request).toHaveLength(5);
       expect(result).toHaveLength(25);
-      expect(result[0].id).toBe('id-1');
-      expect(result[24].id).toBe('id-25');
+      expect(result[0].order?.id).toBe('id-1');
+      expect(result[24].order?.id).toBe('id-25');
     });
 
     it('returns empty array on empty input without HTTP call', async () => {
@@ -1643,8 +1830,38 @@ describe('BybitLinear', () => {
     });
   });
 
+  // Время закрытия Bybit не присылает, но оно однозначно выводится из начала и длительности
+  // интервала. Из-за нуля на его месте обходной приём «если ноль — посчитай сам» разошёлся
+  // по трём приложениям сразу.
+  describe('history klines', () => {
+    it('states when the kline closed instead of leaving a zero for the caller to patch', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({
+        data: { retCode: 0, result: { list: [['1700000000000', '1', '2', '0.5', '1.5', '10', '15']] } },
+      });
+
+      const [kline] = await client.fetchKlines('BTCUSDT', '30m');
+
+      expect(kline.openTimestamp).toBe(1700000000000);
+      expect(kline.closeTimestamp).toBe(1700000000000 + 30 * 60 * 1000);
+    });
+  });
+
   describe('getOrderRateLimit', () => {
-    it('returns documented 10 RPS without any HTTP request', async () => {
+    // Предел частоты был зашит числом в коде: биржа его поменяла — соседняя биржа подстроится
+    // (она читает его с биржи), а эта нет. Bybit сообщает предел заголовком ответа на заявку,
+    // и торговый канал этот заголовок уже разбирает — берём оттуда.
+    it('prefers the limit the exchange itself reported on an order response', async () => {
+      const { client } = createClient();
+      const tradeStream = (client as any).tradeStream;
+      tradeStream.getLastReportedOrderRateLimit.mockReturnValue({ limit: 20, remaining: 19, resetMs: 1700000001000 });
+
+      const result = await client.getOrderRateLimit();
+
+      expect(result).toEqual({ writeRequestsPerSecond: 20, source: 'bybit-exchange-header' });
+    });
+
+    it('falls back to the documented value while the exchange has not reported one', async () => {
       const { client, mockInstance } = createClient();
       mockInstance.get.mockClear();
       mockInstance.post.mockClear();
@@ -1654,6 +1871,200 @@ describe('BybitLinear', () => {
       expect(result).toEqual({ writeRequestsPerSecond: 10, source: 'bybit-documented' });
       expect(mockInstance.get).not.toHaveBeenCalled();
       expect(mockInstance.post).not.toHaveBeenCalled();
+    });
+  });
+
+  // На Bybit скольжение — свойство позиции, а не заявка: отдельного номера у него нет.
+  // Наружу это обязано выглядеть так же, как на Binance, иначе потребителю приходится
+  // знать, с какой биржей он работает.
+  describe('trailing stop (Bybit keeps it on the position, not as an order)', () => {
+    function armTrailingRequest(mockInstance: Record<string, jest.Mock>): void {
+      mockInstance.post.mockResolvedValue({ data: { retCode: 0, retMsg: 'OK', result: {} } });
+    }
+
+    it('sends the percentage offset as an absolute price distance measured from the activation price', async () => {
+      const { client, mockInstance } = createClient();
+      client.tradeSymbols.set('BTCUSDT', BTCUSDT_TRADE_SYMBOL);
+      armTrailingRequest(mockInstance);
+
+      await client.createOrderWebSocket({
+        symbol: 'BTCUSDT',
+        type: OrderTypeEnum.TrailingStop,
+        side: OrderSideEnum.Sell,
+        amount: 0.1,
+        activationPrice: 70000,
+        callbackRate: 2,
+      });
+
+      const [path, body] = mockInstance.post.mock.calls[0];
+
+      expect(path).toBe('/v5/position/trading-stop');
+      expect(body.category).toBe('linear');
+      expect(body.symbol).toBe('BTCUSDT');
+      expect(body.trailingStop).toBe('1400');
+      expect(body.activePrice).toBe('70000');
+      expect(body.tpslMode).toBe('Full');
+      expect(body.positionIdx).toBe(0);
+    });
+
+    it('falls back to the current mark price when no activation price is given', async () => {
+      const { client, mockInstance } = createClient();
+      client.tradeSymbols.set('BTCUSDT', BTCUSDT_TRADE_SYMBOL);
+      mockInstance.get.mockResolvedValue({
+        data: { retCode: 0, retMsg: 'OK', result: { list: BYBIT_RAW_MARK_PRICE_TICKER_LIST } },
+      });
+      armTrailingRequest(mockInstance);
+
+      await client.createOrderWebSocket({
+        symbol: 'BTCUSDT',
+        type: OrderTypeEnum.TrailingStop,
+        side: OrderSideEnum.Sell,
+        amount: 0.1,
+        callbackRate: 1,
+      });
+
+      const [, body] = mockInstance.post.mock.calls[0];
+
+      // Mark price 65450.50, отступ 1% = 654.505 — на сетку цены символа (шаг 0.10) это 654.5.
+      // Расстояние — тоже цена, и биржа принимает его только по своей сетке.
+      expect(body.trailingStop).toBe('654.5');
+      expect(body.activePrice).toBeUndefined();
+    });
+
+    it('addresses the hedge position the order was aimed at', async () => {
+      const { client, mockInstance } = createClient();
+      client.tradeSymbols.set('BTCUSDT', BTCUSDT_TRADE_SYMBOL);
+      armTrailingRequest(mockInstance);
+
+      await client.createOrderWebSocket({
+        symbol: 'BTCUSDT',
+        type: OrderTypeEnum.TrailingStop,
+        side: OrderSideEnum.Buy,
+        amount: 0.1,
+        positionSide: PositionSideEnum.Short,
+        activationPrice: 70000,
+        callbackRate: 2,
+      });
+
+      const [path, body] = mockInstance.post.mock.calls[0];
+
+      expect(path).toBe('/v5/position/trading-stop');
+      expect(body.positionIdx).toBe(2);
+    });
+
+    it('returns an order the caller can later cancel: same symbol, same type, non-empty id', async () => {
+      const { client, mockInstance } = createClient();
+      client.tradeSymbols.set('BTCUSDT', BTCUSDT_TRADE_SYMBOL);
+      armTrailingRequest(mockInstance);
+
+      const order = await client.createOrderWebSocket({
+        symbol: 'BTCUSDT',
+        type: OrderTypeEnum.TrailingStop,
+        side: OrderSideEnum.Sell,
+        amount: 0.1,
+        activationPrice: 70000,
+        callbackRate: 2,
+      });
+
+      expect(order.id).not.toBe('');
+      expect(order.symbol).toBe('BTCUSDT');
+      expect(order.type).toBe(OrderTypeEnum.TrailingStop);
+      expect(order.isConditional).toBe(true);
+      expect(order.status).toBe('open');
+    });
+
+    it('refuses a trailing stop with no offset instead of sending a meaningless zero distance', async () => {
+      const { client, mockInstance } = createClient();
+      client.tradeSymbols.set('BTCUSDT', BTCUSDT_TRADE_SYMBOL);
+      armTrailingRequest(mockInstance);
+
+      await expect(
+        client.createOrderWebSocket({
+          symbol: 'BTCUSDT',
+          type: OrderTypeEnum.TrailingStop,
+          side: OrderSideEnum.Sell,
+          amount: 0.1,
+          activationPrice: 70000,
+        }),
+      ).rejects.toThrow(ExchangeError);
+
+      expect(mockInstance.post).not.toHaveBeenCalled();
+    });
+
+    it('cancels by clearing the distance, exactly as the exchange documents it', async () => {
+      const { client, mockInstance } = createClient();
+      client.tradeSymbols.set('BTCUSDT', BTCUSDT_TRADE_SYMBOL);
+      armTrailingRequest(mockInstance);
+
+      const order = await client.createOrderWebSocket({
+        symbol: 'BTCUSDT',
+        type: OrderTypeEnum.TrailingStop,
+        side: OrderSideEnum.Sell,
+        amount: 0.1,
+        activationPrice: 70000,
+        callbackRate: 2,
+      });
+
+      mockInstance.post.mockClear();
+
+      const canceled = await client.cancelOrder('BTCUSDT', order.id);
+
+      const [path, body] = mockInstance.post.mock.calls[0];
+
+      expect(path).toBe('/v5/position/trading-stop');
+      expect(body.trailingStop).toBe('0');
+      expect(canceled.status).toBe('canceled');
+      expect(canceled.id).toBe(order.id);
+    });
+
+    it('reads the live distance back from the position, so the id survives a restart', async () => {
+      const { client, mockInstance } = createClient();
+      client.tradeSymbols.set('BTCUSDT', BTCUSDT_TRADE_SYMBOL);
+      mockInstance.get.mockResolvedValue({
+        data: {
+          retCode: 0,
+          retMsg: 'OK',
+          result: { list: [{ ...BYBIT_RAW_POSITION, positionIdx: 0, trailingStop: '1400', activePrice: '70000' }] },
+        },
+      });
+
+      const order = await client.getOrder('BTCUSDT', 'bybitTrailingStop|0');
+
+      expect(order.id).toBe('bybitTrailingStop|0');
+      expect(order.type).toBe(OrderTypeEnum.TrailingStop);
+      expect(order.stopPrice).toBe(70000);
+      expect(order.status).toBe('open');
+    });
+
+    it('reports no trailing stop as a missing order, not as an armed one', async () => {
+      const { client, mockInstance } = createClient();
+      client.tradeSymbols.set('BTCUSDT', BTCUSDT_TRADE_SYMBOL);
+      mockInstance.get.mockResolvedValue({
+        data: {
+          retCode: 0,
+          retMsg: 'OK',
+          result: { list: [{ ...BYBIT_RAW_POSITION, positionIdx: 0, trailingStop: '0' }] },
+        },
+      });
+
+      await expect(client.getOrder('BTCUSDT', 'bybitTrailingStop|0')).rejects.toThrow();
+      // Читаем позицию, а не книгу заявок: скольжения в книге не существует.
+      expect(mockInstance.get.mock.calls[0][0]).toBe('/v5/position/list');
+    });
+
+    it('never lets a trailing stop slip through the plain order builder disguised as a market order', () => {
+      const { client } = createClient();
+      client.tradeSymbols.set('BTCUSDT', BTCUSDT_TRADE_SYMBOL);
+
+      expect(() =>
+        (client as any).buildBybitOrderParams({
+          symbol: 'BTCUSDT',
+          type: OrderTypeEnum.TrailingStop,
+          side: OrderSideEnum.Sell,
+          amount: 0.1,
+          callbackRate: 2,
+        }),
+      ).toThrow(ExchangeError);
     });
   });
 });

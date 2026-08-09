@@ -1,5 +1,7 @@
 import type {
   CancelBatchOrdersResult,
+  CreateBatchOrdersResult,
+  CreateOrderItemResult,
   CreateOrderWebSocketArgs,
   ExchangeArgs,
   FetchIncomeArgs,
@@ -8,8 +10,15 @@ import type {
   ModifyBatchOrdersResult,
   ModifyOrderArgs,
 } from '../types/exchange';
-import type { Position, Order, FundingRateHistory, FundingInfo, AccountBalances, MarkPrice, OpenInterest, FeeRate, Income } from '../types/common';
-import { MarginModeEnum, PositionModeEnum } from '../types/common';
+import type { Position, Order, FundingRateHistory, FundingInfo, AccountBalances, MarkPrice, OpenInterest, FeeRate, Income, ClosedPnl } from '../types/common';
+import { MarginModeEnum, PositionModeEnum, OrderTypeEnum, TimeInForceEnum, TriggerByEnum } from '../types/common';
+import { ExchangeError } from '../errors/ExchangeError';
+import { isConditionalOrderType } from '../constants/orderTypes';
+import {
+  MISSING_ORDER_ID_ERROR_TEXT,
+  buildPlacedOrderOutcome,
+  buildRejectedOrderOutcome,
+} from '../normalizers/batchOrderOutcome';
 import { BinanceFuturesHttpClient } from '../http/BinanceFuturesHttpClient';
 import type { BinanceOrderResponseRaw } from '../normalizers/binanceNormalizer';
 import {
@@ -22,7 +31,14 @@ import {
   normalizeBinanceOpenInterest,
   normalizeBinanceCommissionRate,
   normalizeBinanceIncomeList,
+  normalizeBinanceAlgoOrder,
+  buildBinanceClosedPnlList,
+  mergeBinanceTriggeredOrder,
+  isBinanceAlgoOrderRaw,
+  isBinanceOrderResponseRaw,
 } from '../normalizers/binanceNormalizer';
+import { BinanceConditionalOrderRegistry } from './BinanceConditionalOrderRegistry';
+import type { BinanceOrderKind } from './BinanceConditionalOrderRegistry';
 import { BinanceFuturesPublicStream } from '../ws/BinanceFuturesPublicStream';
 import {
   BINANCE_KLINE_LIMIT_FUTURES,
@@ -37,13 +53,53 @@ import {
   BINANCE_FUTURES_CANCEL_BATCH_CHUNK_SIZE,
   BINANCE_FUTURES_CREATE_BATCH_CHUNK_SIZE,
   BINANCE_FUTURES_MODIFY_BATCH_CHUNK_SIZE,
+  BINANCE_ALGO_TYPE_CONDITIONAL,
+  BINANCE_ALGO_ORDER_VISIBILITY_GRACE_MS,
+  BINANCE_ALGO_ORDER_VISIBILITY_ATTEMPT_COUNT,
+  BINANCE_ALGO_ORDER_VISIBILITY_RETRY_DELAY_MS,
 } from '../constants/binance';
-import { BINANCE_ORDER_SIDE_REVERSE } from '../constants/mappings';
+import {
+  BINANCE_ORDER_SIDE_REVERSE,
+  BINANCE_ALGO_ORDER_TYPE_REVERSE,
+  BINANCE_WORKING_TYPE,
+  BINANCE_TRIGGER_BY_WORKING_TYPE,
+  BINANCE_FUTURES_TIME_IN_FORCE_REVERSE,
+} from '../constants/mappings';
 import { chunkList as chunkListUtil } from '../utils/chunkList';
 import { isBinanceNumericOrderId } from '../utils/binanceOrderId';
 import { BinanceBaseClient } from './BinanceBaseClient';
 import { BaseExchangeClient } from './BaseExchangeClient';
 import type { AxiosLikeError, BinanceModifyBatchOrderParams, BinanceModifyOrderParams } from './BinanceFutures.types';
+
+/** Условные типы, которые принимают срок действия: у них после срабатывания рождается лимит. */
+const BINANCE_ALGO_LIMIT_LIKE_ORDER_TYPE_SET: ReadonlySet<OrderTypeEnum> = new Set([
+  OrderTypeEnum.StopLimit,
+  OrderTypeEnum.TakeProfitLimit,
+  OrderTypeEnum.Stop,
+  OrderTypeEnum.TakeProfit,
+]);
+
+/** «Такой заявки нет» — одинаково отвечают обе службы, отличить по коду невозможно. */
+const BINANCE_MISSING_ORDER_ERROR_CODE_LIST = [-2011, -2013];
+
+function isBinanceMissingOrderError(error: unknown): boolean {
+  const code = parseBinanceErrorCode(error);
+
+  if (code !== null && BINANCE_MISSING_ORDER_ERROR_CODE_LIST.includes(code)) {
+    return true;
+  }
+
+  if (error instanceof ExchangeError && typeof error.code === 'number') {
+    return BINANCE_MISSING_ORDER_ERROR_CODE_LIST.includes(error.code);
+  }
+
+  // Числовой код теряется при переносе ошибки в текст — приходится смотреть и на текст.
+  return error instanceof Error && /-2011|-2013|does not exist|unknown order/i.test(error.message);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 const BINANCE_POSITION_MODE_NOOP_ERROR_CODE = -4059;
 const BINANCE_MARGIN_MODE_NOOP_ERROR_CODE = -4046;
@@ -66,6 +122,305 @@ function parseBinanceErrorCode(error: unknown): number | null {
 class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
   protected readonly marketLabel = 'futures';
   protected readonly klineLimit = BINANCE_KLINE_LIMIT_FUTURES;
+  private readonly conditionalOrderRegistry = new BinanceConditionalOrderRegistry();
+
+  /**
+   * Собирает условную заявку для Algo-службы. Отдельная функция, а не ветка в общем сборщике:
+   * общий делится со спотом Binance, и лишние ветки в нём — готовая регрессия.
+   */
+  private buildBinanceAlgoOrderParams(args: CreateOrderWebSocketArgs): Record<string, unknown> {
+    const algoOrderType = BINANCE_ALGO_ORDER_TYPE_REVERSE[args.type];
+
+    if (algoOrderType === undefined) {
+      throw new ExchangeError(
+        `Binance futures: order type ${args.type} is not a conditional type`,
+        'ALGO_ORDER_TYPE_UNSUPPORTED',
+        'binance',
+      );
+    }
+
+    const params: Record<string, unknown> = {
+      algoType: BINANCE_ALGO_TYPE_CONDITIONAL,
+      symbol: args.symbol,
+      side: BINANCE_ORDER_SIDE_REVERSE[args.side] ?? args.side.toUpperCase(),
+      type: algoOrderType,
+    };
+
+    // «Закрыть всю позицию» несовместимо с объёмом — их нельзя слать вместе.
+    if (args.closePosition === true) {
+      params.closePosition = true;
+    } else {
+      params.quantity = String(this.amountToPrecision(args.symbol, args.amount));
+    }
+
+    if (args.price !== undefined && args.price > 0) {
+      params.price = String(this.priceToPrecision(args.symbol, args.price));
+    }
+
+    if (args.stopPrice !== undefined && args.stopPrice > 0) {
+      params.triggerPrice = String(this.priceToPrecision(args.symbol, args.stopPrice));
+    }
+
+    // Явно заданный тип цены срабатывания главнее; иначе выводим его из намерения
+    // «сверять по такой-то цене» — потребителю знать про биржевые имена не нужно.
+    const workingType = args.workingType
+      ?? (args.triggerBy === undefined ? undefined : BINANCE_TRIGGER_BY_WORKING_TYPE[args.triggerBy]);
+
+    if (args.triggerBy === TriggerByEnum.IndexPrice) {
+      this.logger.warn(
+        `[Binance] ${args.symbol}: index price triggers do not exist on Binance futures — falling back to the contract price`,
+      );
+    }
+
+    if (workingType !== undefined) {
+      params.workingType = BINANCE_WORKING_TYPE[workingType] ?? workingType;
+    }
+
+    const isHedgeMode = args.positionSide !== undefined;
+
+    if (isHedgeMode && args.positionSide !== undefined) {
+      params.positionSide = args.positionSide.toUpperCase();
+    }
+
+    // reduceOnly запрещён в хеджевом режиме и несовместим с «закрыть всю позицию».
+    if (!isHedgeMode && args.closePosition !== true && args.reduceOnly !== undefined) {
+      params.reduceOnly = args.reduceOnly;
+    }
+
+    if (args.clientOrderId !== undefined) {
+      params.clientAlgoId = args.clientOrderId;
+    }
+
+    if (args.activationPrice !== undefined && args.activationPrice > 0) {
+      params.activatePrice = String(this.priceToPrecision(args.symbol, args.activationPrice));
+    }
+
+    if (args.callbackRate !== undefined) {
+      params.callbackRate = String(args.callbackRate);
+    }
+
+    // Срок действия принимают только лимитные условные типы; у рыночных биржа сама
+    // ставит GTE_GTC — заявку, живущую столько же, сколько позиция.
+    if (BINANCE_ALGO_LIMIT_LIKE_ORDER_TYPE_SET.has(args.type)) {
+      const timeInForce = args.timeInForce ?? TimeInForceEnum.Gtc;
+      params.timeInForce = BINANCE_FUTURES_TIME_IN_FORCE_REVERSE[timeInForce] ?? timeInForce;
+    }
+
+    return params;
+  }
+
+  protected async tryCreateConditionalOrder(args: CreateOrderWebSocketArgs): Promise<Order | null> {
+    if (!isConditionalOrderType(args.type)) {
+      return null;
+    }
+
+    const algoParams = this.buildBinanceAlgoOrderParams(args);
+    const order = this.tradeStream.isConnected()
+      ? await this.tradeStream.createConditionalOrder(algoParams)
+      : normalizeBinanceAlgoOrder(await this.httpClient.createAlgoOrder(algoParams));
+
+    this.conditionalOrderRegistry.record(order.symbol, order.id, 'conditional');
+
+    return order;
+  }
+
+  /** Дочитывает фактическое исполнение из порождённой заявки, если условная уже сработала. */
+  private async hydrateTriggeredOrder(conditionalOrder: Order): Promise<Order> {
+    if (conditionalOrder.triggeredOrderId === undefined) {
+      return conditionalOrder;
+    }
+
+    try {
+      const triggeredRaw = await this.httpClient.getOrder(
+        conditionalOrder.symbol,
+        conditionalOrder.triggeredOrderId,
+      );
+
+      return mergeBinanceTriggeredOrder(conditionalOrder, triggeredRaw);
+    } catch (error) {
+      // Не срываем чтение: без исполнения потребитель откатится на цену маркировки, а
+      // выдуманное заполнение попало бы в журнал как закрытие, которого не было.
+      this.logger.warn(
+        `[Binance] Could not read the order triggered by ${conditionalOrder.id}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+
+      return conditionalOrder;
+    }
+  }
+
+  /**
+   * Читает условную заявку, чьё происхождение нам известно, с выдержкой на «ещё не видна».
+   *
+   * Algo-служба отдаёт только что поставленную заявку на чтение не сразу (замерено: 0 и 300 мс —
+   * «не существует», 1000 мс — успех). Мы ЗНАЕМ, что заявка есть: мы её поставили или прочитали
+   * в списке. Поэтому короткий ответ «нет такой» вскоре после этого — не отсутствие заявки, а
+   * незавершённое распространение; принять его за отсутствие значит потерять номер живого стопа.
+   * Выдержка действует только в окне после того, как происхождение стало известно.
+   */
+  private async readAlgoOrderWithVisibilityGrace(symbol: string, orderId: string): Promise<Order> {
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        return normalizeBinanceAlgoOrder(await this.httpClient.fetchAlgoOrder({ algoId: orderId }));
+      } catch (error) {
+        const ageMs = this.conditionalOrderRegistry.ageMs(symbol, orderId);
+        const isWithinGrace = ageMs !== null && ageMs <= BINANCE_ALGO_ORDER_VISIBILITY_GRACE_MS;
+        const hasAttemptLeft = attempt < BINANCE_ALGO_ORDER_VISIBILITY_ATTEMPT_COUNT;
+
+        if (!isBinanceMissingOrderError(error) || !isWithinGrace || !hasAttemptLeft) {
+          throw error;
+        }
+
+        this.logger.debug(
+          `[Binance] ${symbol}: conditional order ${orderId} is not visible yet (attempt ${attempt}), retrying`,
+        );
+        await sleep(BINANCE_ALGO_ORDER_VISIBILITY_RETRY_DELAY_MS);
+      }
+    }
+  }
+
+  /**
+   * Читает заявку из той службы, которой она принадлежит.
+   * Помним происхождение — один запрос. Не помним — спрашиваем обе и запоминаем ответ.
+   * Ответили ОБЕ — это столкновение номеров, и мы отказываемся выбирать: молча вернуть
+   * чужую заявку хуже, чем честно сообщить о неоднозначности.
+   */
+  private async readOrderFromOwningService(
+    symbol: string,
+    orderId: string,
+  ): Promise<{ order: Order; kind: BinanceOrderKind }> {
+    const knownKind = this.conditionalOrderRegistry.lookup(symbol, orderId);
+
+    if (knownKind === 'conditional') {
+      return { order: await this.readAlgoOrderWithVisibilityGrace(symbol, orderId), kind: 'conditional' };
+    }
+
+    if (knownKind === 'plain') {
+      return { order: normalizeBinanceOrder(await this.httpClient.getOrder(symbol, orderId)), kind: 'plain' };
+    }
+
+    const [rawPlainOutcome, rawConditionalOutcome] = await Promise.allSettled([
+      this.httpClient.getOrder(symbol, orderId),
+      this.httpClient.fetchAlgoOrder({ algoId: orderId }),
+    ]);
+
+    // Успешный ответ ещё не значит, что он от той службы, которую мы спрашивали, — сверяем
+    // форму с обеих сторон, иначе чужой или пустой ответ был бы принят за свой.
+    const reject = (reason: string) => ({ status: 'rejected' as const, reason: new Error(reason) });
+    const plainOutcome =
+      rawPlainOutcome.status === 'fulfilled' && !isBinanceOrderResponseRaw(rawPlainOutcome.value)
+        ? reject(`Binance futures: order ${orderId} not found in the plain order book`)
+        : rawPlainOutcome;
+    const conditionalOutcome =
+      rawConditionalOutcome.status === 'fulfilled' && !isBinanceAlgoOrderRaw(rawConditionalOutcome.value)
+        ? reject(`Binance futures: order ${orderId} not found in the conditional service`)
+        : rawConditionalOutcome;
+
+    if (plainOutcome.status === 'fulfilled' && conditionalOutcome.status === 'fulfilled') {
+      throw new ExchangeError(
+        `Binance futures: order id ${orderId} exists in both the plain and the conditional service for ${symbol}`,
+        'CONDITIONAL_ORDER_ID_AMBIGUOUS',
+        'binance',
+      );
+    }
+
+    if (conditionalOutcome.status === 'fulfilled') {
+      this.conditionalOrderRegistry.record(symbol, orderId, 'conditional');
+
+      return { order: normalizeBinanceAlgoOrder(conditionalOutcome.value), kind: 'conditional' };
+    }
+
+    if (plainOutcome.status === 'fulfilled') {
+      this.conditionalOrderRegistry.record(symbol, orderId, 'plain');
+
+      return { order: normalizeBinanceOrder(plainOutcome.value), kind: 'plain' };
+    }
+
+    throw plainOutcome.reason;
+  }
+
+  private async cancelConditionalOrderById(orderId: string): Promise<Order> {
+    if (this.tradeStream.isConnected()) {
+      await this.tradeStream.cancelConditionalOrder({ algoId: orderId });
+    } else {
+      await this.httpClient.cancelAlgoOrder({ algoId: orderId });
+    }
+
+    // Отмена условной заявки возвращает короткую расписку, а не снимок заявки, поэтому
+    // отдаём наружу перечитанное состояние — контракт метода прежний.
+    return normalizeBinanceAlgoOrder(await this.httpClient.fetchAlgoOrder({ algoId: orderId }));
+  }
+
+  async getOrder(symbol: string, orderId: string): Promise<Order> {
+    const { order } = await this.readOrderFromOwningService(symbol, orderId);
+
+    return this.hydrateTriggeredOrder(order);
+  }
+
+  async getOrderByClientOrderId(symbol: string, clientOrderId: string): Promise<Order> {
+    // Наша собственная пометка — пространство без столкновений, поэтому спрашиваем обе
+    // службы сразу и берём ту, что ответила.
+    const [plainOutcome, conditionalOutcome] = await Promise.allSettled([
+      this.httpClient.getOrderByClientOrderId(symbol, clientOrderId),
+      this.httpClient.fetchAlgoOrder({ clientAlgoId: clientOrderId }),
+    ]);
+
+    if (conditionalOutcome.status === 'fulfilled' && isBinanceAlgoOrderRaw(conditionalOutcome.value)) {
+      const order = normalizeBinanceAlgoOrder(conditionalOutcome.value);
+      this.conditionalOrderRegistry.record(symbol, order.id, 'conditional');
+
+      return this.hydrateTriggeredOrder(order);
+    }
+
+    if (plainOutcome.status === 'fulfilled') {
+      return normalizeBinanceOrder(plainOutcome.value);
+    }
+
+    throw plainOutcome.reason;
+  }
+
+  async fetchOpenConditionalOrders(_settleCoin: string): Promise<Order[]> {
+    // Читаем ИМЕННО отдельную службу: в общем списке заявок условных больше нет.
+    const rawList = await this.httpClient.fetchOpenAlgoOrders();
+    const orderList = rawList.map(normalizeBinanceAlgoOrder);
+
+    // Заодно наполняем память о происхождении — после перезапуска она пуста, и это
+    // единственный путь узнать номера своих условных заявок заново.
+    orderList.forEach((order) => this.conditionalOrderRegistry.record(order.symbol, order.id, 'conditional'));
+
+    return orderList;
+  }
+
+  async cancelOrder(symbol: string, orderId: string): Promise<Order> {
+    this.logger.debug(`[Binance] Cancelling order ${orderId} for ${symbol}`);
+
+    // Помним происхождение — отменяем адресно, одним запросом. Так идёт подавляющее
+    // большинство отмен: свою условную заявку мы либо сами поставили, либо прочитали
+    // из списка, и оба пути происхождение запоминают.
+    const knownKind = this.conditionalOrderRegistry.lookup(symbol, orderId);
+
+    if (knownKind === 'conditional') {
+      return this.cancelConditionalOrderById(orderId);
+    }
+
+    // Происхождение неизвестно. Сначала обычная книга — так сохраняется прежнее поведение
+    // для обычных заявок, включая ответ биржи «заявки уже нет», по которому вызывающий
+    // отличает успешную отмену от настоящей ошибки.
+    try {
+      return normalizeBinanceOrder(await this.httpClient.cancelOrder(symbol, orderId));
+    } catch (plainCancelError) {
+      if (knownKind === 'plain' || !isBinanceMissingOrderError(plainCancelError)) {
+        throw plainCancelError;
+      }
+
+      try {
+        return await this.cancelConditionalOrderById(orderId);
+      } catch {
+        // Ни в одной службе заявки нет: наружу отдаём ИСХОДНУЮ ошибку обычной книги,
+        // иначе вызывающий не узнает свой случай «заявки уже нет».
+        throw plainCancelError;
+      }
+    }
+  }
 
   constructor(args: ExchangeArgs) {
     const isDemoMode = args.config.isDemoMode === true;
@@ -197,9 +552,7 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
       return null;
     }
 
-    const normalized = normalizeBinancePosition(matched);
-
-    return { ...normalized, positionIdx };
+    return normalizeBinancePosition(matched);
   }
 
   async fetchPositionList(symbol: string): Promise<Position[]> {
@@ -207,19 +560,7 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
     const rawPositionList = await this.httpClient.fetchPositionRisk(symbol);
     const filteredList = rawPositionList.filter((p) => p.symbol === symbol);
 
-    return filteredList.map((raw) => {
-      const normalized = normalizeBinancePosition(raw);
-
-      if (raw.positionSide === 'LONG') {
-        return { ...normalized, positionIdx: 1 };
-      }
-
-      if (raw.positionSide === 'SHORT') {
-        return { ...normalized, positionIdx: 2 };
-      }
-
-      return normalized;
-    });
+    return filteredList.map(normalizeBinancePosition);
   }
 
   async fetchAllPositions(): Promise<Position[]> {
@@ -228,19 +569,7 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
 
     return rawPositionList
       .filter((raw) => Math.abs(parseFloat(raw.positionAmt)) > 0)
-      .map((raw) => {
-        const normalized = normalizeBinancePosition(raw);
-
-        if (raw.positionSide === 'LONG') {
-          return { ...normalized, positionIdx: 1 };
-        }
-
-        if (raw.positionSide === 'SHORT') {
-          return { ...normalized, positionIdx: 2 };
-        }
-
-        return normalized;
-      });
+      .map(normalizeBinancePosition);
   }
 
   async setLeverage(leverage: number, symbol: string): Promise<void> {
@@ -266,6 +595,21 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
   }
 
   async modifyOrder(args: ModifyOrderArgs): Promise<Order> {
+    // У условной заявки изменения не существует ВООБЩЕ — ни обычным запросом, ни через
+    // канал связи. Снятие-и-постановку внутри библиотеки не делаем: это открыло бы окно
+    // без защиты, которого вызывающий не видит и не может отследить.
+    const isConditional =
+      args.triggerPrice !== undefined ||
+      this.conditionalOrderRegistry.lookup(args.symbol, args.orderId) === 'conditional';
+
+    if (isConditional) {
+      throw new ExchangeError(
+        `Binance futures: conditional orders cannot be modified — cancel and place a new one (order ${args.orderId}, ${args.symbol})`,
+        'CONDITIONAL_ORDER_MODIFY_UNSUPPORTED',
+        'binance',
+      );
+    }
+
     this.logger.debug(`[Binance] Modifying order ${args.orderId} for ${args.symbol}`);
     const params: BinanceModifyOrderParams = {
       symbol: args.symbol,
@@ -291,38 +635,92 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
 
   async cancelAllOrders(symbol: string): Promise<void> {
     this.logger.debug(`[Binance] Cancelling all orders for ${symbol}`);
+    // Две службы — две отмены. Старый вход условных заявок не видит, и без второго вызова
+    // «отменить всё» молча оставляло бы стопы висеть.
     await this.httpClient.cancelAllOrders(symbol);
+    await this.httpClient.cancelAllAlgoOrders(symbol);
   }
 
-  async createBatchOrders(orderList: CreateOrderWebSocketArgs[]): Promise<Order[]> {
+  async createBatchOrders(orderList: CreateOrderWebSocketArgs[]): Promise<CreateBatchOrdersResult> {
     if (orderList.length === 0) {
       return [];
     }
 
     this.logger.debug(`[Binance] Creating batch of ${orderList.length} orders`);
-    const chunkedOrderList = chunkListUtil(orderList, BINANCE_FUTURES_CREATE_BATCH_CHUNK_SIZE);
-    const aggregatedOrderList: Order[] = [];
 
-    for (const chunk of chunkedOrderList) {
-      const paramsList = chunk.map((args) => this.buildBinanceOrderParams(args));
+    // Одна запись на каждую входную заявку, в исходном порядке. Заявки уходят двумя разными
+    // путями (см. ниже) и возвращаются вперемешку, поэтому исход кладётся на СВОЁ место, а не
+    // дописывается в конец: иначе вызывающий сопоставит исход не с той заявкой.
+    const resultList: CreateBatchOrdersResult = new Array<CreateOrderItemResult>(orderList.length);
+
+    // У Algo-службы пакетного входа НЕТ, а старый пакетный вход условные типы отбивает
+    // кодом -4120. Поэтому условные заявки уходят по одной, обычные — прежним пакетом.
+    const conditionalIndexList: number[] = [];
+    const plainIndexList: number[] = [];
+
+    orderList.forEach((args, index) => {
+      (isConditionalOrderType(args.type) ? conditionalIndexList : plainIndexList).push(index);
+    });
+
+    for (const index of conditionalIndexList) {
+      try {
+        const conditionalOrder = await this.tryCreateConditionalOrder(orderList[index]);
+
+        resultList[index] = conditionalOrder === null
+          ? buildRejectedOrderOutcome(null, 'Conditional order was not accepted by the conditional service')
+          : buildPlacedOrderOutcome(conditionalOrder);
+      } catch (error) {
+        // Отказ одной условной заявки не смеет уничтожать ответ по остальным: часть пачки
+        // к этому моменту уже стоит на бирже, и потерять её из ответа — значит оставить
+        // живые заявки без управления.
+        this.logger.warn(
+          { symbol: orderList[index].symbol, error: String(error) },
+          '[Binance] createBatchOrders: conditional order rejected',
+        );
+        resultList[index] = buildRejectedOrderOutcome(
+          error instanceof ExchangeError && typeof error.code === 'number' ? error.code : null,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+    }
+
+    const chunkedIndexList = chunkListUtil(plainIndexList, BINANCE_FUTURES_CREATE_BATCH_CHUNK_SIZE);
+
+    for (const chunk of chunkedIndexList) {
+      const paramsList = chunk.map((index) => this.buildBinanceOrderParams(orderList[index]));
       const rawList = await this.httpClient.createBatchOrders(paramsList);
 
-      rawList.forEach((rawItem, indexInChunk) => {
-        if (this.isBinanceBatchErrorItem(rawItem)) {
-          const requestedSymbol = chunk[indexInChunk].symbol;
+      chunk.forEach((index, indexInChunk) => {
+        const rawItem = rawList[indexInChunk];
+
+        if (rawItem === undefined) {
+          // Ответ короче запроса: про эту заявку биржа не сказала ничего. Молчание — не успех.
           this.logger.warn(
-            { code: rawItem.code, msg: rawItem.msg, symbol: requestedSymbol },
-            '[Binance] createBatchOrders: per-order error skipped',
+            { symbol: orderList[index].symbol },
+            '[Binance] createBatchOrders: exchange answered nothing for this order',
           );
+          resultList[index] = buildRejectedOrderOutcome(null, MISSING_ORDER_ID_ERROR_TEXT);
 
           return;
         }
 
-        aggregatedOrderList.push(normalizeBinanceOrder(rawItem as unknown as BinanceOrderResponseRaw));
+        if (this.isBinanceBatchErrorItem(rawItem)) {
+          this.logger.warn(
+            { code: rawItem.code, msg: rawItem.msg, symbol: orderList[index].symbol },
+            '[Binance] createBatchOrders: per-order error',
+          );
+          resultList[index] = buildRejectedOrderOutcome(rawItem.code, rawItem.msg ?? null);
+
+          return;
+        }
+
+        resultList[index] = buildPlacedOrderOutcome(
+          normalizeBinanceOrder(rawItem as unknown as BinanceOrderResponseRaw),
+        );
       });
     }
 
-    return aggregatedOrderList;
+    return resultList;
   }
 
   async cancelBatchOrders(symbol: string, orderIdList: string[]): Promise<CancelBatchOrdersResult> {
@@ -333,7 +731,34 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
     }
 
     const aggregatedResultList: CancelBatchOrdersResult = [];
-    const chunkedOrderIdList = chunkListUtil(orderIdList, BINANCE_FUTURES_CANCEL_BATCH_CHUNK_SIZE);
+
+    // Условные заявки живут в отдельной службе, и пакетный вход обычной книги их НЕ снимает:
+    // раньше просьба снять пачку стопов оставляла их висеть. Известные условные снимаем по
+    // одной их собственным входом — ровно так же, как это делает одиночная отмена.
+    const conditionalOrderIdList = orderIdList.filter(
+      (orderId) => this.conditionalOrderRegistry.lookup(symbol, orderId) === 'conditional',
+    );
+    const plainOrderIdList = orderIdList.filter(
+      (orderId) => this.conditionalOrderRegistry.lookup(symbol, orderId) !== 'conditional',
+    );
+
+    for (const orderId of conditionalOrderIdList) {
+      try {
+        // Именно вход отмены, без перечитывания заявки обратно: пакетной отмене нужен
+        // только исход, а лишнее чтение на каждую заявку — это N запросов из лимита счёта.
+        await this.httpClient.cancelAlgoOrder({ algoId: orderId });
+        aggregatedResultList.push({ orderId, isSuccess: true, errorCode: null, errorText: null });
+      } catch (error) {
+        aggregatedResultList.push({
+          orderId,
+          isSuccess: false,
+          errorCode: error instanceof ExchangeError && typeof error.code === 'number' ? error.code : null,
+          errorText: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    const chunkedOrderIdList = chunkListUtil(plainOrderIdList, BINANCE_FUTURES_CANCEL_BATCH_CHUNK_SIZE);
 
     for (const chunk of chunkedOrderIdList) {
       const sendableOrderIdList = chunk.filter((orderId) => isBinanceNumericOrderId(orderId));
@@ -464,6 +889,17 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
   }
 
   async fetchFeeRate(symbol?: string): Promise<FeeRate[]> {
+    // Символ этот вход требует обязательно (проверено живым запросом 08.08.2026: без него
+    // биржа отвечает -1102). Соседняя биржа отдаёт ставки по всем символам сразу, поэтому
+    // говорим о разнице прямо, а не пропускаем наружу невнятный биржевой код.
+    if (symbol === undefined) {
+      throw new ExchangeError(
+        'Binance futures reports the fee rate per symbol only — pass a symbol',
+        'FEE_RATE_SYMBOL_REQUIRED',
+        'binance',
+      );
+    }
+
     this.logger.debug('[Binance] Fetching fee rate');
     const raw = await this.httpClient.fetchCommissionRate(symbol);
 
@@ -475,6 +911,20 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
     const rawList = await this.httpClient.fetchIncome(options);
 
     return normalizeBinanceIncomeList(rawList);
+  }
+
+  /**
+   * Готовой ручки «итоги закрытия» у Binance нет — собираем их из собственных сделок счёта.
+   * Раньше метод не существовал вовсе: базовый класс просто отказывал, и потребитель писал
+   * итоги сделок расчётными, без комиссии.
+   */
+  async fetchClosedPnl(symbol?: string, options?: FetchPageWithLimitArgs): Promise<ClosedPnl[]> {
+    this.logger.debug(`[Binance] Building closed PnL for ${symbol ?? 'the whole account'} from account trades`);
+    // Символ необязателен — проверено живым запросом 08.08.2026: без него вход отвечает
+    // сделками всего счёта. Соседняя биржа тоже позволяет его не называть.
+    const rawList = await this.httpClient.fetchUserTrades({ symbol, ...options });
+
+    return buildBinanceClosedPnlList(rawList);
   }
 
   async setPositionMode(mode: PositionModeEnum): Promise<void> {

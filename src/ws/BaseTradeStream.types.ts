@@ -14,6 +14,8 @@ export enum PendingRequestKind {
   CreateBatch = 'create-batch',
   ModifyBatch = 'modify-batch',
   CancelBatch = 'cancel-batch',
+  ConditionalOrder = 'conditional-order',
+  ConditionalCancel = 'conditional-cancel',
 }
 
 export interface PendingRequest {

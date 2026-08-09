@@ -62,8 +62,14 @@ export interface CreateOrderWebSocketArgs {
   clientOrderId?: string;
   orderFilter?: OrderFilterEnum;
   marketUnit?: MarketUnitEnum;
-  trailingDelta?: number;
   quoteOrderQty?: number;
+  /** Скользящий стоп: цена, с которой он начинает вести за ценой. */
+  activationPrice?: number;
+  /** Скользящий стоп: отступ в ПРОЦЕНТАХ — единственная единица во всей библиотеке.
+   *  Собственные единицы бирж (сотые доли процента у спота Binance, абсолютное расстояние
+   *  в цене у Bybit) заперты внутри своего клиента и наружу не выходят.
+   *  Ни один вход чтения его обратно НЕ возвращает — если значение нужно потом, хранить у себя. */
+  callbackRate?: number;
 }
 
 export interface FetchPageWithLimitArgs {
@@ -72,10 +78,18 @@ export interface FetchPageWithLimitArgs {
   limit?: number;
 }
 
-export type IncomeTypeFilter = 'funding';
+/**
+ * Что именно спрашиваем в журнале начислений. Это НАМЕРЕНИЕ, а не биржевое слово: как оно
+ * называется на конкретной бирже, решает биржевой слой.
+ * - `funding` — списания и начисления по ставке финансирования;
+ * - `realizedPnl` — реализованный итог сделок, ВАЛОВОЙ (комиссия в него не входит);
+ * - `commission` — торговая комиссия, со знаком минус когда она списана.
+ */
+export type IncomeTypeFilter = 'funding' | 'realizedPnl' | 'commission';
 
 export interface FetchIncomeArgs extends FetchPageWithLimitArgs {
   incomeType?: IncomeTypeFilter;
+  symbol?: string;
 }
 
 export type KlineHandler = (symbol: string, kline: Kline) => void;
@@ -141,6 +155,24 @@ export interface ResubscribePublicTradesArgs {
   symbol: string;
 }
 
+/**
+ * Исход постановки ОДНОЙ заявки из пачки. Записей ровно столько, сколько было заявок, и в том
+ * же порядке: биржи по-разному прячут отказ отдельной заявки (Binance выбрасывал её из ответа,
+ * Bybit возвращал «открытую» заявку с пустым номером), и оба вида молчания приводили к тому,
+ * что вызывающий считал стоп поставленным, когда его нет.
+ */
+export interface CreateOrderItemResult {
+  /** Заявка, если она действительно встала; null — не встала. */
+  order: Order | null;
+  isSuccess: boolean;
+  errorCode: number | null;
+  errorText: string | null;
+  /** Rate-limit budget snapshot from the response header (WS path), when present. */
+  rateLimit?: OrderRateLimitSnapshot;
+}
+
+export type CreateBatchOrdersResult = CreateOrderItemResult[];
+
 export interface CancelOrderItemResult {
   orderId: string;
   isSuccess: boolean;
@@ -163,7 +195,7 @@ export interface ModifyOrderItemResult {
 
 export type ModifyBatchOrdersResult = ModifyOrderItemResult[];
 
-export type OrderRateLimitSource = 'binance-exchange-info' | 'bybit-documented' | 'fallback';
+export type OrderRateLimitSource = 'binance-exchange-info' | 'bybit-exchange-header' | 'bybit-documented' | 'fallback';
 
 export interface OrderRateLimit {
   writeRequestsPerSecond: number;
@@ -208,7 +240,7 @@ export interface ExchangeClient {
   fetchOpenConditionalOrders(settleCoin: string): Promise<Order[]>;
   modifyOrder(args: ModifyOrderArgs): Promise<Order>;
   cancelAllOrders(symbol: string): Promise<void>;
-  createBatchOrders(orderList: CreateOrderWebSocketArgs[]): Promise<Order[]>;
+  createBatchOrders(orderList: CreateOrderWebSocketArgs[]): Promise<CreateBatchOrdersResult>;
   cancelBatchOrders(symbol: string, orderIdList: string[]): Promise<CancelBatchOrdersResult>;
   modifyBatchOrders(orderList: ModifyBatchOrderArgs[]): Promise<ModifyBatchOrdersResult>;
   getOrderRateLimit(): Promise<OrderRateLimit>;

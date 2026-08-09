@@ -75,6 +75,34 @@ describe('BinanceSpot', () => {
     });
   });
 
+  // Раньше защитные заявки отбирались домашним условием «цена срабатывания больше нуля»,
+  // и заявка с нулевой ценой срабатывания была невидима. Условность — свойство ТИПА заявки,
+  // а не её цены; так это устроено и на соседней бирже.
+  describe('fetchOpenConditionalOrders', () => {
+    it('finds a stop even when its trigger price is zero', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({
+        data: [{ ...BINANCE_RAW_ORDER_RESPONSE, type: 'STOP_LOSS', stopPrice: '0' }],
+      });
+
+      const result = await client.fetchOpenConditionalOrders('USDT');
+
+      expect(result).toHaveLength(1);
+      expect(result[0].isConditional).toBe(true);
+    });
+
+    it('does not mistake an ordinary limit order for a protective one', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({
+        data: [{ ...BINANCE_RAW_ORDER_RESPONSE, type: 'LIMIT', stopPrice: '0' }],
+      });
+
+      const result = await client.fetchOpenConditionalOrders('USDT');
+
+      expect(result).toHaveLength(0);
+    });
+  });
+
   describe('fetchOrderBook', () => {
     it('returns normalized order book with parsed numbers', async () => {
       const { client, mockInstance } = createClient();
@@ -226,7 +254,7 @@ describe('BinanceSpot', () => {
       onMessage({ e: 'outboundAccountPosition', E: 1700000000000, B: [{ a: 'USDT', f: '100.5', l: '0.5' }] });
 
       expect(handler.onBalanceUpdate).toHaveBeenCalledWith({
-        balanceList: [{ asset: 'USDT', free: 100.5, locked: 0.5 }],
+        balanceList: [{ asset: 'USDT', free: 100.5, locked: 0.5, total: null }],
         timestamp: 1700000000000,
       });
     });

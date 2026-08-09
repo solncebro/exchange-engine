@@ -114,9 +114,13 @@ describe('buildBinanceOrderParams — futures', () => {
     expect(params.positionSide).toBeUndefined();
   });
 
-  it('SL StopMarket hedge long → STOP_MARKET + workingType', () => {
+  // С 09.12.2025 условные заявки фьючерсов собираются ОТДЕЛЬНОЙ функцией под Algo-службу.
+  // Общий сборщик обязан их отвергать: собранный им запрос биржа отобьёт кодом -4120,
+  // а молчаливо кривой запрос хуже громкого отказа.
+  it('refuses to build a futures stop order for the plain endpoint', () => {
     const client = createBinanceFutures();
-    const params = callBinanceBuild(client, {
+
+    expect(() => callBinanceBuild(client, {
       symbol: 'BTCUSDT',
       side: OrderSideEnum.Sell,
       amount: 1,
@@ -125,24 +129,35 @@ describe('buildBinanceOrderParams — futures', () => {
       stopPrice: 90,
       workingType: WorkingTypeEnum.MarkPrice,
       positionSide: PositionSideEnum.Long,
-    });
-    expect(params.type).toBe('STOP_MARKET');
-    expect(params.stopPrice).toBe('90');
-    expect(params.workingType).toBe('MARK_PRICE');
-    expect(params.positionSide).toBe('LONG');
+    })).toThrow(/must go to the conditional service/);
   });
 
-  it('TP TakeProfitMarket → TAKE_PROFIT_MARKET on futures', () => {
+  it('refuses to build a futures take-profit order for the plain endpoint', () => {
     const client = createBinanceFutures();
-    const params = callBinanceBuild(client, {
+
+    expect(() => callBinanceBuild(client, {
       symbol: 'BTCUSDT',
       side: OrderSideEnum.Sell,
       amount: 1,
       price: 0,
       type: OrderTypeEnum.TakeProfitMarket,
       stopPrice: 110,
+    })).toThrow(/must go to the conditional service/);
+  });
+
+  it('never leaks the spot-only trailing delta onto a futures request', () => {
+    // Раньше уходил без всякого ограждения — параметра с таким именем у фьючерсов нет.
+    const client = createBinanceFutures();
+    const params = callBinanceBuild(client, {
+      symbol: 'BTCUSDT',
+      side: OrderSideEnum.Buy,
+      amount: 1,
+      price: 100,
+      type: OrderTypeEnum.Limit,
+      callbackRate: 0.5,
     });
-    expect(params.type).toBe('TAKE_PROFIT_MARKET');
+
+    expect(params.trailingDelta).toBeUndefined();
   });
 });
 
@@ -238,7 +253,7 @@ describe('buildBinanceOrderParams — spot', () => {
     expect(params.quantity).toBeUndefined();
   });
 
-  it('Spot trailingDelta passed through', () => {
+  it('Spot trailing offset is stated in percent and converted at the boundary (Binance spot counts it in its own hundredths)', () => {
     const client = createBinanceSpot();
     const params = callBinanceBuild(client, {
       symbol: 'BTCUSDT',
@@ -246,9 +261,34 @@ describe('buildBinanceOrderParams — spot', () => {
       amount: 1,
       price: 0,
       type: OrderTypeEnum.StopMarket,
-      trailingDelta: 50,
+      callbackRate: 1,
     });
-    expect(params.trailingDelta).toBe('50');
+    expect(params.trailingDelta).toBe('100');
+  });
+
+  it('Spot trailing offset keeps sub-percent precision through the conversion', () => {
+    const client = createBinanceSpot();
+    const params = callBinanceBuild(client, {
+      symbol: 'BTCUSDT',
+      side: OrderSideEnum.Sell,
+      amount: 1,
+      price: 0,
+      type: OrderTypeEnum.StopMarket,
+      callbackRate: 0.15,
+    });
+    expect(params.trailingDelta).toBe('15');
+  });
+
+  it('Spot order without a trailing offset carries no trailing field at all', () => {
+    const client = createBinanceSpot();
+    const params = callBinanceBuild(client, {
+      symbol: 'BTCUSDT',
+      side: OrderSideEnum.Sell,
+      amount: 1,
+      price: 0,
+      type: OrderTypeEnum.StopMarket,
+    });
+    expect(params.trailingDelta).toBeUndefined();
   });
 });
 
@@ -346,6 +386,82 @@ describe('buildBybitOrderParams — linear (futures)', () => {
     });
     expect(params.positionIdx).toBeUndefined();
   });
+
+  it('closePosition on a stop: qty=0 with reduceOnly and closeOnTrigger (Bybit way to close the whole position)', () => {
+    const client = createBybitLinear();
+    const params = callBybitBuild(client, {
+      symbol: 'BTCUSDT',
+      side: OrderSideEnum.Buy,
+      amount: 3,
+      price: 0,
+      type: OrderTypeEnum.StopMarket,
+      stopPrice: 110,
+      closePosition: true,
+    });
+    expect(params.qty).toBe('0');
+    expect(params.reduceOnly).toBe(true);
+    expect(params.closeOnTrigger).toBe(true);
+  });
+
+  it('closePosition wins over an explicit reduceOnly=false: a closing order can never grow the position', () => {
+    const client = createBybitLinear();
+    const params = callBybitBuild(client, {
+      symbol: 'BTCUSDT',
+      side: OrderSideEnum.Buy,
+      amount: 3,
+      price: 0,
+      type: OrderTypeEnum.StopMarket,
+      stopPrice: 110,
+      closePosition: true,
+      reduceOnly: false,
+    });
+    expect(params.qty).toBe('0');
+    expect(params.reduceOnly).toBe(true);
+    expect(params.closeOnTrigger).toBe(true);
+  });
+
+  it('workingType alone still selects the trigger price type (consumers may speak either dialect)', () => {
+    const client = createBybitLinear();
+    const params = callBybitBuild(client, {
+      symbol: 'BTCUSDT',
+      side: OrderSideEnum.Buy,
+      amount: 1,
+      price: 0,
+      type: OrderTypeEnum.StopMarket,
+      stopPrice: 110,
+      workingType: WorkingTypeEnum.ContractPrice,
+    });
+    expect(params.triggerBy).toBe(TriggerByEnum.LastPrice);
+  });
+
+  it('workingType markPrice maps to the mark price trigger', () => {
+    const client = createBybitLinear();
+    const params = callBybitBuild(client, {
+      symbol: 'BTCUSDT',
+      side: OrderSideEnum.Buy,
+      amount: 1,
+      price: 0,
+      type: OrderTypeEnum.StopMarket,
+      stopPrice: 110,
+      workingType: WorkingTypeEnum.MarkPrice,
+    });
+    expect(params.triggerBy).toBe(TriggerByEnum.MarkPrice);
+  });
+
+  it('explicit triggerBy outranks workingType', () => {
+    const client = createBybitLinear();
+    const params = callBybitBuild(client, {
+      symbol: 'BTCUSDT',
+      side: OrderSideEnum.Buy,
+      amount: 1,
+      price: 0,
+      type: OrderTypeEnum.StopMarket,
+      stopPrice: 110,
+      triggerBy: TriggerByEnum.LastPrice,
+      workingType: WorkingTypeEnum.MarkPrice,
+    });
+    expect(params.triggerBy).toBe(TriggerByEnum.LastPrice);
+  });
 });
 
 describe('buildBybitOrderParams — spot', () => {
@@ -418,6 +534,44 @@ describe('buildBybitOrderParams — spot', () => {
     expect(params.triggerPrice).toBe('90');
     expect(params.orderFilter).toBe('StopOrder');
   });
+
+  it('Spot Market with quoteOrderQty defaults marketUnit to quoteCoin: "buy for 100 dollars" must not become "buy 100 coins"', () => {
+    const client = createBybitSpot();
+    const params = callBybitBuild(client, {
+      symbol: 'BTCUSDT',
+      side: OrderSideEnum.Buy,
+      amount: 0,
+      price: 0,
+      type: OrderTypeEnum.Market,
+      quoteOrderQty: 100,
+    });
+    expect(params.qty).toBe('100');
+    expect(params.marketUnit).toBe(MarketUnitEnum.QuoteCoin);
+  });
+
+  it('Spot Market sized in coins defaults marketUnit to baseCoin', () => {
+    const client = createBybitSpot();
+    const params = callBybitBuild(client, {
+      symbol: 'BTCUSDT',
+      side: OrderSideEnum.Buy,
+      amount: 2,
+      price: 0,
+      type: OrderTypeEnum.Market,
+    });
+    expect(params.marketUnit).toBe(MarketUnitEnum.BaseCoin);
+  });
+
+  it('marketUnit stays absent on a limit order: the unit only exists for spot market orders', () => {
+    const client = createBybitSpot();
+    const params = callBybitBuild(client, {
+      symbol: 'BTCUSDT',
+      side: OrderSideEnum.Buy,
+      amount: 2,
+      price: 100,
+      type: OrderTypeEnum.Limit,
+    });
+    expect(params.marketUnit).toBeUndefined();
+  });
 });
 
 describe('buildBinanceOrderParams — timeInForce mapping', () => {
@@ -463,5 +617,47 @@ describe('buildBinanceOrderParams — timeInForce mapping', () => {
 
     expect(params.type).toBe('LIMIT_MAKER');
     expect(params.timeInForce).toBeUndefined();
+  });
+});
+
+// Проверено по данным биржи 08.08.2026: единственный признак, разрешающий сумму в котируемой
+// валюте, называется «разрешено для РЫНОЧНЫХ» — лимитного соответствия у него нет. Раньше
+// обе биржи молча принимали такую сумму и на лимитной заявке: Binance отправлял заявку вовсе
+// без объёма, Bybit — принимал сумму денег за количество монет.
+describe('amount stated in quote currency belongs to market orders only', () => {
+  it('Binance spot refuses it on a limit order instead of sending an order with no size', () => {
+    const client = createBinanceSpot();
+
+    expect(() => callBinanceBuild(client, {
+      symbol: 'BTCUSDT',
+      side: OrderSideEnum.Buy,
+      amount: 0,
+      price: 100,
+      type: OrderTypeEnum.Limit,
+      quoteOrderQty: 100,
+    })).toThrow(/market/i);
+  });
+
+  it('Bybit spot refuses it on a limit order instead of buying that many coins', () => {
+    const client = createBybitSpot();
+
+    expect(() => callBybitBuild(client, {
+      symbol: 'BTCUSDT',
+      side: OrderSideEnum.Buy,
+      amount: 0,
+      price: 100,
+      type: OrderTypeEnum.Limit,
+      quoteOrderQty: 100,
+    })).toThrow(/market/i);
+  });
+
+  it('both still accept it on a market order', () => {
+    expect(callBinanceBuild(createBinanceSpot(), {
+      symbol: 'BTCUSDT', side: OrderSideEnum.Buy, amount: 0, price: 0, type: OrderTypeEnum.Market, quoteOrderQty: 100,
+    }).quoteOrderQty).toBe('100');
+
+    expect(callBybitBuild(createBybitSpot(), {
+      symbol: 'BTCUSDT', side: OrderSideEnum.Buy, amount: 0, price: 0, type: OrderTypeEnum.Market, quoteOrderQty: 100,
+    }).qty).toBe('100');
   });
 });

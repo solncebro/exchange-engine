@@ -447,4 +447,66 @@ describe('BinanceFuturesPublicStream', () => {
       expect(streamNameList).toContain('!markPrice@arr@1s');
     });
   });
+
+  // Потока стакана у фьючерсов Binance не было вовсе — подписка честно отказывала, а
+  // переподписка и пометка «живого» символа молча ничего не делали. Биржа поток даёт;
+  // это была наша незаконченная работа.
+  describe('subscribeOrderbook', () => {
+    const buildDepthFrame = (updateId: number) => ({
+      e: 'depthUpdate',
+      E: 1700000000000,
+      s: 'BTCUSDT',
+      U: updateId - 1,
+      u: updateId,
+      b: [['49999.5', '2']],
+      a: [['50000.5', '1.5']],
+    });
+
+    it('subscribes to the exchange depth stream for the requested symbol and depth', async () => {
+      const stream = createStreamForTest({ url, mockLogger });
+      stream.subscribeOrderbook('BTCUSDT', 20, jest.fn());
+
+      await flushAsync();
+
+      // @ts-expect-error — read private method for test
+      const streamNameList = stream.buildOrderbookStreamList();
+      expect(streamNameList).toContain('btcusdt@depth20@100ms');
+    });
+
+    it('delivers the book to the handler in the shape both exchanges share', async () => {
+      const stream = createStreamForTest({ url, mockLogger });
+      const received: unknown[] = [];
+      stream.subscribeOrderbook('BTCUSDT', 20, (symbol, update) => received.push([symbol, update]));
+
+      await flushAsync();
+      capturedOnMessage?.({ stream: 'btcusdt@depth20@100ms', data: buildDepthFrame(160) });
+
+      expect(received).toHaveLength(1);
+      const [symbol, update] = received[0] as [string, Record<string, unknown>];
+      expect(symbol).toBe('BTCUSDT');
+      expect(update.bidList).toEqual([['49999.5', '2']]);
+      expect(update.askList).toEqual([['50000.5', '1.5']]);
+      expect(update.updateId).toBe(160);
+      // Поток «частичной глубины» присылает готовый срез верхних уровней, а не поправку.
+      expect(update.updateType).toBe('snapshot');
+    });
+
+    it('stops delivering after the last handler is gone', async () => {
+      const stream = createStreamForTest({ url, mockLogger });
+      const handler = jest.fn();
+      stream.subscribeOrderbook('BTCUSDT', 20, handler);
+
+      await flushAsync();
+      stream.unsubscribeOrderbook('BTCUSDT', 20, handler);
+      capturedOnMessage?.({ stream: 'btcusdt@depth20@100ms', data: buildDepthFrame(161) });
+
+      expect(handler).not.toHaveBeenCalled();
+    });
+
+    it('refuses a depth the exchange does not serve instead of quietly giving another one', () => {
+      const stream = createStreamForTest({ url, mockLogger });
+
+      expect(() => stream.subscribeOrderbook('BTCUSDT', 200, jest.fn())).toThrow(/depth/i);
+    });
+  });
 });

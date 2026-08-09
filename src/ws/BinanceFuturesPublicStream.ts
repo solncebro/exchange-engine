@@ -1,16 +1,18 @@
 import { ReliableWebSocket, WebSocketStatus } from '@solncebro/websocket-engine';
 
-import type { ExchangeLogger, KlineInterval, MarkPriceHandler, PublicTradeHandler, TickerBySymbol, TradeSymbolBySymbol, WebSocketConnectionInfo } from '../types/common';
+import type { ExchangeLogger, KlineInterval, MarkPriceHandler, OrderBookHandler, PublicTradeHandler, TickerBySymbol, TradeSymbolBySymbol, WebSocketConnectionInfo } from '../types/common';
 import { WebSocketConnectionTypeEnum } from '../types/common';
 import type { KlineHandler } from '../types/exchange';
 import {
   normalizeBinanceAggTradeFromStream,
   normalizeBinanceKlineWebSocketMessage,
   normalizeBinanceMarkPriceWebSocketList,
+  normalizeBinanceOrderBookUpdate,
   normalizeBinanceTickers,
 } from '../normalizers/binanceNormalizer';
 import type {
   BinanceAggTradeWebSocketRaw,
+  BinanceDepthWebSocketRaw,
   BinanceMarkPriceWebSocketRaw,
   BinanceTicker24hrRaw,
   BinanceWebSocketKlineRaw,
@@ -30,6 +32,7 @@ const DEFAULT_PAUSE_BETWEEN_SUBSCRIBE_BATCHES_MS = 200;
 const DEFAULT_MAX_STREAMS_PER_CONNECTION = 900;
 const NON_KLINE_GROUP_KEY = 'tickers-markprices';
 const AGGTRADE_GROUP_KEY = 'aggTrades';
+const ORDERBOOK_GROUP_KEY = 'orderbooks';
 const BINANCE_PING_REQUEST_ID = 1_000_000;
 
 const buildIntervalGroupKey = (interval: string): string =>
@@ -73,6 +76,16 @@ function buildAggTradeStreamName(symbol: string): string {
   return `${symbol.toLowerCase()}@aggTrade`;
 }
 
+/**
+ * Глубины, которые биржа отдаёт готовым срезом верхних уровней. Просьбу о другой глубине
+ * отклоняем: молча подсунуть иную — та самая тихая подмена, от которой мы уходим.
+ */
+const BINANCE_PARTIAL_DEPTH_LEVEL_SET: ReadonlySet<number> = new Set([5, 10, 20]);
+
+function buildDepthStreamName(symbol: string, depth: number): string {
+  return `${symbol.toLowerCase()}@depth${depth}@100ms`;
+}
+
 function toAggTradeRaw(record: Record<string, unknown>): BinanceAggTradeWebSocketRaw | null {
   if (record['e'] !== 'aggTrade' || record['s'] === undefined) {
     return null;
@@ -108,6 +121,7 @@ class BinanceFuturesPublicStream {
   private readonly markPriceHandlerSet: Set<MarkPriceHandler> = new Set();
   private readonly klineHandlerByKey: Map<string, Set<KlineHandler>> = new Map();
   private readonly publicTradeHandlerBySymbol: Map<string, Set<PublicTradeHandler>> = new Map();
+  private readonly orderBookHandlerByStream: Map<string, Set<OrderBookHandler>> = new Map();
   private readonly connectionList: FuturesConnection[] = [];
   private isConnectScheduled = false;
   private subscriptionIdCounter = 1;
@@ -239,6 +253,46 @@ class BinanceFuturesPublicStream {
     this.resubscribeStreamByName(buildAggTradeStreamName(symbol));
   }
 
+  subscribeOrderbook(symbol: string, depth: number, handler: OrderBookHandler): void {
+    if (!BINANCE_PARTIAL_DEPTH_LEVEL_SET.has(depth)) {
+      throw new Error(
+        `Binance futures serves the order book at depth ${[...BINANCE_PARTIAL_DEPTH_LEVEL_SET].join(', ')} — ${depth} is not available`,
+      );
+    }
+
+    const stream = buildDepthStreamName(symbol, depth);
+    const handlerSet = this.orderBookHandlerByStream.get(stream) ?? new Set<OrderBookHandler>();
+
+    handlerSet.add(handler);
+    this.orderBookHandlerByStream.set(stream, handlerSet);
+
+    if (this.connectionList.length > 0) {
+      this.addOrderbookStream(stream);
+    } else {
+      this.scheduleConnect();
+    }
+  }
+
+  unsubscribeOrderbook(symbol: string, depth: number, handler: OrderBookHandler): void {
+    const stream = buildDepthStreamName(symbol, depth);
+    const handlerSet = this.orderBookHandlerByStream.get(stream);
+
+    if (!handlerSet) {
+      return;
+    }
+
+    handlerSet.delete(handler);
+
+    if (handlerSet.size === 0) {
+      this.orderBookHandlerByStream.delete(stream);
+      this.removeStreamFromConnection(stream);
+    }
+  }
+
+  resubscribeOrderbook(symbol: string, depth: number): void {
+    this.resubscribeStreamByName(buildDepthStreamName(symbol, depth));
+  }
+
   resubscribeStream(symbol: string, interval: string): void {
     this.resubscribeStreamByName(buildStreamName(symbol, interval, this.tradeSymbols));
   }
@@ -366,11 +420,41 @@ class BinanceFuturesPublicStream {
     );
   }
 
+  private buildOrderbookStreamList(): string[] {
+    return [...this.orderBookHandlerByStream.keys()];
+  }
+
+  private handleDepthMessage(stream: string, record: Record<string, unknown>): void {
+    const handlerSet = this.orderBookHandlerByStream.get(stream);
+
+    if (!handlerSet || handlerSet.size === 0) {
+      return;
+    }
+
+    const symbol = typeof record['s'] === 'string' ? record['s'] : '';
+
+    if (symbol === '') {
+      return;
+    }
+
+    const update = normalizeBinanceOrderBookUpdate(
+      record as unknown as BinanceDepthWebSocketRaw,
+      symbol,
+      Date.now(),
+    );
+
+    for (const handler of handlerSet) {
+      handler(symbol, update);
+    }
+  }
+
   private async createConnections(): Promise<void> {
     const streamListByInterval = this.buildStreamListByInterval();
     const nonKlineStreamList = this.buildNonKlineStreamList();
     const aggTradeStreamList = this.buildAggTradeStreamList();
-    let totalStreamCount = nonKlineStreamList.length + aggTradeStreamList.length;
+    const orderbookStreamList = this.buildOrderbookStreamList();
+    let totalStreamCount =
+      nonKlineStreamList.length + aggTradeStreamList.length + orderbookStreamList.length;
 
     for (const [, streamList] of streamListByInterval) {
       totalStreamCount += streamList.length;
@@ -398,6 +482,18 @@ class BinanceFuturesPublicStream {
       this.createConnection({
         streamList: aggTradeStreamList,
         groupKey: AGGTRADE_GROUP_KEY,
+      });
+      isFirstConnection = false;
+    }
+
+    if (orderbookStreamList.length > 0) {
+      if (!isFirstConnection && this.pauseBetweenConnectionsMs > 0) {
+        await pause(this.pauseBetweenConnectionsMs);
+      }
+
+      this.createConnection({
+        streamList: orderbookStreamList,
+        groupKey: ORDERBOOK_GROUP_KEY,
       });
       isFirstConnection = false;
     }
@@ -768,6 +864,29 @@ class BinanceFuturesPublicStream {
     this.sendDynamicSubscribe(targetConnection, stream);
   }
 
+  private addOrderbookStream(stream: string): void {
+    this.addStreamToGroup(stream, ORDERBOOK_GROUP_KEY);
+  }
+
+  private addStreamToGroup(stream: string, groupKey: string): void {
+    const targetConnection = this.connectionList.find(
+      (connection) => connection.groupKey === groupKey,
+    );
+
+    if (!targetConnection) {
+      this.createConnection({ streamList: [stream], groupKey });
+
+      return;
+    }
+
+    if (targetConnection.streamList.includes(stream)) {
+      return;
+    }
+
+    targetConnection.streamList.push(stream);
+    this.sendDynamicSubscribe(targetConnection, stream);
+  }
+
   private addAggTradeStream(stream: string): void {
     const targetConnection = this.connectionList.find(
       (connection) => connection.groupKey === AGGTRADE_GROUP_KEY,
@@ -1014,6 +1133,12 @@ class BinanceFuturesPublicStream {
 
     if (message.stream && message.stream.includes('@aggTrade')) {
       this.handleAggTradeMessage(message.data as Record<string, unknown>);
+
+      return;
+    }
+
+    if (message.stream && message.stream.includes('@depth')) {
+      this.handleDepthMessage(message.stream, message.data as Record<string, unknown>);
 
       return;
     }

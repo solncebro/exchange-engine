@@ -98,14 +98,14 @@ describe('BybitTradeStream batch operations', () => {
       const result = await promise;
 
       expect(result).toHaveLength(2);
-      expect(result[0].id).toBe('o-1');
-      expect(result[0].symbol).toBe('BTCUSDT');
-      expect(result[0].type).toBe(OrderTypeEnum.Market);
-      expect(result[0].side).toBe(OrderSideEnum.Buy);
-      expect(result[1].id).toBe('o-2');
-      expect(result[1].symbol).toBe('BTCUSDT');
-      expect(result[1].type).toBe(OrderTypeEnum.Limit);
-      expect(result[1].side).toBe(OrderSideEnum.Sell);
+      expect(result[0].order?.id).toBe('o-1');
+      expect(result[0].order?.symbol).toBe('BTCUSDT');
+      expect(result[0].order?.type).toBe(OrderTypeEnum.Market);
+      expect(result[0].order?.side).toBe(OrderSideEnum.Buy);
+      expect(result[1].order?.id).toBe('o-2');
+      expect(result[1].order?.symbol).toBe('BTCUSDT');
+      expect(result[1].order?.type).toBe(OrderTypeEnum.Limit);
+      expect(result[1].order?.side).toBe(OrderSideEnum.Sell);
       expect((stream as any).pendingBatchContextByReqId.size).toBe(0);
     });
 

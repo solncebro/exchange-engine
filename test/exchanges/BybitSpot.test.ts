@@ -11,11 +11,11 @@ import {
   BYBIT_RAW_PUBLIC_TRADE_LIST,
   BYBIT_RAW_FEE_RATE_LIST,
   BYBIT_RAW_TRANSACTION_LOG_LIST,
-  BYBIT_RAW_CLOSED_PNL_LIST,
   BYBIT_RAW_AMEND_BATCH_RESPONSE,
 } from '../fixtures/bybitRaw';
 import { BTCUSDT_SPOT_TRADE_SYMBOL } from '../fixtures/mockTradeSymbol';
 import { OrderTypeEnum, OrderSideEnum, MarginModeEnum, PositionSideEnum } from '../../src/types/common';
+import { ExchangeError } from '../../src/errors/ExchangeError';
 
 jest.mock('axios');
 jest.mock('../../src/ws/BybitPublicStream');
@@ -75,6 +75,48 @@ describe('BybitSpot', () => {
       const [, body] = mockInstance.post.mock.calls[0];
 
       expect(body.marketUnit).toBeUndefined();
+    });
+  });
+
+  describe('trailing stop', () => {
+    it('refuses loudly instead of quietly placing a plain market stop: Bybit spot has no trailing at all', async () => {
+      const { client, mockInstance } = createClient(true);
+      client.tradeSymbols.set('BTCUSDT', BTCUSDT_SPOT_TRADE_SYMBOL);
+      mockInstance.post.mockClear();
+
+      await expect(
+        client.createOrderWebSocket({
+          symbol: 'BTCUSDT',
+          type: OrderTypeEnum.TrailingStop,
+          side: OrderSideEnum.Sell,
+          amount: 0.001,
+          callbackRate: 2,
+        }),
+      ).rejects.toThrow(ExchangeError);
+
+      expect(mockInstance.post).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('createBatchOrders — spot market unit', () => {
+    it('carries marketUnit into every batched market order: the batch path must not silently turn "buy for 100 dollars" into "buy 100 coins"', async () => {
+      const { client, mockInstance } = createClient(true);
+      client.tradeSymbols.set('BTCUSDT', BTCUSDT_SPOT_TRADE_SYMBOL);
+
+      mockInstance.post.mockResolvedValue({
+        data: { retCode: 0, result: { list: [{ orderId: '1' }, { orderId: '2' }] } },
+      });
+
+      await client.createBatchOrders([
+        { symbol: 'BTCUSDT', type: OrderTypeEnum.Market, side: OrderSideEnum.Buy, amount: 0, quoteOrderQty: 100 },
+        { symbol: 'BTCUSDT', type: OrderTypeEnum.Market, side: OrderSideEnum.Sell, amount: 0.001 },
+      ]);
+
+      const [, body] = mockInstance.post.mock.calls[0];
+
+      expect(body.request[0].qty).toBe('100');
+      expect(body.request[0].marketUnit).toBe('quoteCoin');
+      expect(body.request[1].marketUnit).toBe('baseCoin');
     });
   });
 
@@ -344,8 +386,8 @@ describe('BybitSpot', () => {
       ]);
 
       expect(result).toHaveLength(1);
-      expect(result[0].id).toBe('batch-1');
-      expect(result[0].symbol).toBe('BTCUSDT');
+      expect(result[0].order?.id).toBe('batch-1');
+      expect(result[0].order?.symbol).toBe('BTCUSDT');
     });
   });
 
@@ -480,8 +522,8 @@ describe('BybitSpot', () => {
       expect(mockInstance.post.mock.calls[0][1].request).toHaveLength(10);
       expect(mockInstance.post.mock.calls[1][1].request).toHaveLength(2);
       expect(result).toHaveLength(12);
-      expect(result[0].id).toBe('id-1');
-      expect(result[11].id).toBe('id-12');
+      expect(result[0].order?.id).toBe('id-1');
+      expect(result[11].order?.id).toBe('id-12');
     });
 
     it('returns empty array on empty input without HTTP call', async () => {
@@ -540,22 +582,15 @@ describe('BybitSpot', () => {
   });
 
   describe('fetchClosedPnl', () => {
-    it('returns normalized closed PnL list', async () => {
+    // Проверено живым запросом 08.08.2026: на спотовую категорию биржа отвечает отказом
+    // «Closed pnl not support category». Прямой отказ понятнее биржевого кода и совпадает
+    // с тем, что отвечает спот соседней биржи.
+    it('says plainly that spot has no closed PnL instead of leaking an exchange code', async () => {
       const { client, mockInstance } = createClient();
-      mockInstance.get.mockResolvedValue({
-        data: { retCode: 0, result: { list: BYBIT_RAW_CLOSED_PNL_LIST } },
-      });
+      mockInstance.get.mockClear();
 
-      const result = await client.fetchClosedPnl();
-
-      expect(result).toHaveLength(1);
-      expect(result[0].symbol).toBe('BTCUSDT');
-      expect(result[0].orderId).toBe('order-1');
-      expect(result[0].side).toBe(OrderSideEnum.Buy);
-      expect(result[0].quantity).toBe(0.1);
-      expect(result[0].entryPrice).toBe(64000);
-      expect(result[0].exitPrice).toBe(65000);
-      expect(result[0].closedPnl).toBe(100);
+      await expect(client.fetchClosedPnl()).rejects.toThrow('Not supported for spot market');
+      expect(mockInstance.get).not.toHaveBeenCalled();
     });
   });
 

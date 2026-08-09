@@ -1,5 +1,6 @@
 import type {
   CancelBatchOrdersResult,
+  CreateBatchOrdersResult,
   CreateOrderWebSocketArgs,
   FetchIncomeArgs,
   FetchPageWithLimitArgs,
@@ -25,7 +26,9 @@ import type {
   OrderUpdateEvent,
   PositionUpdateEvent,
 } from '../types/common';
-import { OrderTypeEnum, OrderSideEnum, PositionSideEnum, OrderFilterEnum } from '../types/common';
+import { OrderTypeEnum, OrderSideEnum, PositionSideEnum, OrderFilterEnum, MarketUnitEnum } from '../types/common';
+import { isConditionalOrderType } from '../constants/orderTypes';
+import { ExchangeError } from '../errors/ExchangeError';
 import type { PublicStreamLike } from '../types/stream';
 import { BybitHttpClient } from '../http/BybitHttpClient';
 import {
@@ -39,6 +42,8 @@ import {
   normalizeBybitFeeRateList,
   normalizeBybitClosedPnlList,
   normalizeBybitIncomeList,
+  buildBybitCreateOutcome,
+  buildBybitCommissionIncomeList,
   buildBybitOrderFromCreateResponse,
 } from '../normalizers/bybitNormalizer';
 import { BybitPublicStream } from '../ws/BybitPublicStream';
@@ -46,6 +51,7 @@ import { BybitTradeStream } from '../ws/BybitTradeStream';
 import { BybitPrivateStream } from '../ws/BybitPrivateStream';
 import {
   BYBIT_KLINE_INTERVAL,
+  BYBIT_KLINE_INTERVAL_MS,
   BYBIT_BASE_URL,
   BYBIT_DEMO_BASE_URL,
   BYBIT_TRADE_WEBSOCKET_URL,
@@ -53,12 +59,39 @@ import {
   BYBIT_DEMO_PRIVATE_WEBSOCKET_URL,
   BYBIT_TRANSACTION_LOG_MAX_LIMIT,
 } from '../constants/bybit';
-import { BYBIT_ORDER_STATUS } from '../constants/mappings';
+import { BYBIT_ORDER_STATUS, BYBIT_WORKING_TYPE_TRIGGER_BY } from '../constants/mappings';
 import { chunkList as chunkListUtil } from '../utils/chunkList';
 import { BaseExchangeClient } from './BaseExchangeClient';
 import type { BybitBaseClientArgs } from './BybitBaseClient.types';
 
 const BYBIT_FUNDING_INCOME_TYPE_SET = new Set(['FUNDING', 'SETTLEMENT']);
+
+/** Записи, несущие реализованный итог сделки: поток денег по ним и есть этот итог. */
+const BYBIT_TRADE_INCOME_TYPE_SET = new Set(['TRADE', 'SETTLEMENT']);
+
+/** Стоп-подобные типы: срабатывают, когда цена ДОХОДИТ до уровня со стороны позиции. */
+const BYBIT_STOP_LIKE_ORDER_TYPE_SET: ReadonlySet<OrderTypeEnum> = new Set([
+  OrderTypeEnum.StopMarket,
+  OrderTypeEnum.StopLimit,
+  OrderTypeEnum.Stop,
+  OrderTypeEnum.TrailingStop,
+]);
+
+/**
+ * С какой стороны цена подходит к уровню срабатывания: 1 — снизу вверх, 2 — сверху вниз.
+ * Выводится из типа и стороны заявки, других сведений для этого не нужно:
+ *   стоп + покупка  = закрываем шорт, цена растёт  -> 1
+ *   стоп + продажа  = закрываем лонг,  цена падает -> 2
+ *   тейк + покупка  = закрываем шорт, цена падает  -> 2
+ *   тейк + продажа  = закрываем лонг,  цена растёт -> 1
+ */
+function resolveBybitTriggerDirection(type: OrderTypeEnum, side: OrderSideEnum): 1 | 2 {
+  const isRisingToTrigger = BYBIT_STOP_LIKE_ORDER_TYPE_SET.has(type)
+    ? side === OrderSideEnum.Buy
+    : side === OrderSideEnum.Sell;
+
+  return isRisingToTrigger ? 1 : 2;
+}
 
 abstract class BybitBaseClient extends BaseExchangeClient {
   protected readonly exchangeLabel = 'Bybit';
@@ -100,6 +133,13 @@ abstract class BybitBaseClient extends BaseExchangeClient {
     });
 
     if (isDemoMode) {
+      // Торгового канала в демо у Bybit нет — так решила биржа («WS Trade is not supported»
+      // в её документации по демо-торговле), обойти это нечем. Но следствие обязано быть
+      // видимым: проверенное в демо в бою пойдёт ДРУГИМ путём — обычными запросами вместо
+      // канала, — и разницы в поведении под нагрузкой демо не покажет.
+      args.exchangeArgs.logger.warn(
+        `[Bybit] Demo mode has no order WebSocket — orders go over plain requests, unlike production (${args.tradeStreamLabel})`,
+      );
       this.tradeStream = null;
     } else {
       this.tradeStream = new BybitTradeStream({
@@ -151,7 +191,7 @@ abstract class BybitBaseClient extends BaseExchangeClient {
       options,
     });
 
-    return normalizeBybitKlines(raw.result.list);
+    return normalizeBybitKlines(raw.result.list, BYBIT_KLINE_INTERVAL_MS[interval]);
   }
 
   protected async fetchAndNormalizeBalances(): Promise<AccountBalances> {
@@ -163,6 +203,20 @@ abstract class BybitBaseClient extends BaseExchangeClient {
   protected buildBybitOrderParams(args: CreateOrderWebSocketArgs): Record<string, unknown> {
     const isSpot = this.category === 'spot';
     const isLinear = this.category === 'linear';
+
+    // Скольжение у Bybit живёт на позиции, а не в книге заявок, и обычной заявкой не
+    // выражается вовсе. Раньше такой запрос молча собирался в рыночный стоп — потребитель
+    // просил вести стоп за ценой и получал неподвижный. Отказ здесь закрывает и пакетный
+    // путь: он зовёт этот сборщик напрямую.
+    if (args.type === OrderTypeEnum.TrailingStop) {
+      throw new ExchangeError(
+        isSpot
+          ? 'Bybit spot has no trailing stop at all — there is nothing to fall back to'
+          : 'Bybit: a trailing stop is a position property, not an order — createOrderWebSocket handles it',
+        isSpot ? 'TRAILING_STOP_UNSUPPORTED' : 'TRAILING_STOP_WRONG_ENDPOINT',
+        'bybit',
+      );
+    }
 
     const isLimitLike =
       args.type === OrderTypeEnum.Limit ||
@@ -178,7 +232,27 @@ abstract class BybitBaseClient extends BaseExchangeClient {
       side: args.side === OrderSideEnum.Buy ? 'Buy' : 'Sell',
     };
 
-    if (isSpot && args.quoteOrderQty !== undefined && args.quoteOrderQty > 0) {
+    // «Закрыть всю позицию» Bybit выражает нулевым объёмом, но принимает его ТОЛЬКО вместе
+    // с двумя признаками закрывающей заявки (документация create-order, раздел qty). Без
+    // такой сборки намерение просто терялось, стоп становился заявкой фиксированного объёма,
+    // и подросшая позиция оставалась без защиты.
+    const isClosePosition = isLinear && args.closePosition === true;
+
+    // Сумма в котируемой валюте — свойство РЫНОЧНОЙ заявки: она измеряется единицей, которую
+    // биржа принимает только там. На лимитной та же сумма стала бы количеством монет.
+    const isQuoteSized = isSpot && args.quoteOrderQty !== undefined && args.quoteOrderQty > 0;
+
+    if (isQuoteSized && args.type !== OrderTypeEnum.Market) {
+      throw new ExchangeError(
+        'Bybit spot accepts an amount in quote currency on MARKET orders only',
+        'QUOTE_AMOUNT_MARKET_ONLY',
+        'bybit',
+      );
+    }
+
+    if (isClosePosition) {
+      orderParams.qty = '0';
+    } else if (isQuoteSized) {
       orderParams.qty = String(args.quoteOrderQty);
     } else {
       orderParams.qty = String(this.amountToPrecision(args.symbol, args.amount));
@@ -195,20 +269,45 @@ abstract class BybitBaseClient extends BaseExchangeClient {
       orderParams.triggerPrice = String(this.priceToPrecision(args.symbol, args.stopPrice));
     }
 
-    if (!isSpot && args.triggerDirection !== undefined) {
-      orderParams.triggerDirection = args.triggerDirection;
+    const isConditional = isConditionalOrderType(args.type);
+
+    // С какой стороны цена подходит к уровню — сведения, которые здесь уже есть: у стопа
+    // заявка на покупку означает «цена растёт до уровня», на продажу — «падает»; у тейка
+    // наоборот. Раньше это вычислял потребитель, то есть держал у себя знание об устройстве
+    // одной конкретной биржи. Явно переданное значение по-прежнему главнее.
+    const triggerDirection = args.triggerDirection
+      ?? (isConditional ? resolveBybitTriggerDirection(args.type, args.side) : undefined);
+
+    if (!isSpot && triggerDirection !== undefined) {
+      orderParams.triggerDirection = triggerDirection;
     }
 
-    if (!isSpot && args.triggerBy !== undefined) {
-      orderParams.triggerBy = args.triggerBy;
+    // По какой цене сверять срабатывание, потребитель может выразить любым из двух полей —
+    // понимаем оба, иначе биржевой диалект соседа теряется молча и стоп уезжает на
+    // умолчание биржи. Явно названный тип цены главнее.
+    const triggerBy = args.triggerBy
+      ?? (args.workingType === undefined ? undefined : BYBIT_WORKING_TYPE_TRIGGER_BY[args.workingType]);
+
+    if (!isSpot && triggerBy !== undefined) {
+      orderParams.triggerBy = triggerBy;
     }
 
-    if (!isSpot && args.reduceOnly !== undefined) {
-      orderParams.reduceOnly = args.reduceOnly;
+    // Закрывающая заявка не смеет наращивать позицию, поэтому запрет на увеличение здесь
+    // не обсуждается: он часть самого намерения «закрыть всю позицию», а не пожелание.
+    const reduceOnly = isClosePosition ? true : args.reduceOnly;
+
+    if (!isSpot && reduceOnly !== undefined) {
+      orderParams.reduceOnly = reduceOnly;
     }
 
-    if (!isSpot && args.closeOnTrigger !== undefined) {
-      orderParams.closeOnTrigger = args.closeOnTrigger;
+    // Условная заявка, которая только уменьшает позицию, — защитная: при срабатывании она
+    // закрывает позицию. Это тоже выводится здесь, а не приходит снаружи.
+    const closeOnTrigger = isClosePosition
+      ? true
+      : args.closeOnTrigger ?? (isConditional && args.reduceOnly === true ? true : undefined);
+
+    if (!isSpot && closeOnTrigger !== undefined) {
+      orderParams.closeOnTrigger = closeOnTrigger;
     }
 
     if (args.timeInForce !== undefined) {
@@ -223,8 +322,15 @@ abstract class BybitBaseClient extends BaseExchangeClient {
       orderParams.orderFilter = args.orderFilter;
     }
 
-    if (isSpot && args.marketUnit !== undefined) {
-      orderParams.marketUnit = args.marketUnit;
+    // Чем меряется объём рыночной спотовой заявки, Bybit сам не угадывает: без единицы
+    // «купить на 100 долларов» уходит как «купить 100 монет». Умолчание живёт ЗДЕСЬ, а не
+    // в одиночном пути постановки, потому что пакетный путь зовёт этот сборщик напрямую и
+    // мимо любой доводки снаружи.
+    if (isSpot && args.type === OrderTypeEnum.Market) {
+      orderParams.marketUnit = args.marketUnit
+        ?? (args.quoteOrderQty !== undefined && args.quoteOrderQty > 0
+          ? MarketUnitEnum.QuoteCoin
+          : MarketUnitEnum.BaseCoin);
     }
 
     if (isLinear && args.positionSide !== undefined) {
@@ -322,7 +428,15 @@ abstract class BybitBaseClient extends BaseExchangeClient {
 
   async fetchOrderHistory(symbol: string, options?: FetchPageWithLimitArgs): Promise<Order[]> {
     this.logger.debug(`[Bybit] Fetching order history for ${symbol}`);
-    const raw = await this.httpClient.getOrderHistory(this.category, { symbol, limit: options?.limit });
+    // Границы времени биржа принимает и уважает (проверено живым запросом 08.08.2026).
+    // Раньше они молча выбрасывались, и «заявки за вчера» отдавали последние N записей
+    // независимо от дат.
+    const raw = await this.httpClient.getOrderHistory(this.category, {
+      symbol,
+      limit: options?.limit,
+      startTime: options?.startTime,
+      endTime: options?.endTime,
+    });
 
     return raw.result.list.map(normalizeBybitOrder);
   }
@@ -357,39 +471,51 @@ abstract class BybitBaseClient extends BaseExchangeClient {
     await this.httpClient.cancelAllOrders(this.category, symbol);
   }
 
-  async createBatchOrders(orderList: CreateOrderWebSocketArgs[]): Promise<Order[]> {
+  async createBatchOrders(orderList: CreateOrderWebSocketArgs[]): Promise<CreateBatchOrdersResult> {
     if (orderList.length === 0) {
       return [];
     }
 
     this.logger.debug(`[Bybit] Creating batch of ${orderList.length} orders`);
     const chunkedOrderList = chunkListUtil(orderList, this.batchChunkSize);
-    const aggregatedOrderList: Order[] = [];
+    const aggregatedResultList: CreateBatchOrdersResult = [];
 
     for (const chunk of chunkedOrderList) {
       const requestList = chunk.map((args) => this.buildBybitOrderParams(args));
 
       if (this.tradeStream !== null && this.tradeStream.isConnected()) {
-        const wsOrderList = await this.tradeStream.createBatchOrders(this.category, chunk, requestList);
-        aggregatedOrderList.push(...wsOrderList);
-      } else {
-        const raw = await this.httpClient.createBatchOrders(this.category, requestList);
-        raw.result.list.forEach((entry, indexInChunk) => {
-          aggregatedOrderList.push(
-            buildBybitOrderFromCreateResponse(chunk[indexInChunk], String(entry['orderId'])),
-          );
-        });
+        aggregatedResultList.push(...await this.tradeStream.createBatchOrders(this.category, chunk, requestList));
+
+        continue;
       }
+
+      const raw = await this.httpClient.createBatchOrders(this.category, requestList);
+      // Исход каждой заявки Bybit кладёт в отдельный список, выровненный с ответом по месту
+      // (документация batch-place). Раньше он не читался вовсе, и отказ возвращался как
+      // «открытая» заявка с пустым номером — бот считал стоп поставленным, а его не было.
+      const extInfoList = raw.retExtInfo?.list ?? [];
+
+      chunk.forEach((args, indexInChunk) => {
+        aggregatedResultList.push(
+          buildBybitCreateOutcome(args, raw.result.list[indexInChunk], extInfoList[indexInChunk]),
+        );
+      });
     }
 
-    return aggregatedOrderList;
+    return aggregatedResultList;
   }
 
   async getOrderRateLimit(): Promise<OrderRateLimit> {
-    const writeRequestsPerSecond = this.category === 'spot' ? 20 : 10;
+    // Число в коде — лишь запасной вариант: биржа меняет пределы, а константа нет. Сама
+    // биржа называет предел заголовком ответа на заявку, и торговый канал его уже разбирает.
+    const reported = this.tradeStream?.getLastReportedOrderRateLimit() ?? null;
+
+    if (reported !== null && reported.limit > 0) {
+      return { writeRequestsPerSecond: reported.limit, source: 'bybit-exchange-header' };
+    }
 
     return {
-      writeRequestsPerSecond,
+      writeRequestsPerSecond: this.category === 'spot' ? 20 : 10,
       source: 'bybit-documented',
     };
   }
@@ -505,10 +631,11 @@ abstract class BybitBaseClient extends BaseExchangeClient {
 
   async fetchIncome(options?: FetchIncomeArgs): Promise<Income[]> {
     this.logger.debug('[Bybit] Fetching income');
-    const limit =
-      options?.limit !== undefined
-        ? Math.min(options.limit, BYBIT_TRANSACTION_LOG_MAX_LIMIT)
-        : undefined;
+    // Умолчание биржи — 20 записей на страницу, и постраничного дочитывания здесь нет.
+    // Поэтому всегда просим максимум, а полную страницу считаем признаком того, что часть
+    // записей осталась за кадром: молча отдать усечённый ответ хуже, чем отказать —
+    // потребитель посчитает по неполным данным и не узнает об этом.
+    const limit = Math.min(options?.limit ?? BYBIT_TRANSACTION_LOG_MAX_LIMIT, BYBIT_TRANSACTION_LOG_MAX_LIMIT);
     const raw = await this.httpClient.fetchTransactionLog({
       category: this.category,
       limit,
@@ -516,29 +643,60 @@ abstract class BybitBaseClient extends BaseExchangeClient {
       endTime: options?.endTime,
     });
     const rawList = raw.result.list;
-    const incomeList = normalizeBybitIncomeList(rawList);
 
-    if (options?.incomeType !== 'funding') {
-      return incomeList;
+    if (rawList.length >= limit) {
+      throw new Error(
+        `[Bybit] transaction log returned a full page of ${limit} entries — the answer would be incomplete`,
+      );
+    }
+    // Символ этот вход биржи не принимает — отбираем сами; у Binance то же самое делает биржа.
+    const symbolFilteredList = options?.symbol === undefined
+      ? rawList
+      : rawList.filter((entry) => entry.symbol === options.symbol);
+
+    if (options?.incomeType === undefined) {
+      return normalizeBybitIncomeList(symbolFilteredList);
     }
 
-    if (limit !== undefined && rawList.length >= limit) {
-      throw new Error(
-        '[Bybit] transaction log hit the page limit — the funding income filter would be incomplete',
+    const windowFilteredList = symbolFilteredList.filter((entry) => {
+      const timestamp = parseFloat(entry.transactionTime);
+
+      return (options.startTime === undefined || timestamp >= options.startTime)
+        && (options.endTime === undefined || timestamp <= options.endTime);
+    });
+
+    if (options.incomeType === 'funding') {
+      return normalizeBybitIncomeList(
+        windowFilteredList.filter((entry) => BYBIT_FUNDING_INCOME_TYPE_SET.has(entry.type)),
       );
     }
 
-    return incomeList.filter(
-      (income) =>
-        BYBIT_FUNDING_INCOME_TYPE_SET.has(income.incomeType) &&
-        (options.startTime === undefined || income.timestamp >= options.startTime) &&
-        (options.endTime === undefined || income.timestamp <= options.endTime),
-    );
+    if (options.incomeType === 'realizedPnl') {
+      // Поток денег по записи и есть реализованный итог, комиссия в него не входит —
+      // ровно тот же смысл, что у Binance под словом REALIZED_PNL (проверено живьём).
+      return normalizeBybitIncomeList(
+        windowFilteredList.filter((entry) => BYBIT_TRADE_INCOME_TYPE_SET.has(entry.type) && parseFloat(entry.cashFlow) !== 0),
+      );
+    }
+
+    return buildBybitCommissionIncomeList(windowFilteredList);
   }
 
   async fetchClosedPnl(symbol?: string, options?: FetchPageWithLimitArgs): Promise<ClosedPnl[]> {
+    // Спотовой категории этот вход у биржи не существует (проверено живым запросом
+    // 08.08.2026: «Closed pnl not support category»). Прямой отказ понятнее, чем биржевой
+    // код, и совпадает с тем, что отвечает спот соседней биржи.
+    if (this.category === 'spot') {
+      throw new Error('Not supported for spot market');
+    }
+
     this.logger.debug('[Bybit] Fetching closed PnL');
-    const raw = await this.httpClient.getClosedPnl(this.category, { symbol, limit: options?.limit });
+    const raw = await this.httpClient.getClosedPnl(this.category, {
+      symbol,
+      limit: options?.limit,
+      startTime: options?.startTime,
+      endTime: options?.endTime,
+    });
 
     return normalizeBybitClosedPnlList(raw.result.list);
   }
@@ -586,7 +744,7 @@ abstract class BybitBaseClient extends BaseExchangeClient {
       secret: this.secret,
       logger: this.logger,
       onNotify: this.onNotify,
-      topicList: ['order', 'position'],
+      topicList: ['order', 'position', 'wallet'],
       onMessage: (event) => this.handlePrivateMessage(event, handler),
     });
 
@@ -651,16 +809,43 @@ abstract class BybitBaseClient extends BaseExchangeClient {
           side: positionData.side as string,
           size: Number(positionData.size),
           entryPrice: Number(positionData.entryPrice),
-          markPrice: Number(positionData.markPrice),
           unrealisedPnl: Number(positionData.unrealisedPnl),
-          leverage: Number(positionData.leverage),
-          liquidationPrice: Number(positionData.liqPrice),
           positionSide: (positionData.positionIdx as string) ?? '',
           timestamp: Number(positionData.updatedTime),
+          // Эти три Bybit сообщает — отдаём как есть; у соседней биржи их в событии нет.
+          markPrice: Number(positionData.markPrice),
+          leverage: Number(positionData.leverage),
+          liquidationPrice: Number(positionData.liqPrice),
         };
 
         handler.onPositionUpdate(positionUpdate);
       }
+    }
+
+    if (topic === 'wallet' && handler.onBalanceUpdate !== undefined) {
+      const dataList = event.data as Array<Record<string, unknown>>;
+
+      if (!Array.isArray(dataList)) {
+        return;
+      }
+
+      // Bybit кладёт монеты внутрь записи счёта. Свободное здесь не называется так же, как
+      // на споте (у единого счёта «доступное к выводу» — это другая величина), поэтому
+      // сообщаем только то, что означает ровно себя: остаток кошелька.
+      const balanceList = dataList.flatMap((accountData) => {
+        const coinList = accountData.coin;
+
+        return Array.isArray(coinList)
+          ? (coinList as Array<Record<string, unknown>>).map((coinData) => ({
+            asset: coinData.coin as string,
+            free: null,
+            locked: null,
+            total: Number(coinData.walletBalance),
+          }))
+          : [];
+      });
+
+      handler.onBalanceUpdate({ balanceList, timestamp: Number(event.creationTime ?? Date.now()) });
     }
   }
 

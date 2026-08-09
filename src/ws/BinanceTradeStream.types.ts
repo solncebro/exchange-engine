@@ -1,4 +1,15 @@
-import type { BinanceOrderResponseRaw } from '../normalizers/binanceNormalizer';
+import type { BinanceOrderResponseRaw, BinanceAlgoOrderRaw } from '../normalizers/binanceNormalizer';
+
+/**
+ * Ответ на отмену условной заявки — короткая расписка, а не снимок заявки, как у обычной
+ * отмены. Успех подтверждается ВЛОЖЕННЫМ полем code (строка "200"), внешнего status мало.
+ */
+export interface BinanceAlgoOrderCancelAckRaw {
+  algoId: number;
+  clientAlgoId: string;
+  code: string;
+  msg: string;
+}
 
 export interface BinanceWebSocketError {
   code: number;
@@ -16,7 +27,7 @@ export interface BinanceWebSocketRateLimitEntry {
 export interface BinanceTradeWebSocketResponse {
   id: string;
   status: number;
-  result?: BinanceOrderResponseRaw;
+  result?: BinanceOrderResponseRaw | BinanceAlgoOrderRaw | BinanceAlgoOrderCancelAckRaw;
   error?: BinanceWebSocketError;
   rateLimits?: BinanceWebSocketRateLimitEntry[];
 }

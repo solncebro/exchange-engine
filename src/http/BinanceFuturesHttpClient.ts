@@ -3,18 +3,44 @@ import type {
   BinanceFundingRateHistoryRaw,
   BinanceFundingInfoRaw,
   BinanceOrderResponseRaw,
+  BinanceAlgoOrderRaw,
   BinanceFuturesAccountRaw,
   BinanceMarkPriceRaw,
   BinanceOpenInterestRaw,
   BinanceCommissionRateRaw,
   BinanceIncomeRaw,
+  BinanceUserTradeRaw,
 } from '../normalizers/binanceNormalizer';
 import type { FetchIncomeArgs, FetchPageWithLimitArgs } from '../types/exchange';
-import { BINANCE_REQUEST_TIMEOUT } from '../constants/binance';
+import {
+  BINANCE_REQUEST_TIMEOUT,
+  BINANCE_FUTURES_ALGO_ORDER_PATH,
+  BINANCE_FUTURES_OPEN_ALGO_ORDERS_PATH,
+  BINANCE_FUTURES_ALL_ALGO_ORDERS_PATH,
+  BINANCE_FUTURES_CANCEL_ALL_ALGO_ORDERS_PATH,
+} from '../constants/binance';
+import { BINANCE_INCOME_TYPE } from '../constants/mappings';
 import { applyTimeRangeOptions } from '../utils/httpParams';
 import { serializeBinanceOrderIdList } from '../utils/binanceOrderId';
 import type { BinanceEndpoints, BinanceHttpClientArgs } from './BinanceBaseHttpClient';
 import { BinanceBaseHttpClient } from './BinanceBaseHttpClient';
+import type { BinanceAlgoOrderLookupArgs, BinanceUserTradeQueryArgs } from './BinanceFuturesHttpClient.types';
+
+function buildAlgoOrderLookupParams(
+  args: BinanceAlgoOrderLookupArgs,
+): Record<string, string | number | boolean> {
+  const params: Record<string, string | number | boolean> = {};
+
+  if (args.algoId !== undefined) {
+    params.algoId = args.algoId;
+  }
+
+  if (args.clientAlgoId !== undefined) {
+    params.clientAlgoId = args.clientAlgoId;
+  }
+
+  return params;
+}
 
 class BinanceFuturesHttpClient extends BinanceBaseHttpClient {
   protected readonly endpoints: BinanceEndpoints = {
@@ -111,6 +137,51 @@ class BinanceFuturesHttpClient extends BinanceBaseHttpClient {
     );
   }
 
+  async createAlgoOrder(params: Record<string, unknown>): Promise<BinanceAlgoOrderRaw> {
+    return this.signedPost<BinanceAlgoOrderRaw>(
+      BINANCE_FUTURES_ALGO_ORDER_PATH,
+      params as Record<string, string | number | boolean>,
+    );
+  }
+
+  async fetchAlgoOrder(args: BinanceAlgoOrderLookupArgs): Promise<BinanceAlgoOrderRaw> {
+    return this.signedGet<BinanceAlgoOrderRaw>(
+      BINANCE_FUTURES_ALGO_ORDER_PATH,
+      buildAlgoOrderLookupParams(args),
+    );
+  }
+
+  async cancelAlgoOrder(args: BinanceAlgoOrderLookupArgs): Promise<Record<string, unknown>> {
+    return this.signedDelete<Record<string, unknown>>(
+      BINANCE_FUTURES_ALGO_ORDER_PATH,
+      buildAlgoOrderLookupParams(args),
+    );
+  }
+
+  async fetchOpenAlgoOrders(symbol?: string): Promise<BinanceAlgoOrderRaw[]> {
+    return this.signedGet<BinanceAlgoOrderRaw[]>(
+      BINANCE_FUTURES_OPEN_ALGO_ORDERS_PATH,
+      this.buildOptionalSymbolParams(symbol),
+    );
+  }
+
+  async fetchAllAlgoOrders(
+    symbol: string,
+    options?: FetchPageWithLimitArgs,
+  ): Promise<BinanceAlgoOrderRaw[]> {
+    const params: Record<string, string | number | boolean> = { symbol };
+    applyTimeRangeOptions(params, options);
+
+    return this.signedGet<BinanceAlgoOrderRaw[]>(BINANCE_FUTURES_ALL_ALGO_ORDERS_PATH, params);
+  }
+
+  async cancelAllAlgoOrders(symbol: string): Promise<Record<string, unknown>> {
+    return this.signedDelete<Record<string, unknown>>(
+      BINANCE_FUTURES_CANCEL_ALL_ALGO_ORDERS_PATH,
+      { symbol },
+    );
+  }
+
   async fetchPositionRisk(symbol?: string): Promise<BinancePositionRiskRaw[]> {
     return this.signedGet<BinancePositionRiskRaw[]>('/fapi/v3/positionRisk', this.buildOptionalSymbolParams(symbol));
   }
@@ -125,11 +196,28 @@ class BinanceFuturesHttpClient extends BinanceBaseHttpClient {
     const params: Record<string, string | number | boolean> = {};
     applyTimeRangeOptions(params, options);
 
-    if (options?.incomeType === 'funding') {
-      params.incomeType = 'FUNDING_FEE';
+    // Фильтрует сама биржа: раньше выбрать можно было только фандинг, а символ не
+    // передавался вовсе — приходилось тянуть весь счёт и отсеивать у себя.
+    if (options?.incomeType !== undefined) {
+      params.incomeType = BINANCE_INCOME_TYPE[options.incomeType];
+    }
+
+    if (options?.symbol !== undefined) {
+      params.symbol = options.symbol;
     }
 
     return this.signedGet<BinanceIncomeRaw[]>('/fapi/v1/income', params);
+  }
+
+  /**
+   * Собственные сделки счёта — единственный вход Binance, дающий реализованный итог и
+   * комиссию в разрезе сделки. Символ необязателен: без него отвечает по всему счёту.
+   */
+  async fetchUserTrades(args: BinanceUserTradeQueryArgs): Promise<BinanceUserTradeRaw[]> {
+    const params: Record<string, string | number | boolean> = this.buildOptionalSymbolParams(args.symbol);
+    applyTimeRangeOptions(params, args);
+
+    return this.signedGet<BinanceUserTradeRaw[]>('/fapi/v1/userTrades', params);
   }
 
   async setLeverage(symbol: string, leverage: number): Promise<Record<string, unknown>> {

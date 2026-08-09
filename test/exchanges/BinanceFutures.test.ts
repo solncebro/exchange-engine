@@ -10,6 +10,7 @@ import {
   BINANCE_RAW_KLINE_LIST,
   BINANCE_RAW_FUTURES_ACCOUNT,
   BINANCE_RAW_ORDER_RESPONSE,
+  BINANCE_RAW_ALGO_ORDER_RESPONSE,
   BINANCE_RAW_FUNDING_INFO_LIST,
   BINANCE_RAW_POSITION_MODE_HEDGE,
   BINANCE_RAW_POSITION_MODE_ONE_WAY,
@@ -76,6 +77,24 @@ describe('BinanceFutures', () => {
       expect(position.symbol).toBe('BTCUSDT');
       expect(position.side).toBe(PositionSideEnum.Long);
       expect(position.contracts).toBe(0.1);
+    });
+
+    it('says which of the two sides this position is: the reader must not have to guess', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: [BINANCE_RAW_POSITION_RISK] });
+
+      const position = await client.fetchPosition('BTCUSDT');
+
+      expect(position.positionIdx).toBe(1);
+    });
+
+    it('marks a one-way position with zero, exactly as the other exchange does', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: [{ ...BINANCE_RAW_POSITION_RISK, positionSide: 'BOTH' }] });
+
+      const position = await client.fetchPosition('BTCUSDT');
+
+      expect(position.positionIdx).toBe(0);
     });
 
     it('throws when symbol not found in response', async () => {
@@ -448,12 +467,14 @@ describe('BinanceFutures', () => {
       expect(options.params.timeInForce).toBe('GTC');
     });
 
-    it('sends stopPrice when provided', async () => {
+    // С 09.12.2025 условные заявки USDⓈ-M живут в отдельной Algo-службе: старый вход
+    // отбивает их кодом -4120. Поэтому тесты ниже проверяют НОВЫЙ адрес и НОВЫЕ имена полей.
+    it('routes a conditional order to the algo endpoint with the renamed trigger price', async () => {
       const { client, mockInstance } = createClient();
       mockInstance.get.mockResolvedValue({ data: BINANCE_RAW_EXCHANGE_INFO });
       await client.loadTradeSymbols();
 
-      mockInstance.post.mockResolvedValue({ data: BINANCE_RAW_ORDER_RESPONSE });
+      mockInstance.post.mockResolvedValue({ data: BINANCE_RAW_ALGO_ORDER_RESPONSE });
 
       await client.createOrderWebSocket({
         symbol: 'BTCUSDT',
@@ -463,17 +484,22 @@ describe('BinanceFutures', () => {
         stopPrice: 60000,
       });
 
-      const [, , options] = mockInstance.post.mock.calls[0];
+      const [url, , options] = mockInstance.post.mock.calls[0];
 
-      expect(options.params.stopPrice).toBe('60000');
+      expect(url).toBe('/fapi/v1/algoOrder');
+      expect(options.params.algoType).toBe('CONDITIONAL');
+      expect(options.params.type).toBe('STOP_MARKET');
+      expect(options.params.triggerPrice).toBe('60000');
+      // Старые имена уйти не должны — иначе биржа молча их проигнорирует.
+      expect(options.params.stopPrice).toBeUndefined();
     });
 
-    it('sends closePosition when provided', async () => {
+    it('sends closePosition instead of quantity, since the two are mutually exclusive', async () => {
       const { client, mockInstance } = createClient();
       mockInstance.get.mockResolvedValue({ data: BINANCE_RAW_EXCHANGE_INFO });
       await client.loadTradeSymbols();
 
-      mockInstance.post.mockResolvedValue({ data: BINANCE_RAW_ORDER_RESPONSE });
+      mockInstance.post.mockResolvedValue({ data: BINANCE_RAW_ALGO_ORDER_RESPONSE });
 
       await client.createOrderWebSocket({
         symbol: 'BTCUSDT',
@@ -484,17 +510,19 @@ describe('BinanceFutures', () => {
         closePosition: true,
       });
 
-      const [, , options] = mockInstance.post.mock.calls[0];
+      const [url, , options] = mockInstance.post.mock.calls[0];
 
+      expect(url).toBe('/fapi/v1/algoOrder');
       expect(options.params.closePosition).toBe(true);
+      expect(options.params.quantity).toBeUndefined();
     });
 
-    it('sends workingType when provided', async () => {
+    it('sends workingType on the algo endpoint', async () => {
       const { client, mockInstance } = createClient();
       mockInstance.get.mockResolvedValue({ data: BINANCE_RAW_EXCHANGE_INFO });
       await client.loadTradeSymbols();
 
-      mockInstance.post.mockResolvedValue({ data: BINANCE_RAW_ORDER_RESPONSE });
+      mockInstance.post.mockResolvedValue({ data: BINANCE_RAW_ALGO_ORDER_RESPONSE });
 
       await client.createOrderWebSocket({
         symbol: 'BTCUSDT',
@@ -505,9 +533,95 @@ describe('BinanceFutures', () => {
         workingType: WorkingTypeEnum.MarkPrice,
       });
 
+      const [url, , options] = mockInstance.post.mock.calls[0];
+
+      expect(url).toBe('/fapi/v1/algoOrder');
+      expect(options.params.workingType).toBe('MARK_PRICE');
+    });
+
+    it('keeps plain orders on the legacy endpoint', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: BINANCE_RAW_EXCHANGE_INFO });
+      await client.loadTradeSymbols();
+
+      mockInstance.post.mockResolvedValue({ data: BINANCE_RAW_ORDER_RESPONSE });
+
+      await client.createOrderWebSocket({
+        symbol: 'BTCUSDT',
+        type: OrderTypeEnum.Limit,
+        side: OrderSideEnum.Sell,
+        amount: 0.1,
+        price: 65000,
+      });
+
+      const [url] = mockInstance.post.mock.calls[0];
+
+      expect(url).toBe('/fapi/v1/order');
+    });
+
+    it('tags a conditional order with clientAlgoId, not newClientOrderId', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: BINANCE_RAW_EXCHANGE_INFO });
+      await client.loadTradeSymbols();
+
+      mockInstance.post.mockResolvedValue({ data: BINANCE_RAW_ALGO_ORDER_RESPONSE });
+
+      await client.createOrderWebSocket({
+        symbol: 'BTCUSDT',
+        type: OrderTypeEnum.StopMarket,
+        side: OrderSideEnum.Sell,
+        amount: 0.1,
+        stopPrice: 60000,
+        clientOrderId: 'rbr_abc1',
+      });
+
       const [, , options] = mockInstance.post.mock.calls[0];
 
-      expect(options.params.workingType).toBe('MARK_PRICE');
+      expect(options.params.clientAlgoId).toBe('rbr_abc1');
+      expect(options.params.newClientOrderId).toBeUndefined();
+    });
+
+    it('omits reduceOnly in hedge mode, where the exchange forbids it', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: BINANCE_RAW_EXCHANGE_INFO });
+      await client.loadTradeSymbols();
+
+      mockInstance.post.mockResolvedValue({ data: BINANCE_RAW_ALGO_ORDER_RESPONSE });
+
+      await client.createOrderWebSocket({
+        symbol: 'BTCUSDT',
+        type: OrderTypeEnum.StopMarket,
+        side: OrderSideEnum.Buy,
+        amount: 0.1,
+        stopPrice: 60000,
+        positionSide: PositionSideEnum.Short,
+        reduceOnly: true,
+      });
+
+      const [, , options] = mockInstance.post.mock.calls[0];
+
+      expect(options.params.positionSide).toBe('SHORT');
+      expect(options.params.reduceOnly).toBeUndefined();
+    });
+
+    it('returns the conditional order under its own algo id', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: BINANCE_RAW_EXCHANGE_INFO });
+      await client.loadTradeSymbols();
+
+      mockInstance.post.mockResolvedValue({ data: BINANCE_RAW_ALGO_ORDER_RESPONSE });
+
+      const order = await client.createOrderWebSocket({
+        symbol: 'BTCUSDT',
+        type: OrderTypeEnum.StopMarket,
+        side: OrderSideEnum.Sell,
+        amount: 0.1,
+        stopPrice: 60000,
+      });
+
+      expect(order.id).toBe('3000000000003505');
+      expect(order.isConditional).toBe(true);
+      expect(order.stopPrice).toBe(60000);
     });
 
     it('sends positionSide when provided', async () => {
@@ -977,6 +1091,124 @@ describe('BinanceFutures', () => {
       expect(result[1].incomeType).toBe('FUNDING_FEE');
       expect(result[1].income).toBe(-0.05);
     });
+
+    it('asks the exchange for the requested income kind and symbol instead of filtering at home', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: [] });
+
+      await client.fetchIncome({ incomeType: 'realizedPnl', symbol: 'BTCUSDT', startTime: 1000, endTime: 2000 });
+
+      const [, config] = mockInstance.get.mock.calls[0];
+
+      expect(config.params.incomeType).toBe('REALIZED_PNL');
+      expect(config.params.symbol).toBe('BTCUSDT');
+      expect(config.params.startTime).toBe(1000);
+    });
+
+    it('translates the commission intent into the exchange wording', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: [] });
+
+      await client.fetchIncome({ incomeType: 'commission' });
+
+      const [, config] = mockInstance.get.mock.calls[0];
+
+      expect(config.params.incomeType).toBe('COMMISSION');
+    });
+  });
+
+  // Итог закрытия у Binance готовой ручкой не отдаётся: собираем его из списка собственных
+  // сделок. Смысл полей обязан совпасть с Bybit, иначе одно и то же поле будет значить разное.
+  describe('fetchClosedPnl', () => {
+    const CLOSING_TRADE_LIST = [
+      // Заполнение, которое ОТКРЫВАЛО позицию: ничего не закрыло, итог нулевой,
+      // но комиссию биржа за него взяла — и в итог сделки она обязана войти.
+      { orderId: 10, symbol: 'BTCUSDT', side: 'SELL', price: '100', qty: '2', realizedPnl: '0', commission: '0.10', time: 1000 },
+      // Два заполнения ОДНОЙ закрывающей заявки.
+      { orderId: 20, symbol: 'BTCUSDT', side: 'BUY', price: '96', qty: '1', realizedPnl: '4', commission: '0.05', time: 5000 },
+      { orderId: 20, symbol: 'BTCUSDT', side: 'BUY', price: '98', qty: '1', realizedPnl: '2', commission: '0.05', time: 5500 },
+    ];
+
+    it('returns one row per closing order, with the volume-weighted exit price', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: CLOSING_TRADE_LIST });
+
+      const result = await client.fetchClosedPnl('BTCUSDT');
+
+      expect(result).toHaveLength(1);
+      expect(result[0].symbol).toBe('BTCUSDT');
+      expect(result[0].orderId).toBe('20');
+      expect(result[0].side).toBe(OrderSideEnum.Buy);
+      expect(result[0].quantity).toBe(2);
+      expect(result[0].exitPrice).toBe(97);
+      expect(result[0].timestamp).toBe(5500);
+    });
+
+    it('reports the result NET of the whole trade commission, opening fills included', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: CLOSING_TRADE_LIST });
+
+      const result = await client.fetchClosedPnl('BTCUSDT');
+
+      // Проверено на живом счёте 08.08.2026: у Binance итог ВАЛОВОЙ, комиссия списывается
+      // отдельно и берётся ДВАЖДЫ — на открытии и на закрытии. Соседняя биржа вычитает обе
+      // (её итог = валовой − комиссия открытия − комиссия закрытия, сверено живьём),
+      // поэтому вычитаем обе и здесь: 6 − 0.10 закрытия − 0.10 открытия.
+      expect(result[0].closedPnl).toBeCloseTo(6 - 0.1 - 0.1, 9);
+    });
+
+    it('keeps the identity consumers rely on: gross minus result equals the whole commission', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: CLOSING_TRADE_LIST });
+
+      const [row] = await client.fetchClosedPnl('BTCUSDT');
+      const grossPnl = (row.entryPrice - row.exitPrice) * row.quantity;
+
+      expect(grossPnl - row.closedPnl).toBeCloseTo(0.2, 9);
+    });
+
+    it('splits the opening commission across partial closes in proportion to what was closed', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({
+        data: [
+          { orderId: 10, symbol: 'BTCUSDT', side: 'SELL', price: '100', qty: '4', realizedPnl: '0', commission: '0.40', time: 1000 },
+          { orderId: 20, symbol: 'BTCUSDT', side: 'BUY', price: '99', qty: '1', realizedPnl: '1', commission: '0.01', time: 2000 },
+          { orderId: 30, symbol: 'BTCUSDT', side: 'BUY', price: '98', qty: '3', realizedPnl: '6', commission: '0.03', time: 3000 },
+        ],
+      });
+
+      const result = await client.fetchClosedPnl('BTCUSDT');
+      const firstClose = result.find((row) => row.orderId === '20');
+      const secondClose = result.find((row) => row.orderId === '30');
+
+      // Четверть позиции закрыта первой заявкой — на неё приходится четверть комиссии открытия.
+      expect(firstClose?.closedPnl).toBeCloseTo(1 - 0.01 - 0.1, 9);
+      expect(secondClose?.closedPnl).toBeCloseTo(6 - 0.03 - 0.3, 9);
+    });
+
+    it('derives the entry price of a long the other way round', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({
+        data: [{ orderId: 30, symbol: 'BTCUSDT', side: 'SELL', price: '110', qty: '2', realizedPnl: '20', commission: '0.2', time: 7000 }],
+      });
+
+      const [row] = await client.fetchClosedPnl('BTCUSDT');
+      const grossPnl = (row.exitPrice - row.entryPrice) * row.quantity;
+
+      expect(row.entryPrice).toBeCloseTo(100, 9);
+      expect(grossPnl - row.closedPnl).toBeCloseTo(0.2, 9);
+    });
+
+    it('reads the whole account when no symbol is given, exactly as the other exchange does', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: [] });
+
+      await expect(client.fetchClosedPnl()).resolves.toEqual([]);
+
+      const [, config] = mockInstance.get.mock.calls[0];
+
+      expect(config.params.symbol).toBeUndefined();
+    });
   });
 
   describe('createBatchOrders', () => {
@@ -992,9 +1224,62 @@ describe('BinanceFutures', () => {
       ]);
 
       expect(result).toHaveLength(1);
-      expect(result[0].id).toBe('123456789');
-      expect(result[0].symbol).toBe('BTCUSDT');
-      expect(result[0].side).toBe(OrderSideEnum.Buy);
+      expect(result[0].isSuccess).toBe(true);
+      expect(result[0].order?.id).toBe('123456789');
+      expect(result[0].order?.symbol).toBe('BTCUSDT');
+      expect(result[0].order?.side).toBe(OrderSideEnum.Buy);
+      expect(result[0].errorText).toBeNull();
+    });
+
+    it('keeps one entry per requested order when the exchange rejects some of them', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: BINANCE_RAW_EXCHANGE_INFO });
+      await client.loadTradeSymbols();
+
+      // Отказ ровно посередине: раньше он выбрасывался из ответа, ответ становился короче
+      // запроса, и каждый следующий исход приписывался не той заявке.
+      mockInstance.post.mockResolvedValue({
+        data: [
+          { ...BINANCE_RAW_ORDER_RESPONSE, orderId: 111 },
+          { code: -2010, msg: 'Account has insufficient balance' },
+          { ...BINANCE_RAW_ORDER_RESPONSE, orderId: 333 },
+        ],
+      });
+
+      const result = await client.createBatchOrders([
+        { symbol: 'BTCUSDT', type: OrderTypeEnum.Market, side: OrderSideEnum.Buy, amount: 0.1 },
+        { symbol: 'BTCUSDT', type: OrderTypeEnum.Market, side: OrderSideEnum.Buy, amount: 0.2 },
+        { symbol: 'BTCUSDT', type: OrderTypeEnum.Market, side: OrderSideEnum.Buy, amount: 0.3 },
+      ]);
+
+      expect(result).toHaveLength(3);
+      expect(result[0].isSuccess).toBe(true);
+      expect(result[0].order?.id).toBe('111');
+      expect(result[1].isSuccess).toBe(false);
+      expect(result[1].order).toBeNull();
+      expect(result[1].errorCode).toBe(-2010);
+      expect(result[1].errorText).toBe('Account has insufficient balance');
+      expect(result[2].isSuccess).toBe(true);
+      expect(result[2].order?.id).toBe('333');
+    });
+
+    it('reports a short exchange answer as failure instead of silently losing orders', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: BINANCE_RAW_EXCHANGE_INFO });
+      await client.loadTradeSymbols();
+
+      mockInstance.post.mockResolvedValue({ data: [{ ...BINANCE_RAW_ORDER_RESPONSE, orderId: 111 }] });
+
+      const result = await client.createBatchOrders([
+        { symbol: 'BTCUSDT', type: OrderTypeEnum.Market, side: OrderSideEnum.Buy, amount: 0.1 },
+        { symbol: 'BTCUSDT', type: OrderTypeEnum.Market, side: OrderSideEnum.Buy, amount: 0.2 },
+      ]);
+
+      expect(result).toHaveLength(2);
+      expect(result[0].isSuccess).toBe(true);
+      expect(result[1].isSuccess).toBe(false);
+      expect(result[1].order).toBeNull();
+      expect(result[1].errorText).not.toBeNull();
     });
   });
 
@@ -1023,6 +1308,47 @@ describe('BinanceFutures', () => {
         { orderId: '1001', isSuccess: true, errorCode: null, errorText: null },
         { orderId: '1002', isSuccess: true, errorCode: null, errorText: null },
       ]);
+    });
+
+    // Условные заявки живут в отдельной службе, и пакетная отмена обычной книги их не
+    // видит: просили снять пачку стопов — часть оставалась висеть. Одиночная отмена
+    // развилку имела, пакетная — нет.
+    it('cancels a known conditional order through its own service, not the plain book', async () => {
+      const { client, mockInstance } = createClient();
+      // Читаем список условных заявок — так клиент узнаёт происхождение номера.
+      mockInstance.get.mockResolvedValue({
+        data: [{ ...BINANCE_RAW_ALGO_ORDER_RESPONSE, algoId: 777, symbol: 'BTCUSDT' }],
+      });
+      await client.fetchOpenConditionalOrders('USDT');
+
+      mockInstance.delete.mockResolvedValue({ data: { success: true } });
+
+      const result = await client.cancelBatchOrders('BTCUSDT', ['777']);
+
+      const deletedPathList = mockInstance.delete.mock.calls.map((call: unknown[]) => call[0]);
+
+      expect(deletedPathList).toContain('/fapi/v1/algoOrder');
+      expect(result).toEqual([{ orderId: '777', isSuccess: true, errorCode: null, errorText: null }]);
+    });
+
+    it('still sends plain orders of the same batch through the plain book', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({
+        data: [{ ...BINANCE_RAW_ALGO_ORDER_RESPONSE, algoId: 777, symbol: 'BTCUSDT' }],
+      });
+      await client.fetchOpenConditionalOrders('USDT');
+
+      mockInstance.delete.mockImplementation((path: string) =>
+        path === '/fapi/v1/algoOrder'
+          ? Promise.resolve({ data: { success: true } })
+          : Promise.resolve({ data: [{ orderId: 555, status: 'CANCELED' }] }),
+      );
+
+      const result = await client.cancelBatchOrders('BTCUSDT', ['777', '555']);
+
+      expect(result).toHaveLength(2);
+      expect(result.find((item) => item.orderId === '777')?.isSuccess).toBe(true);
+      expect(result.find((item) => item.orderId === '555')?.isSuccess).toBe(true);
     });
 
     it('sends orderIdList as a JSON array of numbers', async () => {
@@ -1283,7 +1609,7 @@ describe('BinanceFutures', () => {
       expect(mockInstance.post).not.toHaveBeenCalled();
     });
 
-    it('skips per-order errors with warning and returns only normalized orders', async () => {
+    it('reports a per-order error in place, with a warning, instead of dropping the entry', async () => {
       const logger = createMockLogger();
       const mockInstance = createMockAxiosInstance();
       mockedAxios.create.mockReturnValue(mockInstance as any);
@@ -1308,8 +1634,12 @@ describe('BinanceFutures', () => {
         { symbol: 'BTCUSDT', type: OrderTypeEnum.Limit, side: OrderSideEnum.Buy, amount: 0.001, price: 30000, reduceOnly: true },
       ]);
 
-      expect(result).toHaveLength(1);
-      expect(result[0].id).toBe(String(BINANCE_RAW_ORDER_RESPONSE.orderId));
+      expect(result).toHaveLength(2);
+      expect(result[0].isSuccess).toBe(true);
+      expect(result[0].order?.id).toBe(String(BINANCE_RAW_ORDER_RESPONSE.orderId));
+      expect(result[1].isSuccess).toBe(false);
+      expect(result[1].errorCode).toBe(-2022);
+      expect(result[1].errorText).toBe('ReduceOnly Order is rejected.');
       expect(logger.warn).toHaveBeenCalled();
     });
   });
@@ -1418,6 +1748,68 @@ describe('BinanceFutures', () => {
       const result = await client.getOrderRateLimit();
 
       expect(result).toEqual({ writeRequestsPerSecond: 20, source: 'binance-exchange-info' });
+    });
+  });
+
+  // Образец события счёта (ccxt, js/src/pro/binance.js — payload из документации Binance):
+  // позиция несёт только s/pa/ep/cr/up/mt/iw/ps, средства — a/wb/cw. Ни цены маркировки,
+  // ни плеча, ни цены ликвидации в позиции НЕТ.
+  describe('ACCOUNT_UPDATE event', () => {
+    function emitAccountUpdate(client: BinanceFutures, handler: Record<string, jest.Mock>): void {
+      (client as any).handleUserDataMessage(
+        {
+          e: 'ACCOUNT_UPDATE',
+          T: 1700000000000,
+          a: {
+            B: [{ a: 'USDT', wb: '1234.5', cw: '1000.25' }],
+            P: [{ s: 'BTCUSDT', pa: '-0.5', ep: '65000', up: '-12.5', ps: 'BOTH' }],
+          },
+        },
+        handler,
+      );
+    }
+
+    it('reports the fields the event does not carry as unknown, not as zero', () => {
+      const { client } = createClient();
+      const handler = { onOrderUpdate: jest.fn(), onPositionUpdate: jest.fn(), onBalanceUpdate: jest.fn() };
+
+      emitAccountUpdate(client, handler);
+
+      const [positionUpdate] = handler.onPositionUpdate.mock.calls[0];
+
+      // Ноль неотличим от настоящего нуля, и сторож ликвидации, сравнивая с нулём, не
+      // сработает никогда. Пусто означает «биржа этого не сообщила».
+      expect(positionUpdate.markPrice).toBeNull();
+      expect(positionUpdate.leverage).toBeNull();
+      expect(positionUpdate.liquidationPrice).toBeNull();
+    });
+
+    it('still reports what the event does carry', () => {
+      const { client } = createClient();
+      const handler = { onOrderUpdate: jest.fn(), onPositionUpdate: jest.fn(), onBalanceUpdate: jest.fn() };
+
+      emitAccountUpdate(client, handler);
+
+      const [positionUpdate] = handler.onPositionUpdate.mock.calls[0];
+
+      expect(positionUpdate.symbol).toBe('BTCUSDT');
+      expect(positionUpdate.side).toBe('Sell');
+      expect(positionUpdate.size).toBe(0.5);
+      expect(positionUpdate.entryPrice).toBe(65000);
+      expect(positionUpdate.unrealisedPnl).toBe(-12.5);
+    });
+
+    it('reports the balance change: futures state the wallet balance, not free and locked', () => {
+      const { client } = createClient();
+      const handler = { onOrderUpdate: jest.fn(), onPositionUpdate: jest.fn(), onBalanceUpdate: jest.fn() };
+
+      emitAccountUpdate(client, handler);
+
+      const [balanceUpdate] = handler.onBalanceUpdate.mock.calls[0];
+
+      expect(balanceUpdate.balanceList).toEqual([
+        { asset: 'USDT', free: null, locked: null, total: 1234.5 },
+      ]);
     });
   });
 

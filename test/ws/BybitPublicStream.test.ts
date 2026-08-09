@@ -6,7 +6,7 @@ import { createMockLogger } from '../fixtures/mockLogger';
 let capturedOnMessage: ((message: any) => void) | undefined;
 let capturedParseMessage: ((rawData: any) => any) | undefined;
 let capturedOnReconnectSuccess: (() => void) | undefined;
-let _capturedOnOpen: (() => Promise<void>) | undefined;
+let _capturedOnOpen: ((context: unknown) => Promise<void>) | undefined;
 
 const mockContextSend = jest.fn();
 
@@ -1154,6 +1154,29 @@ describe('BybitPublicStream', () => {
       }
       expect(infoList.some((info) => info.subscriptionList.every((entry) => entry.startsWith('Orderbook')))).toBe(true);
       expect(infoList.some((info) => info.subscriptionList.every((entry) => entry.startsWith('Klines')))).toBe(true);
+    });
+  });
+
+  // Ожидание готовности потоков у Bybit возвращалось МГНОВЕННО (базовый класс отдавал уже
+  // решённое обещание), и бот начинал торговать на пустом кэше. У соседней биржи это
+  // ожидание настоящее.
+  describe('awaitConnectionsReady', () => {
+    it('does not resolve before the connection has opened', async () => {
+      const stream = new BybitPublicStream({ url: 'wss://stream.bybit.com/v5/public/linear', logger: mockLogger, onNotify: undefined, label: 'test' });
+      stream.subscribeKlines('BTCUSDT', '1m' as never, jest.fn());
+
+      let isResolved = false;
+      const readyPromise = stream.awaitConnectionsReady().then(() => { isResolved = true; });
+
+      // Пока сокет не открылся, ждать обязано.
+      await Promise.resolve();
+      expect(isResolved).toBe(false);
+
+      _capturedOnOpen?.({ send: mockContextSend, waitForMessage: jest.fn() });
+      await readyPromise;
+
+      expect(isResolved).toBe(true);
+      stream.close();
     });
   });
 });

@@ -11,18 +11,22 @@ import type {
   FundingRateHistory,
   FundingInfo,
   OrderBook,
+  OrderBookRawLevel,
+  OrderBookUpdate,
   PublicTrade,
   MarkPrice,
   MarkPriceUpdate,
   OpenInterest,
   FeeRate,
   Income,
+  ClosedPnl,
   PriceLimitRisk,
 } from '../types/common';
 import { TradeSymbolTypeEnum, PositionSideEnum, MarginModeEnum, TimeInForceEnum, OrderSideEnum } from '../types/common';
 import type { OrderRateLimit } from '../types/exchange';
-import { BINANCE_POSITION_SIDE, BINANCE_ORDER_SIDE, BINANCE_ORDER_TYPE, BINANCE_ORDER_STATUS, BINANCE_TIME_IN_FORCE } from '../constants/mappings';
+import { BINANCE_POSITION_SIDE, BINANCE_POSITION_IDX, BINANCE_ORDER_SIDE, BINANCE_ORDER_TYPE, BINANCE_ORDER_STATUS, BINANCE_ALGO_STATUS, BINANCE_TIME_IN_FORCE } from '../constants/mappings';
 import { parseOrderBookLevel } from './normalizerUtils';
+import { isConditionalOrderType } from '../constants/orderTypes';
 
 interface BinancePriceFilterRaw {
   filterType: 'PRICE_FILTER';
@@ -267,6 +271,46 @@ export interface BinanceOrderResponseRaw {
   reduceOnly: boolean;
   time: number;
   updateTime: number;
+}
+
+/**
+ * Ответ Algo-службы Binance USDⓈ-M. Имена полей отличаются от обычной заявки:
+ * algoId вместо orderId, clientAlgoId вместо clientOrderId, triggerPrice вместо stopPrice.
+ * Замерено на живом ответе биржи 07.08.2026.
+ */
+export interface BinanceAlgoOrderRaw {
+  algoId: number;
+  clientAlgoId: string;
+  algoType: string;
+  orderType: string;
+  symbol: string;
+  side: string;
+  positionSide?: string;
+  /** Возвращается в том числе как GTE_GTC — значения нет ни в одном перечне на вход. */
+  timeInForce?: string;
+  /** У заявки «закрыть всю позицию» биржа отдаёт "0". */
+  quantity: string;
+  algoStatus: string;
+  /** Номер порождённой обычной заявки; пустая строка, пока не сработала. */
+  actualOrderId?: string;
+  actualPrice?: string;
+  actualType?: string;
+  actualQty?: string;
+  triggerPrice: string;
+  price: string;
+  /** Живая биржа отдаёт настоящий null, хотя в примере документации стоит строка "null". */
+  icebergQuantity?: string | null;
+  tpOrderType?: string;
+  selfTradePreventionMode?: string;
+  workingType?: string;
+  priceMatch?: string;
+  closePosition?: boolean;
+  priceProtect?: boolean;
+  reduceOnly?: boolean;
+  createTime: number;
+  updateTime: number;
+  triggerTime?: number;
+  goodTillDate?: number;
 }
 
 interface BinanceBalanceRaw {
@@ -557,17 +601,28 @@ export function normalizeBinancePosition(raw: BinancePositionRiskRaw): Position 
     leverage: safeLeverage,
     marginMode,
     liquidationPrice: isNaN(liquidationPriceRaw) ? 0 : liquidationPriceRaw,
+    // Какая из двух сторон — сведения, которые уже есть в ответе, поэтому заполняются ЗДЕСЬ,
+    // на всех путях чтения сразу: раньше три метода дописывали это вручную, а четвёртый
+    // забывал, и читатель в двустороннем режиме не понимал, какую позицию ему дали.
+    // Односторонний режим помечается нулём — тем же числом, что и у соседней биржи.
+    positionIdx: BINANCE_POSITION_IDX[raw.positionSide] ?? 0,
     info: raw,
   };
 }
 
 export function normalizeBinanceOrder(raw: BinanceOrderResponseRaw): Order {
+  const type = BINANCE_ORDER_TYPE[raw.type] ?? raw.type.toLowerCase() as never;
+
   return {
     id: String(raw.orderId),
     clientOrderId: raw.clientOrderId ?? '',
     symbol: raw.symbol,
     side: BINANCE_ORDER_SIDE[raw.side] ?? OrderSideEnum.Buy,
-    type: BINANCE_ORDER_TYPE[raw.type] ?? raw.type.toLowerCase() as never,
+    type,
+    // Условность — свойство ТИПА заявки, а не её цены срабатывания. Раньше защитные
+    // заявки отбирались условием «цена срабатывания больше нуля», и заявка с нулевой
+    // ценой была невидима.
+    isConditional: isConditionalOrderType(type),
     timeInForce: BINANCE_TIME_IN_FORCE[raw.timeInForce] ?? TimeInForceEnum.Gtc,
     price: parseFloat(raw.price),
     avgPrice: parseFloat(raw.avgPrice ?? '0'),
@@ -579,6 +634,90 @@ export function normalizeBinanceOrder(raw: BinanceOrderResponseRaw): Order {
     reduceOnly: raw.reduceOnly ?? false,
     timestamp: raw.time ?? raw.updateTime,
     updatedTimestamp: raw.updateTime,
+  };
+}
+
+function parseFiniteFloat(value: string | null | undefined): number {
+  if (value === undefined || value === null || value === '') {
+    return 0;
+  }
+
+  const parsed = parseFloat(value);
+
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+/**
+ * Ответ действительно принадлежит Algo-службе, а не пришёл из обычной книги.
+ * Нужна потому, что при неизвестном происхождении номера мы спрашиваем обе службы, и принять
+ * чужой ответ за свой значит вернуть не ту заявку.
+ */
+/** Ответ действительно принадлежит обычной книге заявок. Пара к проверке ниже. */
+export function isBinanceOrderResponseRaw(value: unknown): value is BinanceOrderResponseRaw {
+  if (value === null || typeof value !== 'object') {
+    return false;
+  }
+
+  const candidate = value as Partial<BinanceOrderResponseRaw>;
+
+  return typeof candidate.orderId === 'number' && typeof candidate.type === 'string';
+}
+
+export function isBinanceAlgoOrderRaw(value: unknown): value is BinanceAlgoOrderRaw {
+  if (value === null || typeof value !== 'object') {
+    return false;
+  }
+
+  const candidate = value as Partial<BinanceAlgoOrderRaw>;
+
+  return typeof candidate.algoId === 'number' && typeof candidate.orderType === 'string';
+}
+
+export function normalizeBinanceAlgoOrder(raw: BinanceAlgoOrderRaw): Order {
+  const triggeredOrderId =
+    raw.actualOrderId !== undefined && raw.actualOrderId !== '' ? raw.actualOrderId : undefined;
+
+  return {
+    id: String(raw.algoId),
+    clientOrderId: raw.clientAlgoId ?? '',
+    symbol: raw.symbol,
+    side: BINANCE_ORDER_SIDE[raw.side] ?? OrderSideEnum.Buy,
+    type: BINANCE_ORDER_TYPE[raw.orderType] ?? raw.orderType.toLowerCase() as never,
+    timeInForce: BINANCE_TIME_IN_FORCE[raw.timeInForce ?? ''] ?? TimeInForceEnum.Gtc,
+    price: parseFiniteFloat(raw.price),
+    avgPrice: parseFiniteFloat(raw.actualPrice),
+    stopPrice: parseFiniteFloat(raw.triggerPrice),
+    amount: parseFiniteFloat(raw.quantity),
+    // actualQty НЕ берём: документация не говорит, исполненный это объём или заявленный,
+    // а принять заявленный за исполненный значит записать закрытие, которого не было.
+    // Честное заполнение подмешивается из порождённой заявки (mergeBinanceTriggeredOrder).
+    filledAmount: 0,
+    filledQuoteAmount: 0,
+    status: BINANCE_ALGO_STATUS[raw.algoStatus] ?? raw.algoStatus.toLowerCase(),
+    reduceOnly: raw.reduceOnly ?? false,
+    timestamp: raw.createTime,
+    updatedTimestamp: raw.updateTime,
+    isConditional: true,
+    closePosition: raw.closePosition ?? false,
+    ...(triggeredOrderId === undefined ? {} : { triggeredOrderId }),
+  };
+}
+
+/**
+ * Подмешивает в условную заявку фактическое исполнение из порождённой обычной заявки.
+ * Собственные поля условной (номер, цена срабатывания, заявленный объём) не трогаются —
+ * снаружи это по-прежнему та же заявка, у которой лишь стало известно исполнение.
+ */
+export function mergeBinanceTriggeredOrder(
+  conditionalOrder: Order,
+  triggeredRaw: BinanceOrderResponseRaw,
+): Order {
+  return {
+    ...conditionalOrder,
+    avgPrice: parseFiniteFloat(triggeredRaw.avgPrice),
+    filledAmount: parseFiniteFloat(triggeredRaw.executedQty),
+    filledQuoteAmount: parseFiniteFloat(triggeredRaw.cumQuote),
+    status: BINANCE_ORDER_STATUS[triggeredRaw.status] ?? conditionalOrder.status,
   };
 }
 
@@ -749,6 +888,145 @@ export interface BinanceIncomeRaw {
   info: string;
   tranId: number;
   tradeId: string;
+}
+
+export interface BinanceUserTradeRaw {
+  id: number;
+  orderId: number;
+  symbol: string;
+  side: string;
+  positionSide: string;
+  price: string;
+  qty: string;
+  quoteQty: string;
+  /** ВАЛОВОЙ итог: комиссия в него НЕ входит, она списывается отдельной строкой.
+   *  Проверено на живом счёте 08.08.2026 — сумма по сделкам сошлась с начислением
+   *  REALIZED_PNL до восьмого знака, а комиссия пришла отдельным начислением. */
+  realizedPnl: string;
+  commission: string;
+  commissionAsset: string;
+  time: number;
+}
+
+/**
+ * Итог закрытия из собственных сделок счёта. Готовой ручки у Binance нет, а у Bybit есть, и
+ * потребитель обязан получать одно и то же — включая СМЫСЛ полей:
+ *
+ * - `closedPnl` — итог ЧИСТЫЙ, после комиссии (у Bybit он приходит таким же — сверено
+ *   арифметикой на примере из их документации). Binance отдаёт валовой, поэтому комиссия
+ *   вычитается здесь.
+ * - `entryPrice` — у Binance его в сделках нет вовсе, поэтому он выводится из тождества
+ *   «валовой итог = (вход − выход) × объём» для шорта и наоборот для лонга. Так сохраняется
+ *   свойство, на которое опираются потребители: валовой минус чистый равен комиссии.
+ *
+ * Заполнения, ничего не закрывшие (открытие позиции), пропускаются — у них нулевой итог.
+ */
+interface BinanceClosingGroup {
+  fillList: BinanceUserTradeRaw[];
+  /** Доля комиссии ОТКРЫТИЯ, приходящаяся на закрытый этой заявкой объём. */
+  openingCommission: number;
+}
+
+export function buildBinanceClosedPnlList(rawList: BinanceUserTradeRaw[]): ClosedPnl[] {
+  const groupByOrderId = new Map<string, BinanceClosingGroup>();
+  // Комиссию за вход биржа берёт в момент открытия, когда закрывать ещё нечего. Копим её и
+  // раздаём закрывающим заявкам пропорционально закрытому объёму — иначе итог сделки
+  // окажется завышен ровно на комиссию входа (замерено на живом счёте: 7.03$ за неделю).
+  let openingCommissionPool = 0;
+  let openQuantityPool = 0;
+
+  const chronologicalList = [...rawList].sort((left, right) => left.time - right.time || left.id - right.id);
+
+  for (const raw of chronologicalList) {
+    const quantity = parseFloat(raw.qty);
+
+    if (parseFloat(raw.realizedPnl) === 0) {
+      openingCommissionPool += parseFloat(raw.commission);
+      openQuantityPool += quantity;
+
+      continue;
+    }
+
+    const openingShare = openQuantityPool > 0
+      ? openingCommissionPool * Math.min(quantity / openQuantityPool, 1)
+      : 0;
+    openingCommissionPool -= openingShare;
+    openQuantityPool = Math.max(openQuantityPool - quantity, 0);
+
+    const orderId = String(raw.orderId);
+    const group = groupByOrderId.get(orderId);
+
+    if (group === undefined) {
+      groupByOrderId.set(orderId, { fillList: [raw], openingCommission: openingShare });
+    } else {
+      group.fillList.push(raw);
+      group.openingCommission += openingShare;
+    }
+  }
+
+  const closedPnlList: ClosedPnl[] = [];
+
+  for (const [orderId, group] of groupByOrderId) {
+    const { fillList } = group;
+    const quantity = fillList.reduce((sum, raw) => sum + parseFloat(raw.qty), 0);
+
+    if (quantity <= 0) {
+      continue;
+    }
+
+    const grossPnl = fillList.reduce((sum, raw) => sum + parseFloat(raw.realizedPnl), 0);
+    const commission = fillList.reduce((sum, raw) => sum + parseFloat(raw.commission), 0) + group.openingCommission;
+    const exitPrice = fillList.reduce((sum, raw) => sum + parseFloat(raw.price) * parseFloat(raw.qty), 0) / quantity;
+    const side = BINANCE_ORDER_SIDE[fillList[0].side] ?? OrderSideEnum.Buy;
+    // Закрывающая покупка закрывает шорт, закрывающая продажа — лонг.
+    const entryPrice = side === OrderSideEnum.Buy
+      ? exitPrice + grossPnl / quantity
+      : exitPrice - grossPnl / quantity;
+
+    closedPnlList.push({
+      symbol: fillList[0].symbol,
+      orderId,
+      side,
+      quantity,
+      entryPrice,
+      exitPrice,
+      closedPnl: grossPnl - commission,
+      timestamp: fillList.reduce((latest, raw) => Math.max(latest, raw.time), 0),
+    });
+  }
+
+  return closedPnlList;
+}
+
+export interface BinanceDepthWebSocketRaw {
+  e: string;
+  E: number;
+  s: string;
+  U?: number;
+  u: number;
+  b: OrderBookRawLevel[];
+  a: OrderBookRawLevel[];
+}
+
+/**
+ * Кадр стакана из потока. Мы подписываемся на «частичную глубину» — биржа присылает готовый
+ * срез верхних уровней, а не поправку к предыдущему, поэтому вид кадра всегда «снимок».
+ * Форма ответа общая с соседней биржей: склейку делает потребитель, а не слой связи.
+ */
+export function normalizeBinanceOrderBookUpdate(
+  raw: BinanceDepthWebSocketRaw,
+  symbol: string,
+  receivedTimestamp: number,
+): OrderBookUpdate {
+  return {
+    symbol,
+    updateType: 'snapshot',
+    bidList: Array.isArray(raw.b) ? raw.b : [],
+    askList: Array.isArray(raw.a) ? raw.a : [],
+    updateId: Number(raw.u),
+    eventTimestamp: Number(raw.E),
+    receivedTimestamp,
+  };
 }
 
 export function normalizeBinanceOrderBook(raw: BinanceOrderBookRaw, symbol: string): OrderBook {

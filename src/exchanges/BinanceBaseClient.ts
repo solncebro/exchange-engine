@@ -29,10 +29,13 @@ import {
 import {
   BINANCE_FUTURES_ORDER_TYPE_REVERSE,
   BINANCE_SPOT_ORDER_TYPE_REVERSE,
-  BINANCE_WORKING_TYPE,
   BINANCE_ORDER_STATUS,
+  BINANCE_ALGO_STATUS,
   BINANCE_FUTURES_TIME_IN_FORCE_REVERSE,
 } from '../constants/mappings';
+import { BINANCE_SPOT_TRAILING_UNITS_PER_PERCENT } from '../constants/binance';
+import { isConditionalOrderType } from '../constants/orderTypes';
+import { ExchangeError } from '../errors/ExchangeError';
 import { BinanceUserDataStream } from '../ws/BinanceUserDataStream';
 import { BinanceTradeStream } from '../ws/BinanceTradeStream';
 import { BaseExchangeClient } from './BaseExchangeClient';
@@ -47,7 +50,7 @@ abstract class BinanceBaseClient<T extends BinanceBaseHttpClient> extends BaseEx
   protected userDataStream: BinanceUserDataStream | null = null;
 
   private readonly publicStream: PublicStreamLike;
-  private readonly tradeStream: BinanceTradeStream;
+  protected readonly tradeStream: BinanceTradeStream;
   private readonly userDataWebSocketUrl: string;
   private listenKey: string | null = null;
   private listenKeyKeepAliveTimer: ReturnType<typeof setInterval> | null = null;
@@ -114,6 +117,18 @@ abstract class BinanceBaseClient<T extends BinanceBaseHttpClient> extends BaseEx
 
   protected buildBinanceOrderParams(args: CreateOrderWebSocketArgs): Record<string, unknown> {
     const isSpot = this.marketLabel === 'spot';
+
+    // На фьючерсах условные заявки живут в отдельной службе и сюда попасть не должны:
+    // развилка уводит их раньше. Если попали — это ошибка в самой библиотеке, и честнее
+    // сказать об этом громко, чем собрать запрос, который биржа отобьёт кодом -4120.
+    if (!isSpot && isConditionalOrderType(args.type)) {
+      throw new ExchangeError(
+        `Binance futures: conditional order type ${args.type} must go to the conditional service, not the plain order endpoint`,
+        'CONDITIONAL_ORDER_WRONG_ENDPOINT',
+        'binance',
+      );
+    }
+
     const typeMap = isSpot ? BINANCE_SPOT_ORDER_TYPE_REVERSE : BINANCE_FUTURES_ORDER_TYPE_REVERSE;
     const binanceType = typeMap[args.type] ?? args.type.toUpperCase();
 
@@ -123,7 +138,21 @@ abstract class BinanceBaseClient<T extends BinanceBaseHttpClient> extends BaseEx
       type: binanceType,
     };
 
-    if (isSpot && args.quoteOrderQty !== undefined && args.quoteOrderQty > 0) {
+    // Сумму в котируемой валюте биржа принимает ТОЛЬКО на рыночной заявке — её собственный
+    // признак так и называется, «разрешено для рыночных», лимитного соответствия нет
+    // (сверено с данными биржи 08.08.2026). Раньше сумма проходила и на лимитной, и заявка
+    // уходила вообще без объёма.
+    const isQuoteSized = isSpot && args.quoteOrderQty !== undefined && args.quoteOrderQty > 0;
+
+    if (isQuoteSized && args.type !== OrderTypeEnum.Market) {
+      throw new ExchangeError(
+        'Binance spot accepts an amount in quote currency on MARKET orders only',
+        'QUOTE_AMOUNT_MARKET_ONLY',
+        'binance',
+      );
+    }
+
+    if (isQuoteSized) {
       orderParams.quoteOrderQty = String(args.quoteOrderQty);
     } else {
       orderParams.quantity = String(this.amountToPrecision(args.symbol, args.amount));
@@ -133,20 +162,18 @@ abstract class BinanceBaseClient<T extends BinanceBaseHttpClient> extends BaseEx
       orderParams.price = String(this.priceToPrecision(args.symbol, args.price));
     }
 
-    if (args.stopPrice !== undefined && args.stopPrice > 0) {
+    // Цена срабатывания и запас скольжения — параметры СПОТА: там условные заявки
+    // по-прежнему ставятся этим входом. На фьючерсах таких параметров у обычной заявки нет,
+    // и запас скольжения раньше уходил туда без всякого ограждения — это чинится здесь.
+    if (isSpot && args.stopPrice !== undefined && args.stopPrice > 0) {
       orderParams.stopPrice = String(this.priceToPrecision(args.symbol, args.stopPrice));
     }
 
-    if (args.trailingDelta !== undefined) {
-      orderParams.trailingDelta = String(args.trailingDelta);
-    }
-
-    if (!isSpot && args.closePosition !== undefined) {
-      orderParams.closePosition = args.closePosition;
-    }
-
-    if (!isSpot && args.workingType !== undefined) {
-      orderParams.workingType = BINANCE_WORKING_TYPE[args.workingType] ?? args.workingType;
+    // Отступ скольжения снаружи ВСЕГДА в процентах — единственная единица во всей библиотеке.
+    // Спот Binance считает его в своих сотых долях процента; перевод живёт здесь, на границе,
+    // и наружу биржевая единица не выходит.
+    if (isSpot && args.callbackRate !== undefined && args.callbackRate > 0) {
+      orderParams.trailingDelta = String(Math.round(args.callbackRate * BINANCE_SPOT_TRAILING_UNITS_PER_PERCENT));
     }
 
     const positionSide = args.positionSide;
@@ -224,7 +251,7 @@ abstract class BinanceBaseClient<T extends BinanceBaseHttpClient> extends BaseEx
     this.logger.debug('[Binance] Fetching open conditional (stop) orders');
     const rawList = await this.httpClient.getOpenOrders(undefined);
 
-    return rawList.map(normalizeBinanceOrder).filter((order) => order.stopPrice > 0);
+    return rawList.map(normalizeBinanceOrder).filter((order) => order.isConditional === true);
   }
 
   async fetchOrderBook(symbol: string, limit?: number): Promise<OrderBook> {
@@ -249,7 +276,24 @@ abstract class BinanceBaseClient<T extends BinanceBaseHttpClient> extends BaseEx
     await this.tradeStream.connect();
   }
 
+  /**
+   * Условная заявка на той бирже/рынке, где она исполняется отдельной службой.
+   * Основание всегда отдаёт null — спот Binance условные заявки ставит прежним входом,
+   * поэтому его путь этой развилкой доказуемо не затрагивается.
+   */
+  protected async tryCreateConditionalOrder(_args: CreateOrderWebSocketArgs): Promise<Order | null> {
+    return null;
+  }
+
   async createOrderWebSocket(args: CreateOrderWebSocketArgs): Promise<Order> {
+    // Развилка берётся ДО выбора транспорта: у условной заявки собственные методы и в
+    // канале связи, и среди обычных запросов.
+    const conditionalOrder = await this.tryCreateConditionalOrder(args);
+
+    if (conditionalOrder !== null) {
+      return conditionalOrder;
+    }
+
     const orderParams = this.buildBinanceOrderParams(args);
 
     if (this.tradeStream.isConnected()) {
@@ -402,6 +446,8 @@ abstract class BinanceBaseClient<T extends BinanceBaseHttpClient> extends BaseEx
       };
 
       handler.onOrderUpdate(orderUpdate);
+
+      return;
     }
 
     if (eventType === 'ACCOUNT_UPDATE') {
@@ -409,6 +455,22 @@ abstract class BinanceBaseClient<T extends BinanceBaseHttpClient> extends BaseEx
 
       if (!accountData) {
         return;
+      }
+
+      const balanceList = accountData.B;
+
+      if (Array.isArray(balanceList) && handler.onBalanceUpdate !== undefined) {
+        // Фьючерсы называют остаток кошелька; свободного и заблокированного здесь нет —
+        // выдавать их нулями значило бы придумать числа, которых биржа не присылала.
+        handler.onBalanceUpdate({
+          balanceList: (balanceList as Array<Record<string, unknown>>).map((rawBalance) => ({
+            asset: rawBalance.a as string,
+            free: null,
+            locked: null,
+            total: Number(rawBalance.wb),
+          })),
+          timestamp: event.T as number,
+        });
       }
 
       const positionList = accountData.P as Array<Record<string, unknown>>;
@@ -423,17 +485,60 @@ abstract class BinanceBaseClient<T extends BinanceBaseHttpClient> extends BaseEx
           side: Number(positionData.pa) > 0 ? 'Buy' : (Number(positionData.pa) < 0 ? 'Sell' : ''),
           size: Math.abs(Number(positionData.pa)),
           entryPrice: Number(positionData.ep),
-          markPrice: 0,
           unrealisedPnl: Number(positionData.up),
-          leverage: 0,
-          liquidationPrice: 0,
           positionSide: positionData.ps as string,
           timestamp: event.T as number,
+          // Этих трёх в событии Binance нет вовсе — раньше здесь стояли нули, неотличимые
+          // от настоящих значений. Пусто честнее: сторож видит «не сообщили» и может
+          // дочитать позицию, а не сравнивать с нулём.
+          markPrice: null,
+          leverage: null,
+          liquidationPrice: null,
         };
 
         handler.onPositionUpdate(positionUpdate);
       }
+
+      return;
     }
+
+    if (eventType === 'ALGO_UPDATE') {
+      const algoData = event.o as Record<string, unknown>;
+
+      if (!algoData) {
+        return;
+      }
+
+      const triggeredOrderId = algoData.ai === undefined || algoData.ai === '' ? undefined : String(algoData.ai);
+      const rejectReason = typeof algoData.rm === 'string' && algoData.rm !== '' ? algoData.rm : undefined;
+
+      const orderUpdate: OrderUpdateEvent = {
+        symbol: algoData.s as string,
+        // Номер СОБСТВЕННО условной заявки, а не порождённой: вызывающий помнит именно его.
+        orderId: String(algoData.aid),
+        clientOrderId: algoData.caid as string,
+        side: (algoData.S as string).toLowerCase() === 'buy' ? OrderSideEnum.Buy : OrderSideEnum.Sell,
+        status: BINANCE_ALGO_STATUS[algoData.X as string] ?? 'open',
+        price: Number(algoData.p),
+        avgPrice: Number(algoData.ap ?? 0),
+        amount: Number(algoData.q),
+        filledAmount: Number(algoData.aq ?? 0),
+        timestamp: event.T as number,
+        isConditional: true,
+        ...(triggeredOrderId === undefined ? {} : { triggeredOrderId }),
+        // Отказ приходит на СРАБАТЫВАНИИ: маржа проверяется только в этот момент, и позиция
+        // остаётся без защиты. Прежнее отдельное событие отказа упразднено 15.12.2025.
+        ...(rejectReason === undefined ? {} : { rejectReason }),
+      };
+
+      handler.onOrderUpdate(orderUpdate);
+
+      return;
+    }
+
+    // Неопознанные типы раньше исчезали бесследно — из-за этого смену формата потока
+    // не заметили бы второй раз.
+    this.logger.debug(`[${this.exchangeLabel}] Unhandled user data event type: ${eventType}`);
   }
 
   async close(): Promise<void> {

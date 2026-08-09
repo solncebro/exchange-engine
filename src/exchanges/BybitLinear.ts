@@ -1,7 +1,13 @@
 import type { CreateOrderWebSocketArgs, ExchangeArgs, FetchPageWithLimitArgs } from '../types/exchange';
 import type { Position, Order, FundingRateHistory, FundingInfo, MarkPrice, OpenInterest } from '../types/common';
-import { MarginModeEnum, PositionModeEnum } from '../types/common';
+import { MarginModeEnum, OrderSideEnum, OrderTypeEnum, PositionModeEnum, TimeInForceEnum } from '../types/common';
 import { ExchangeError } from '../errors/ExchangeError';
+import type { BybitPositionIdx } from './bybitTrailingStopId';
+import {
+  buildBybitTrailingStopId,
+  parseBybitTrailingStopId,
+  resolveBybitPositionIdx,
+} from './bybitTrailingStopId';
 import {
   normalizeBybitPosition,
   normalizeBybitFundingRateHistoryList,
@@ -15,6 +21,21 @@ import {
 import { BybitBaseClient } from './BybitBaseClient';
 
 const BYBIT_LEVERAGE_NOOP_ERROR_CODE = 110043;
+
+/** Скольжение ведёт позицию целиком: частичного режима у него в нашем контракте нет. */
+const BYBIT_TRAILING_STOP_TPSL_MODE = 'Full';
+
+/** Как Bybit называет режимы маржи счёта; «обычный» у него и есть кросс-маржа. */
+const BYBIT_ISOLATED_MARGIN_MODE = 'ISOLATED_MARGIN';
+const BYBIT_CROSS_MARGIN_MODE = 'REGULAR_MARGIN';
+
+interface BuildBybitTrailingStopOrderArgs {
+  symbol: string;
+  positionIdx: BybitPositionIdx;
+  side: OrderSideEnum;
+  activationPrice: number;
+  status: string;
+}
 
 class BybitLinear extends BybitBaseClient {
   protected readonly marketLabel = 'linear';
@@ -31,9 +52,157 @@ class BybitLinear extends BybitBaseClient {
   }
 
   async createOrderWebSocket(args: CreateOrderWebSocketArgs): Promise<Order> {
+    if (args.type === OrderTypeEnum.TrailingStop) {
+      return this.placeTrailingStop(args);
+    }
+
     const orderParams = this.buildBybitOrderParams(args);
 
     return this.submitOrder(orderParams, args);
+  }
+
+  /**
+   * Отступ снаружи приходит в процентах, а Bybit принимает его расстоянием в цене, поэтому
+   * нужна опора. Ею служит цена вооружения, если она названа: именно от неё скольжение
+   * начинает вести. Не названа — берём текущую цену маркировки, то есть ту же точку, от
+   * которой биржа поведёт стоп прямо сейчас.
+   */
+  private async resolveTrailingReferencePrice(args: CreateOrderWebSocketArgs): Promise<number> {
+    if (args.activationPrice !== undefined && args.activationPrice > 0) {
+      return args.activationPrice;
+    }
+
+    const markPriceList = await this.fetchMarkPrice(args.symbol);
+    const markPrice = markPriceList.find((entry) => entry.symbol === args.symbol)?.markPrice;
+
+    if (markPrice === undefined || markPrice <= 0) {
+      throw new ExchangeError(
+        `Bybit: cannot arm a trailing stop for ${args.symbol} — no mark price to measure the offset from`,
+        'TRAILING_STOP_NO_REFERENCE_PRICE',
+        'bybit',
+      );
+    }
+
+    return markPrice;
+  }
+
+  private async placeTrailingStop(args: CreateOrderWebSocketArgs): Promise<Order> {
+    if (args.callbackRate === undefined || args.callbackRate <= 0) {
+      throw new ExchangeError(
+        `Bybit: a trailing stop for ${args.symbol} needs a positive offset in percent`,
+        'TRAILING_STOP_OFFSET_MISSING',
+        'bybit',
+      );
+    }
+
+    const positionIdx = resolveBybitPositionIdx(args.positionSide);
+    const referencePrice = await this.resolveTrailingReferencePrice(args);
+    // Расстояние — тоже цена, поэтому кладём его на сетку символа: не по сетке биржа отобьёт.
+    const trailingDistance = this.priceToPrecision(args.symbol, referencePrice * args.callbackRate / 100);
+
+    const params: Record<string, unknown> = {
+      category: 'linear',
+      symbol: args.symbol,
+      tpslMode: BYBIT_TRAILING_STOP_TPSL_MODE,
+      positionIdx,
+      trailingStop: String(trailingDistance),
+    };
+
+    if (args.activationPrice !== undefined && args.activationPrice > 0) {
+      params.activePrice = String(this.priceToPrecision(args.symbol, args.activationPrice));
+    }
+
+    this.logger.debug(
+      `[Bybit] Arming trailing stop for ${args.symbol}: offset ${args.callbackRate}% = ${trailingDistance} in price`,
+    );
+    await this.httpClient.setTradingStop(params);
+
+    return this.buildTrailingStopOrder({
+      symbol: args.symbol,
+      positionIdx,
+      side: args.side,
+      activationPrice: args.activationPrice ?? 0,
+      status: 'open',
+    });
+  }
+
+  private buildTrailingStopOrder(args: BuildBybitTrailingStopOrderArgs): Order {
+    const timestamp = Date.now();
+
+    return {
+      id: buildBybitTrailingStopId(args.positionIdx),
+      clientOrderId: '',
+      symbol: args.symbol,
+      side: args.side,
+      type: OrderTypeEnum.TrailingStop,
+      timeInForce: TimeInForceEnum.Gtc,
+      price: 0,
+      avgPrice: 0,
+      // Цена вооружения — единственный уровень, который у скольжения вообще есть заранее:
+      // уровень выхода биржа ведёт сама и наружу до срабатывания не отдаёт.
+      stopPrice: args.activationPrice,
+      amount: 0,
+      filledAmount: 0,
+      filledQuoteAmount: 0,
+      status: args.status,
+      reduceOnly: true,
+      isConditional: true,
+      closePosition: true,
+      timestamp,
+      updatedTimestamp: timestamp,
+    };
+  }
+
+  async cancelOrder(symbol: string, orderId: string): Promise<Order> {
+    const positionIdx = parseBybitTrailingStopId(orderId);
+
+    if (positionIdx === null) {
+      return super.cancelOrder(symbol, orderId);
+    }
+
+    this.logger.debug(`[Bybit] Clearing trailing stop for ${symbol} (positionIdx=${positionIdx})`);
+    // Нулевое расстояние — документированный способ снять скольжение; отдельной отмены нет.
+    await this.httpClient.setTradingStop({
+      category: 'linear',
+      symbol,
+      tpslMode: BYBIT_TRAILING_STOP_TPSL_MODE,
+      positionIdx,
+      trailingStop: '0',
+    });
+
+    return this.buildTrailingStopOrder({
+      symbol,
+      positionIdx,
+      side: OrderSideEnum.Buy,
+      activationPrice: 0,
+      status: 'canceled',
+    });
+  }
+
+  async getOrder(symbol: string, orderId: string): Promise<Order> {
+    const positionIdx = parseBybitTrailingStopId(orderId);
+
+    if (positionIdx === null) {
+      return super.getOrder(symbol, orderId);
+    }
+
+    const raw = await this.httpClient.getPositionList('linear', { symbol });
+    const positionRaw = (raw.result.list ?? []).find((entry) => entry.positionIdx === positionIdx);
+    const trailingDistance = parseFloat(String(positionRaw?.['trailingStop'] ?? '0'));
+
+    // Нулевое расстояние на бирже означает «скольжения нет». Отдать его как вооружённую
+    // заявку было бы ложью того же сорта, что и молча проглоченный запрос.
+    if (!positionRaw || !(trailingDistance > 0)) {
+      throw new Error(`Trailing stop ${orderId} not found for ${symbol}`);
+    }
+
+    return this.buildTrailingStopOrder({
+      symbol,
+      positionIdx,
+      side: positionRaw.side === 'Buy' ? OrderSideEnum.Sell : OrderSideEnum.Buy,
+      activationPrice: parseFloat(String(positionRaw['activePrice'] ?? '0')),
+      status: 'open',
+    });
   }
 
   async fetchFundingRateHistory(symbol: string, options?: FetchPageWithLimitArgs): Promise<FundingRateHistory[]> {
@@ -145,8 +314,34 @@ class BybitLinear extends BybitBaseClient {
     }
   }
 
-  async setMarginMode(_marginMode: MarginModeEnum, _symbol: string): Promise<void> {
-    this.logger.info('[Bybit] setMarginMode skipped (Unified Account manages margin mode at account level)');
+  /**
+   * На едином счёте Bybit режим маржи — свойство ВСЕГО счёта, а не отдельного символа
+   * (проверено живым чтением 08.08.2026). Раньше метод просто писал строчку в журнал: у
+   * потребителя, попросившего изолированную маржу перед рискованным входом, счёт оставался
+   * в прежнем режиме, и узнать об этом было неоткуда.
+   *
+   * Сначала читаем текущий режим и молчим, если он уже нужный: лишняя запись в настройки
+   * счёта — не бесплатное действие, а биржа отбивает её ошибкой.
+   */
+  async setMarginMode(marginMode: MarginModeEnum, symbol: string): Promise<void> {
+    const desiredMode = marginMode === MarginModeEnum.Isolated
+      ? BYBIT_ISOLATED_MARGIN_MODE
+      : BYBIT_CROSS_MARGIN_MODE;
+    const accountInfo = await this.httpClient.fetchAccountInfo();
+    const currentMode = accountInfo.result['marginMode'];
+
+    if (currentMode === desiredMode) {
+      this.logger.debug(`[Bybit] Margin mode already ${desiredMode} — nothing to switch for ${symbol}`);
+
+      return;
+    }
+
+    // Просили за символ, меняем счёт целиком — потребитель обязан узнать об этом громко,
+    // иначе соседние позиции поедут в другом режиме молча.
+    this.logger.warn(
+      `[Bybit] Margin mode is an ACCOUNT-WIDE setting: switching to ${desiredMode} for ${symbol} affects every symbol on this account`,
+    );
+    await this.httpClient.setMarginMode(desiredMode);
   }
 
   async fetchMarkPrice(symbol?: string): Promise<MarkPrice[]> {

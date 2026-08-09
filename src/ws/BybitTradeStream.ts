@@ -2,12 +2,13 @@ import type { WebSocketOpenContext } from '@solncebro/websocket-engine';
 import { ReliableWebSocket } from '@solncebro/websocket-engine';
 
 import { ExchangeError } from '../errors/ExchangeError';
-import { buildBybitOrderFromCreateResponse } from '../normalizers/bybitNormalizer';
-import type { Order, OrderRateLimitSnapshot } from '../types/common';
+import { buildBybitCreateOutcome } from '../normalizers/bybitNormalizer';
+import type { OrderRateLimitSnapshot } from '../types/common';
 import { OrderSideEnum, OrderTypeEnum, TimeInForceEnum } from '../types/common';
 import type {
   CancelBatchOrdersResult,
   CancelOrderItemResult,
+  CreateBatchOrdersResult,
   CreateOrderWebSocketArgs,
   ModifyBatchOrdersResult,
   ModifyOrderItemResult,
@@ -36,12 +37,24 @@ type BybitPendingBatchContext =
 
 class BybitTradeStream extends BaseTradeStream<BybitTradeAnyMessage> {
   private pendingBatchContextByReqId: Map<string, BybitPendingBatchContext> = new Map();
+  /** Последний предел частоты, названный самой биржей в ответе на заявку. */
+  private lastReportedOrderRateLimit: OrderRateLimitSnapshot | null = null;
+
+  getLastReportedOrderRateLimit(): OrderRateLimitSnapshot | null {
+    return this.lastReportedOrderRateLimit;
+  }
+
+  private rememberOrderRateLimit(snapshot: OrderRateLimitSnapshot | undefined): void {
+    if (snapshot !== undefined) {
+      this.lastReportedOrderRateLimit = snapshot;
+    }
+  }
 
   async createBatchOrders(
     category: string,
     originalArgsList: CreateOrderWebSocketArgs[],
     requestPayloadList: Array<Record<string, unknown>>,
-  ): Promise<Order[]> {
+  ): Promise<CreateBatchOrdersResult> {
     await this.ensureConnectedHook();
     const reqId = this.generateReqId();
     const request = {
@@ -54,7 +67,7 @@ class BybitTradeStream extends BaseTradeStream<BybitTradeAnyMessage> {
     this.pendingBatchContextByReqId.set(reqId, { kind: 'create', originalArgsList });
 
     try {
-      return await this.sendRequest<Order[]>(request, reqId, PendingRequestKind.CreateBatch);
+      return await this.sendRequest<CreateBatchOrdersResult>(request, reqId, PendingRequestKind.CreateBatch);
     } catch (error) {
       this.pendingBatchContextByReqId.delete(reqId);
       throw error;
@@ -293,18 +306,19 @@ class BybitTradeStream extends BaseTradeStream<BybitTradeAnyMessage> {
     }
 
     const itemList = message.data?.list ?? [];
+    const extInfoList = message.retExtInfo?.list ?? [];
     const rateLimit = parseBybitHeaderRateLimit(message.header);
-    const orderList = context.originalArgsList.map((args, index) => {
-      const item = itemList[index];
-      const order = buildBybitOrderFromCreateResponse(args, String(item?.orderId ?? ''));
+    this.rememberOrderRateLimit(rateLimit);
+    const resultList: CreateBatchOrdersResult = context.originalArgsList.map((args, index) => {
+      const outcome = buildBybitCreateOutcome(args, itemList[index], extInfoList[index]);
 
       if (rateLimit !== undefined) {
-        order.rateLimit = rateLimit;
+        outcome.rateLimit = rateLimit;
       }
 
-      return order;
+      return outcome;
     });
-    pending.resolve(orderList);
+    pending.resolve(resultList);
   }
 
   private handleAmendBatchResponse(message: BybitBatchTradeMessage): void {
@@ -360,6 +374,7 @@ class BybitTradeStream extends BaseTradeStream<BybitTradeAnyMessage> {
 
     const extInfoList = message.retExtInfo?.list ?? [];
     const rateLimit = parseBybitHeaderRateLimit(message.header);
+    this.rememberOrderRateLimit(rateLimit);
     const resultList: ModifyBatchOrdersResult = context.originalOrderIdList.map((orderId, index) => {
       return buildItemResult<ModifyOrderItemResult>(orderId, extInfoList[index], rateLimit);
     });
@@ -419,6 +434,7 @@ class BybitTradeStream extends BaseTradeStream<BybitTradeAnyMessage> {
 
     const extInfoList = message.retExtInfo?.list ?? [];
     const rateLimit = parseBybitHeaderRateLimit(message.header);
+    this.rememberOrderRateLimit(rateLimit);
     const resultList: CancelBatchOrdersResult = context.originalOrderIdList.map((orderId, index) => {
       return buildItemResult<CancelOrderItemResult>(orderId, extInfoList[index], rateLimit);
     });

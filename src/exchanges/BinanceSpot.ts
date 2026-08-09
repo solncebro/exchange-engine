@@ -159,10 +159,12 @@ class BinanceSpot extends BinanceBaseClient<BinanceSpotHttpClient> {
   private buildBalanceUpdateFromAccountPosition(event: Record<string, unknown>): BalanceUpdateEvent {
     const rawBalanceList = Array.isArray(event.B) ? (event.B as Array<Record<string, unknown>>) : [];
 
+    // Спот называет свободное и заблокированное, но не остаток кошелька — его не выдумываем.
     const balanceList: BalanceUpdateItem[] = rawBalanceList.map((rawBalance) => ({
       asset: rawBalance.a as string,
       free: Number(rawBalance.f),
       locked: Number(rawBalance.l),
+      total: null,
     }));
 
     return {

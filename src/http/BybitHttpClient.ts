@@ -22,6 +22,7 @@ import type {
   BybitAmendBatchOrdersResponse,
   BybitApiResponse,
   BybitCancelBatchOrdersResponse,
+  BybitCreateBatchOrdersResponse,
   BybitCancelOrderResult,
   BybitHttpClientArgs,
   BybitListResponse,
@@ -117,6 +118,14 @@ class BybitHttpClient extends BaseHttpClient {
 
     if (options?.orderFilter !== undefined) {
       params.orderFilter = options.orderFilter;
+    }
+
+    if (options?.startTime !== undefined) {
+      params.startTime = options.startTime;
+    }
+
+    if (options?.endTime !== undefined) {
+      params.endTime = options.endTime;
     }
 
     return params;
@@ -281,7 +290,7 @@ class BybitHttpClient extends BaseHttpClient {
   async createBatchOrders(
     category: string,
     requestList: Array<Record<string, unknown>>,
-  ): Promise<BybitListResponse<Record<string, unknown>>> {
+  ): Promise<BybitCreateBatchOrdersResponse> {
     return this.authenticatedPost('/v5/order/create-batch', { category, request: requestList });
   }
 

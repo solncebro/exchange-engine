@@ -624,6 +624,65 @@ describe('normalizeBybitOrder', () => {
     expect(result.type).toBe('limit');
   });
 
+  // Bybit держит «условность» в ОТДЕЛЬНОМ поле: у защитной заявки orderType остаётся
+  // Market/Limit, а признаком служит stopOrderType (проверено на живой заявке 08.08.2026:
+  // orderType=Market, stopOrderType=Stop, triggerPrice=0.1273). Без этого поля прочитанный
+  // с биржи собственный стоп выглядел обычной рыночной заявкой, и правило «не трогать
+  // защитные заявки» снимало его заодно с обычными.
+  describe('conditional orders read back from the exchange', () => {
+    const CONDITIONAL_RAW = {
+      ...BYBIT_RAW_ORDER_RESPONSE,
+      orderType: 'Market',
+      stopOrderType: 'Stop',
+      triggerPrice: '0.1273',
+      reduceOnly: true,
+    };
+
+    it('marks a stop as conditional', () => {
+      const result = normalizeBybitOrder(CONDITIONAL_RAW);
+
+      expect(result.isConditional).toBe(true);
+    });
+
+    it('reports a market stop as a stop, not as a plain market order', () => {
+      const result = normalizeBybitOrder(CONDITIONAL_RAW);
+
+      expect(result.type).toBe(OrderTypeEnum.StopMarket);
+    });
+
+    it('reports a limit stop as a limit stop', () => {
+      const result = normalizeBybitOrder({ ...CONDITIONAL_RAW, orderType: 'Limit' });
+
+      expect(result.type).toBe(OrderTypeEnum.StopLimit);
+    });
+
+    it('tells a take profit apart from a stop', () => {
+      const result = normalizeBybitOrder({ ...CONDITIONAL_RAW, stopOrderType: 'TakeProfit' });
+
+      expect(result.type).toBe(OrderTypeEnum.TakeProfitMarket);
+    });
+
+    it('recognises a trailing stop', () => {
+      const result = normalizeBybitOrder({ ...CONDITIONAL_RAW, stopOrderType: 'TrailingStop' });
+
+      expect(result.type).toBe(OrderTypeEnum.TrailingStop);
+    });
+
+    it('still treats an unfamiliar protective kind as conditional rather than plain', () => {
+      const result = normalizeBybitOrder({ ...CONDITIONAL_RAW, stopOrderType: 'MmRateClose' });
+
+      expect(result.isConditional).toBe(true);
+      expect(result.type).toBe(OrderTypeEnum.StopMarket);
+    });
+
+    it('leaves an ordinary order alone: empty marker means not conditional', () => {
+      const result = normalizeBybitOrder({ ...BYBIT_RAW_ORDER_RESPONSE, stopOrderType: '' });
+
+      expect(result.isConditional).toBe(false);
+      expect(result.type).toBe(OrderTypeEnum.Limit);
+    });
+  });
+
   it('parses timeInForce', () => {
     const result = normalizeBybitOrder(BYBIT_RAW_ORDER_RESPONSE);
 

@@ -31,6 +31,8 @@ export interface BybitConnection {
   topicList: string[];
   dynamicTopicList: string[];
   url: string;
+  /** Решается, когда сокет открылся: до этого подписки ещё не отправлены. */
+  readyPromise: Promise<void>;
   lastRecreateTimestamp: number;
   lastMessageTimestamp: number;
   messageCount: number;

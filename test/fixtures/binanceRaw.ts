@@ -4,6 +4,7 @@ import type {
   BinanceWebSocketKlineRaw,
   BinancePositionRiskRaw,
   BinanceOrderResponseRaw,
+  BinanceAlgoOrderRaw,
   BinanceAccountRaw,
   BinanceFuturesAccountRaw,
   BinanceFundingRateHistoryRaw,
@@ -124,6 +125,36 @@ export const BINANCE_RAW_ORDER_RESPONSE: BinanceOrderResponseRaw = {
   reduceOnly: false,
   time: 1699999990000,
   updateTime: 1700000000000,
+};
+
+// Форма ответа Algo-службы. Снята с живого ответа биржи 07.08.2026: айсберг приходит
+// настоящим пустым значением, срок действия — GTE_GTC.
+export const BINANCE_RAW_ALGO_ORDER_RESPONSE: BinanceAlgoOrderRaw = {
+  algoId: 3000000000003505,
+  clientAlgoId: 'myAlgo123',
+  algoType: 'CONDITIONAL',
+  orderType: 'STOP_MARKET',
+  symbol: 'BTCUSDT',
+  side: 'SELL',
+  positionSide: 'BOTH',
+  timeInForce: 'GTE_GTC',
+  quantity: '0.100',
+  algoStatus: 'NEW',
+  actualOrderId: '',
+  actualPrice: '0.00000',
+  triggerPrice: '60000',
+  price: '0',
+  icebergQuantity: null,
+  selfTradePreventionMode: 'EXPIRE_MAKER',
+  workingType: 'CONTRACT_PRICE',
+  priceMatch: 'NONE',
+  closePosition: false,
+  priceProtect: false,
+  reduceOnly: false,
+  createTime: 1699999990000,
+  updateTime: 1700000000000,
+  triggerTime: 0,
+  goodTillDate: 0,
 };
 
 export const BINANCE_RAW_ACCOUNT: BinanceAccountRaw = {

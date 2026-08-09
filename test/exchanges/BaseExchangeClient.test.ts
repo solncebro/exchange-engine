@@ -57,4 +57,38 @@ describe('BaseExchangeClient', () => {
       expect(onNotify).toHaveBeenCalled();
     });
   });
+  // Раньше эти два метода звались через необязательный доступ: если поток их не умеет, код
+  // отрабатывал молча — данных нет, ошибки нет. Худший вид отказа: о нём узнаёшь только по
+  // отсутствию торговли.
+  describe('capabilities the stream does not have refuse loudly', () => {
+    const buildClientWithBareStream = () => {
+      const client = Object.create(BaseExchangeClient.prototype) as Record<string, unknown>;
+      client.marketLabel = 'futures';
+      (client as { getPublicStream: () => unknown }).getPublicStream = () => ({});
+
+      return client as unknown as {
+        setOrderbookLiveSymbol: (args: { symbol: string; isLive: boolean }) => void;
+        subscribeRawOrderbook: (handler: () => void) => void;
+        unsubscribeRawOrderbook: (handler: () => void) => void;
+      };
+    };
+
+    it('refuses to mark a live orderbook symbol', () => {
+      const client = buildClientWithBareStream();
+
+      expect(() => client.setOrderbookLiveSymbol({ symbol: 'BTCUSDT', isLive: true })).toThrow(/not supported/i);
+    });
+
+    it('refuses a raw orderbook subscription', () => {
+      const client = buildClientWithBareStream();
+
+      expect(() => client.subscribeRawOrderbook(() => undefined)).toThrow(/not supported/i);
+    });
+
+    it('stays quiet on unsubscribe: tidying up promises no data', () => {
+      const client = buildClientWithBareStream();
+
+      expect(() => client.unsubscribeRawOrderbook(() => undefined)).not.toThrow();
+    });
+  });
 });

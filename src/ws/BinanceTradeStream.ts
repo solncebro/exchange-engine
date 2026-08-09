@@ -1,35 +1,66 @@
 import { ReliableWebSocket } from '@solncebro/websocket-engine';
 
 import { buildBinanceWebSocketSignedParams } from '../auth/binanceAuth';
+import {
+  BINANCE_ORDER_PLACE_WEBSOCKET_METHOD,
+  BINANCE_ALGO_ORDER_PLACE_WEBSOCKET_METHOD,
+  BINANCE_ALGO_ORDER_CANCEL_WEBSOCKET_METHOD,
+} from '../constants/binance';
 import { ExchangeError } from '../errors/ExchangeError';
-import { normalizeBinanceOrder } from '../normalizers/binanceNormalizer';
-import type { OrderRateLimitSnapshot } from '../types/common';
+import { normalizeBinanceOrder, normalizeBinanceAlgoOrder } from '../normalizers/binanceNormalizer';
+import type { BinanceOrderResponseRaw, BinanceAlgoOrderRaw } from '../normalizers/binanceNormalizer';
+import type { Order, OrderRateLimitSnapshot } from '../types/common';
 import { BaseTradeStream } from './BaseTradeStream';
 import { PendingRequestKind } from './BaseTradeStream.types';
 import type {
   BinanceTradeWebSocketResponse,
   BinanceWebSocketRateLimitEntry,
+  BinanceAlgoOrderCancelAckRaw,
 } from './BinanceTradeStream.types';
 import { parseWebSocketMessage } from './parseWebSocketMessage';
 
 class BinanceTradeStream extends BaseTradeStream<BinanceTradeWebSocketResponse> {
-  protected buildOrderRequest(
-    orderParams: Record<string, unknown>,
+  private buildSignedRequest(
+    method: string,
+    params: Record<string, unknown>,
     requestId: string,
   ): unknown {
     const signedParams = buildBinanceWebSocketSignedParams({
       params: {
-        ...orderParams,
+        ...params,
         apiKey: this.apiKey,
       } as Record<string, string | number | boolean>,
       secret: this.secret,
     });
 
-    return {
-      id: requestId,
-      method: 'order.place',
-      params: signedParams,
-    };
+    return { id: requestId, method, params: signedParams };
+  }
+
+  protected buildOrderRequest(
+    orderParams: Record<string, unknown>,
+    requestId: string,
+  ): unknown {
+    return this.buildSignedRequest(BINANCE_ORDER_PLACE_WEBSOCKET_METHOD, orderParams, requestId);
+  }
+
+  /** Постановка условной заявки. Отдельный метод канала — старый order.place условные типы не принимает. */
+  async createConditionalOrder(orderParams: Record<string, unknown>): Promise<Order> {
+    await this.ensureConnectedHook();
+
+    const requestId = this.generateReqId();
+    const request = this.buildSignedRequest(BINANCE_ALGO_ORDER_PLACE_WEBSOCKET_METHOD, orderParams, requestId);
+
+    return this.sendRequest<Order>(request, requestId, PendingRequestKind.ConditionalOrder);
+  }
+
+  /** Отмена условной заявки. Символ не передаётся — вход его не принимает. */
+  async cancelConditionalOrder(cancelParams: Record<string, unknown>): Promise<void> {
+    await this.ensureConnectedHook();
+
+    const requestId = this.generateReqId();
+    const request = this.buildSignedRequest(BINANCE_ALGO_ORDER_CANCEL_WEBSOCKET_METHOD, cancelParams, requestId);
+
+    await this.sendRequest<void>(request, requestId, PendingRequestKind.ConditionalCancel);
   }
 
   protected initConnection(): Promise<void> {
@@ -61,7 +92,12 @@ class BinanceTradeStream extends BaseTradeStream<BinanceTradeWebSocketResponse> 
 
     this.logger.info({ rawMessage: message }, '[Binance] Order response received');
 
-    if (pending.kind !== PendingRequestKind.SingleOrder) {
+    const isKnownKind =
+      pending.kind === PendingRequestKind.SingleOrder ||
+      pending.kind === PendingRequestKind.ConditionalOrder ||
+      pending.kind === PendingRequestKind.ConditionalCancel;
+
+    if (!isKnownKind) {
       pending.reject(new ExchangeError(
         'Unexpected pending kind for Binance single-order response',
         message.status ?? 'UNKNOWN',
@@ -71,23 +107,46 @@ class BinanceTradeStream extends BaseTradeStream<BinanceTradeWebSocketResponse> 
       return;
     }
 
-    if (message.status === 200 && message.result) {
-      try {
-        const order = normalizeBinanceOrder(message.result);
-        const rateLimit = parseBinanceRateLimitArray(message.rateLimits);
-
-        if (rateLimit !== undefined) {
-          order.rateLimit = rateLimit;
-        }
-
-        pending.resolve(order);
-      } catch (error) {
-        pending.reject(error instanceof Error ? error : new Error(String(error)));
-      }
-    } else {
+    if (message.status !== 200 || !message.result) {
       const errorMessage = message.error?.msg ?? 'Order creation failed';
       const errorCode = message.error?.code ?? message.status;
       pending.reject(new ExchangeError(`Binance WS order error [${errorCode}]: ${errorMessage}`, errorCode, 'binance'));
+
+      return;
+    }
+
+    try {
+      if (pending.kind === PendingRequestKind.ConditionalCancel) {
+        // Внешний status=200 ещё не значит успех: отказ приходит вложенным полем code.
+        const ack = message.result as BinanceAlgoOrderCancelAckRaw;
+
+        if (String(ack.code) !== '200') {
+          pending.reject(new ExchangeError(
+            `Binance WS algo cancel error [${ack.code}]: ${ack.msg}`,
+            ack.code,
+            'binance',
+          ));
+
+          return;
+        }
+
+        pending.resolve(undefined);
+
+        return;
+      }
+
+      const order = pending.kind === PendingRequestKind.ConditionalOrder
+        ? normalizeBinanceAlgoOrder(message.result as BinanceAlgoOrderRaw)
+        : normalizeBinanceOrder(message.result as BinanceOrderResponseRaw);
+      const rateLimit = parseBinanceRateLimitArray(message.rateLimits);
+
+      if (rateLimit !== undefined) {
+        order.rateLimit = rateLimit;
+      }
+
+      pending.resolve(order);
+    } catch (error) {
+      pending.reject(error instanceof Error ? error : new Error(String(error)));
     }
   }
 }

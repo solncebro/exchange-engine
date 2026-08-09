@@ -60,6 +60,7 @@ function resolveUnifiedInterval(bybitInterval: string): KlineInterval {
 
 class BybitPublicStream {
   private readonly connectionList: BybitConnection[] = [];
+  private readonly resolveReadyByConnectionIndex: Array<(() => void) | undefined> = [];
   private readonly url: string;
   private readonly logger: ExchangeLogger;
   private readonly label: string;
@@ -549,9 +550,25 @@ class BybitPublicStream {
     const connectionIndex = this.connectionList.length;
     const connectionLabel = this.buildConnectionLabel(connectionIndex, topicType);
     const connectionShortLabel = this.buildConnectionShortLabel(connectionIndex, topicType);
+    // Обещание готовности заводим ДО создания сокета: он может открыться сразу, и тогда
+    // разрешать было бы нечего.
+    let resolveReady: () => void = () => undefined;
+    const readyPromise = new Promise<void>((resolve) => {
+      resolveReady = resolve;
+    });
+    this.resolveReadyByConnectionIndex[connectionIndex] = resolveReady;
     const webSocket = this.buildWebSocket(connectionIndex, connectionLabel);
 
-    this.connectionList.push({ webSocket, label: connectionLabel, shortLabel: connectionShortLabel, topicType, topicList, dynamicTopicList: [], url: this.url, lastRecreateTimestamp: 0, lastMessageTimestamp: 0, messageCount: 0, reconnectCount: 0 });
+    this.connectionList.push({ webSocket, label: connectionLabel, shortLabel: connectionShortLabel, topicType, topicList, dynamicTopicList: [], url: this.url, readyPromise, lastRecreateTimestamp: 0, lastMessageTimestamp: 0, messageCount: 0, reconnectCount: 0 });
+  }
+
+  /**
+   * Раньше этого метода тут не было вовсе, и базовый класс отдавал уже решённое обещание:
+   * бот считал потоки готовыми и начинал торговать на пустом кэше. У соседней биржи
+   * ожидание настоящее — теперь и здесь.
+   */
+  async awaitConnectionsReady(): Promise<void> {
+    await Promise.all(this.connectionList.map((connection) => connection.readyPromise));
   }
 
   private buildWebSocket(connectionIndex: number, connectionLabel: string): ReliableWebSocket<BybitWebSocketMessage> {
@@ -567,6 +584,8 @@ class BybitPublicStream {
         if (connection && connection.topicList.length > 0) {
           this.sendSubscribeInBatches(connection.topicList, (data) => context.send(data), connection.label);
         }
+
+        this.resolveReadyByConnectionIndex[connectionIndex]?.();
       },
       onReconnectSuccess: () => this.resubscribeConnection(connectionIndex),
       onClose: (closeContext) => this.handleConnectionClose(connectionIndex, closeContext),

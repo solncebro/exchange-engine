@@ -24,6 +24,9 @@ export interface SymbolLimitFilterArgs {
   settleCoin?: string;
   baseCoin?: string;
   orderFilter?: string;
+  /** Границы времени: история заявок и итоги закрытия их принимают и уважают. */
+  startTime?: number;
+  endTime?: number;
 }
 
 export interface PeriodFilterArgs {
@@ -82,6 +85,26 @@ export interface BybitCancelBatchOrderRaw {
 export interface BybitCancelBatchOrderExtInfo {
   code: number;
   msg: string;
+}
+
+export interface BybitCreateBatchOrderRaw {
+  category?: string;
+  symbol?: string;
+  orderId?: string;
+  orderLinkId?: string;
+  createAt?: string;
+}
+
+/**
+ * Исход каждой заявки пачки Bybit отдаёт ОТДЕЛЬНЫМ списком, выровненным с ответом по месту:
+ * ноль — встала, иначе отказ с пояснением (документация batch-place). Без этого списка
+ * отличить отказ от успеха по самому ответу невозможно.
+ */
+export interface BybitCreateBatchOrdersResponse {
+  result: BybitListResult<BybitCreateBatchOrderRaw>;
+  retExtInfo?: {
+    list?: BybitCancelBatchOrderExtInfo[];
+  };
 }
 
 export interface BybitCancelBatchOrdersResponse {

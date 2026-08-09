@@ -1,5 +1,6 @@
 import type {
   CancelBatchOrdersResult,
+  CreateBatchOrdersResult,
   ExchangeClient,
   ExchangeArgs,
   FetchAllKlinesOptions,
@@ -210,14 +211,30 @@ abstract class BaseExchangeClient implements ExchangeClient {
     publicStream.unsubscribeOrderbook(args.symbol, args.depth, args.handler);
   }
 
+  // Всё, что обещает доставку данных, обязано отказывать ГРОМКО: раньше эти два метода
+  // молча ничего не делали — код отработал, данных нет, ошибки нет. Это худший вид отказа,
+  // потому что о нём узнаёшь только по отсутствию торговли.
   setOrderbookLiveSymbol(args: SetOrderbookLiveSymbolArgs): void {
-    this.getPublicStream().setOrderbookLiveSymbol?.(args.symbol, args.isLive);
+    const publicStream = this.getPublicStream();
+
+    if (publicStream.setOrderbookLiveSymbol === undefined) {
+      throw new Error(`Marking a live orderbook symbol is not supported for ${this.marketLabel} market`);
+    }
+
+    publicStream.setOrderbookLiveSymbol(args.symbol, args.isLive);
   }
 
   subscribeRawOrderbook(handler: RawOrderbookHandler): void {
-    this.getPublicStream().subscribeRawOrderbook?.(handler);
+    const publicStream = this.getPublicStream();
+
+    if (publicStream.subscribeRawOrderbook === undefined) {
+      throw new Error(`Raw orderbook subscription is not supported for ${this.marketLabel} market`);
+    }
+
+    publicStream.subscribeRawOrderbook(handler);
   }
 
+  // Отписка и переподписка — уборка, а не обещание данных: молчать здесь безопасно.
   unsubscribeRawOrderbook(handler: RawOrderbookHandler): void {
     this.getPublicStream().unsubscribeRawOrderbook?.(handler);
   }
@@ -410,7 +427,7 @@ abstract class BaseExchangeClient implements ExchangeClient {
     throw new Error(`Not supported for ${this.marketLabel} market`);
   }
 
-  async createBatchOrders(_orderList: CreateOrderWebSocketArgs[]): Promise<Order[]> {
+  async createBatchOrders(_orderList: CreateOrderWebSocketArgs[]): Promise<CreateBatchOrdersResult> {
     throw new Error(`Not supported for ${this.marketLabel} market`);
   }
 

@@ -260,6 +260,14 @@ export interface Order {
   timestamp: number;
   updatedTimestamp: number;
   rateLimit?: OrderRateLimitSnapshot;
+  /** Заявка ждёт срабатывания по цене. До появления этого поля условность приходилось
+   *  угадывать по признаку «цена срабатывания больше нуля». */
+  isConditional?: boolean;
+  /** Номер обычной заявки, которую породило срабатывание условной. Пусто, пока не сработала.
+   *  Обратной ссылки у порождённой заявки нет — связь только отсюда. */
+  triggeredOrderId?: string;
+  /** Заявка закрывает позицию целиком; объём при этом биржа возвращает нулевым. */
+  closePosition?: boolean;
 }
 
 export interface Balance {
@@ -475,7 +483,13 @@ export interface OrderUpdateEvent {
   filledAmount: number;
   timestamp: number;
   cancelType?: string;
+  /** Почему заявка отвергнута. У условной заявки это причина отказа при СРАБАТЫВАНИИ —
+   *  позиция в этот момент остаётся без защиты, событие требует внимания человека. */
   rejectReason?: string;
+  /** Событие пришло по условной заявке; orderId — её собственный номер, не порождённой. */
+  isConditional?: boolean;
+  /** Номер обычной заявки, порождённой срабатыванием. Пусто, пока не сработала. */
+  triggeredOrderId?: string;
 }
 
 export interface PositionUpdateEvent {
@@ -483,18 +497,30 @@ export interface PositionUpdateEvent {
   side: string;
   size: number;
   entryPrice: number;
-  markPrice: number;
   unrealisedPnl: number;
-  leverage: number;
-  liquidationPrice: number;
   positionSide: string;
   timestamp: number;
+  /**
+   * Ниже — то, что сообщает не всякая биржа. `null` значит «в этом событии не пришло», и это
+   * ВАЖНО отличать от настоящего нуля: раньше здесь стояли жёсткие нули, из-за чего сторож
+   * ликвидации сравнивал с нулём и не срабатывал никогда. Нужно точное значение — читать
+   * позицию отдельным запросом.
+   */
+  markPrice: number | null;
+  leverage: number | null;
+  liquidationPrice: number | null;
 }
 
+/**
+ * Средства по одному активу. Биржи сообщают РАЗНОЕ: спот называет свободное и заблокированное,
+ * фьючерсы — остаток кошелька. `null` означает «эта биржа в этом событии такого не говорит»,
+ * а не ноль.
+ */
 export interface BalanceUpdateItem {
   asset: string;
-  free: number;
-  locked: number;
+  free: number | null;
+  locked: number | null;
+  total: number | null;
 }
 
 export interface BalanceUpdateEvent {

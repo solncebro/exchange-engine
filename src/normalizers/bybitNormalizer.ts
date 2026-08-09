@@ -23,10 +23,11 @@ import type {
   PriceLimitRisk,
   TradingFunding,
 } from '../types/common';
-import { TradeSymbolTypeEnum, PositionSideEnum, MarginModeEnum, TimeInForceEnum, OrderSideEnum } from '../types/common';
+import { TradeSymbolTypeEnum, PositionSideEnum, MarginModeEnum, TimeInForceEnum, OrderSideEnum, OrderTypeEnum } from '../types/common';
 import { BYBIT_POSITION_SIDE, BYBIT_ORDER_STATUS, BYBIT_ORDER_SIDE, BYBIT_ORDER_TYPE, BYBIT_TIME_IN_FORCE } from '../constants/mappings';
 import { parseOrderBookLevel } from './normalizerUtils';
-import type { CreateOrderWebSocketArgs } from '../types/exchange';
+import { buildPlacedOrderOutcome, buildRejectedOrderOutcome } from './batchOrderOutcome';
+import type { CreateOrderItemResult, CreateOrderWebSocketArgs } from '../types/exchange';
 
 interface BybitLotSizeFilterRaw {
   basePrecision?: string;
@@ -162,7 +163,14 @@ export interface BybitOrderResponseRaw {
   orderLinkId: string;
   symbol: string;
   side: string;
+  /** Только Market или Limit: «условность» Bybit держит в отдельном поле ниже. */
   orderType: string;
+  /**
+   * Чем именно является защитная заявка: Stop, TakeProfit, StopLoss, TrailingStop и прочие.
+   * У обычной заявки пусто. Проверено на живой заявке 08.08.2026: у сработавшего стопа
+   * orderType=Market, stopOrderType=Stop, у обычной лимитной оба поля обычные.
+   */
+  stopOrderType?: string;
   timeInForce: string;
   qty: string;
   price: string;
@@ -251,12 +259,23 @@ export interface BybitTransactionLogRaw {
   symbol: string;
   type: string;
   qty: string;
+  /** Реализованный итог сделки БЕЗ комиссии. */
   cashFlow: string;
+  /** Торговая комиссия: положительное число = списано. */
+  fee?: string;
+  /** Ставка финансирования: положительное = получено. */
+  funding?: string;
   currency: string;
   transactionTime: string;
   tradeId: string;
   orderId: string;
 }
+
+/** Виды защиты Bybit, означающие «взять прибыль», — остальные считаем стопом. */
+const BYBIT_TAKE_PROFIT_ORDER_TYPE_SET = new Set(['TakeProfit', 'PartialTakeProfit']);
+
+/** Виды защиты, которые ведут уровень за ценой. */
+const BYBIT_TRAILING_STOP_ORDER_TYPE_SET = new Set(['TrailingStop']);
 
 const LINEAR_CONTRACT_TYPES = new Set(['LinearPerpetual', 'LinearFutures']);
 
@@ -464,20 +483,32 @@ export function normalizeBybitTickers(rawList: BybitTickerRaw[]): TickerBySymbol
   return result;
 }
 
-export function normalizeBybitKlines(rawList: string[][]): Kline[] {
-  return rawList.map((row) => ({
-    openTimestamp: parseFloat(row[0]),
-    openPrice: parseFloat(row[1]),
-    highPrice: parseFloat(row[2]),
-    lowPrice: parseFloat(row[3]),
-    closePrice: parseFloat(row[4]),
-    volume: parseFloat(row[5]),
-    closeTimestamp: 0,
-    quoteAssetVolume: parseFloat(row[6]),
-    numberOfTrades: 0,
-    takerBuyBaseAssetVolume: 0,
-    takerBuyQuoteAssetVolume: 0,
-  })).reverse();
+/**
+ * Клайны истории. Время закрытия Bybit не присылает — но оно однозначно выводится из начала
+ * и длительности интервала, и раньше на его месте стоял ноль. Из-за нуля обходной приём
+ * «если ноль, считай сам» разошёлся по трём приложениям сразу.
+ *
+ * Число сделок и объёмы покупателей Bybit не сообщает вовсе; они остаются нулями, и это
+ * ЕДИНСТВЕННЫЕ поля клайна, которых у него нет.
+ */
+export function normalizeBybitKlines(rawList: string[][], intervalMs?: number): Kline[] {
+  return rawList.map((row) => {
+    const openTimestamp = parseFloat(row[0]);
+
+    return {
+      openTimestamp,
+      openPrice: parseFloat(row[1]),
+      highPrice: parseFloat(row[2]),
+      lowPrice: parseFloat(row[3]),
+      closePrice: parseFloat(row[4]),
+      volume: parseFloat(row[5]),
+      closeTimestamp: intervalMs !== undefined && intervalMs > 0 ? openTimestamp + intervalMs : 0,
+      quoteAssetVolume: parseFloat(row[6]),
+      numberOfTrades: 0,
+      takerBuyBaseAssetVolume: 0,
+      takerBuyQuoteAssetVolume: 0,
+    };
+  }).reverse();
 }
 
 export function normalizeBybitKlineWebSocketMessage(raw: BybitWebSocketKlineRaw): Kline {
@@ -540,6 +571,33 @@ export function normalizeBybitPosition(raw: BybitPositionRaw): Position {
   };
 }
 
+/**
+ * Тип прочитанной заявки Bybit. Обычная берётся из `orderType`, а защитная складывается из
+ * двух полей: чем она является (`stopOrderType`) и чем исполнится при срабатывании
+ * (`orderType`). Раньше читался только второй, и собственный стоп возвращался с биржи
+ * обычной рыночной заявкой — правило «не трогать защитные» снимало его вместе с обычными.
+ * Незнакомый вид защиты остаётся защитой: считать его обычной заявкой опаснее всего.
+ */
+function resolveBybitOrderType(raw: BybitOrderResponseRaw): OrderTypeEnum {
+  const stopOrderType = raw.stopOrderType ?? '';
+
+  if (stopOrderType === '') {
+    return BYBIT_ORDER_TYPE[raw.orderType] ?? raw.orderType.toLowerCase() as never;
+  }
+
+  if (BYBIT_TRAILING_STOP_ORDER_TYPE_SET.has(stopOrderType)) {
+    return OrderTypeEnum.TrailingStop;
+  }
+
+  const isLimitLike = raw.orderType === 'Limit';
+
+  if (BYBIT_TAKE_PROFIT_ORDER_TYPE_SET.has(stopOrderType)) {
+    return isLimitLike ? OrderTypeEnum.TakeProfitLimit : OrderTypeEnum.TakeProfitMarket;
+  }
+
+  return isLimitLike ? OrderTypeEnum.StopLimit : OrderTypeEnum.StopMarket;
+}
+
 export function normalizeBybitOrder(raw: BybitOrderResponseRaw): Order {
   const status = BYBIT_ORDER_STATUS[raw.orderStatus] ?? raw.orderStatus.toLowerCase();
 
@@ -548,7 +606,8 @@ export function normalizeBybitOrder(raw: BybitOrderResponseRaw): Order {
     clientOrderId: raw.orderLinkId ?? '',
     symbol: raw.symbol,
     side: BYBIT_ORDER_SIDE[raw.side] ?? OrderSideEnum.Buy,
-    type: BYBIT_ORDER_TYPE[raw.orderType] ?? raw.orderType.toLowerCase() as never,
+    type: resolveBybitOrderType(raw),
+    isConditional: (raw.stopOrderType ?? '') !== '',
     timeInForce: BYBIT_TIME_IN_FORCE[raw.timeInForce] ?? TimeInForceEnum.Gtc,
     price: parseFloat(raw.price),
     avgPrice: parseFloat(raw.avgPrice ?? '0'),
@@ -582,6 +641,25 @@ export function buildBybitOrderFromCreateResponse(args: CreateOrderWebSocketArgs
     timestamp: Date.now(),
     updatedTimestamp: Date.now(),
   };
+}
+
+/**
+ * Исход одной заявки из пачки Bybit. Общая для обычного пути и для торгового канала: ответы
+ * там одинаковы по смыслу, и вторая копия этого разбора рано или поздно разъехалась бы с
+ * первой — а расходиться тут значит по-разному врать про поставленный стоп.
+ */
+export function buildBybitCreateOutcome(
+  args: CreateOrderWebSocketArgs,
+  item: { orderId?: string } | undefined,
+  extInfo: { code?: number; msg?: string } | undefined,
+): CreateOrderItemResult {
+  const code = typeof extInfo?.code === 'number' ? extInfo.code : null;
+
+  if (code !== null && code !== 0) {
+    return buildRejectedOrderOutcome(code, extInfo?.msg ?? null);
+  }
+
+  return buildPlacedOrderOutcome(buildBybitOrderFromCreateResponse(args, String(item?.orderId ?? '')));
 }
 
 export function normalizeBybitBalances(raw: BybitWalletBalanceRaw): AccountBalances {
@@ -883,6 +961,25 @@ export function normalizeBybitClosedPnlList(rawList: BybitClosedPnlRaw[]): Close
     closedPnl: parseFloat(raw.closedPnl),
     timestamp: parseFloat(raw.createdTime),
   }));
+}
+
+/**
+ * Комиссия отдельным начислением. Bybit держит её полем записи, где положительное число
+ * означает «списано»; Binance отдаёт её отдельной строкой со знаком минус. Наружу приводим
+ * к знаку Binance, иначе одно и то же поле на двух биржах значило бы противоположное.
+ */
+export function buildBybitCommissionIncomeList(rawList: BybitTransactionLogRaw[]): Income[] {
+  return rawList
+    .filter((raw) => parseFloat(raw.fee ?? '0') !== 0)
+    .map((raw) => ({
+      symbol: raw.symbol,
+      incomeType: 'COMMISSION',
+      income: -parseFloat(raw.fee ?? '0'),
+      asset: raw.currency,
+      timestamp: parseFloat(raw.transactionTime),
+      info: { tradeId: raw.tradeId, orderId: raw.orderId },
+      quantity: parseFloat(raw.qty),
+    }));
 }
 
 export function normalizeBybitIncomeList(rawList: BybitTransactionLogRaw[]): Income[] {
