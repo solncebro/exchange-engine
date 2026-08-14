@@ -512,6 +512,27 @@ describe('BybitLinear', () => {
       expect(body.buyLeverage).toBe('20');
       expect(body.sellLeverage).toBe('20');
     });
+
+    // Ответ Bybit установленного значения не несёт, но принятая без ошибки установка ставит
+    // ровно запрошенное — это и есть подтверждение (контракт единый с Binance).
+    it('confirms the requested leverage on an accepted set', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.post.mockResolvedValue({ data: { retCode: 0, retMsg: 'OK' } });
+
+      const result = await client.setLeverage(20, 'BTCUSDT');
+
+      expect(result.confirmedLeverage).toBe(20);
+    });
+
+    // 110043 «leverage not modified» = на бирже УЖЕ стоит ровно запрошенное — тоже подтверждение.
+    it('confirms the requested leverage on the "not modified" answer', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.post.mockResolvedValue({ data: { retCode: 110043, retMsg: 'leverage not modified' } });
+
+      const result = await client.setLeverage(20, 'BTCUSDT');
+
+      expect(result.confirmedLeverage).toBe(20);
+    });
   });
 
   describe('loadTradeSymbols', () => {

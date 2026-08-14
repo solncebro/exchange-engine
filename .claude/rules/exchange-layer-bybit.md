@@ -61,7 +61,7 @@
 - Наследует `BybitBaseClient`
 - Реализует фьючерсные методы (position, leverage)
 - `setMarginMode()` — no-op (Bybit Unified Account управляет margin mode на уровне аккаунта, не символа)
-- `setLeverage()` — обрабатывает код Bybit `110043` (leverage not modified) как no-op без throw
+- `setLeverage()` — обрабатывает код Bybit `110043` (leverage not modified) как no-op без throw. Возвращает `SetLeverageResult`: Bybit не отдаёт установленное значение в ответе, поэтому и no-op, и успешная установка возвращают эхо запроса (`confirmedLeverage: leverage`) — по документации оба исхода означают «на бирже стоит ровно запрошенное»
 - Реализует `createOrderWebSocket()` через `buildBybitOrderParams()` + `submitOrder()`
 - Реализует дополнительные методы:
   - `fetchMarkPrice(symbol?)` → `httpClient.fetchTickers()` → `normalizeBybitMarkPriceList()`

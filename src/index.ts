@@ -27,6 +27,7 @@ export type {
   ModifyBatchOrdersResult,
   OrderRateLimit,
   OrderRateLimitSource,
+  SetLeverageResult,
 } from './types/exchange';
 
 export {

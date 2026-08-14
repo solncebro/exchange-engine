@@ -249,6 +249,7 @@ WebSocket:
 - `CancelBatchOrdersResult = CancelOrderItemResult[]`
 - `ModifyOrderItemResult` — `{ orderId, isSuccess, errorCode: number | null, errorText: string | null }` (симметрично `CancelOrderItemResult`)
 - `ModifyBatchOrdersResult = ModifyOrderItemResult[]`
+- `SetLeverageResult` — `{ confirmedLeverage: number | null }`. То, что биржа ФАКТИЧЕСКИ подтвердила на установку плеча (не эхо запроса): Binance — из числового поля ответа `/fapi/v1/leverage`, Bybit — эхо запроса (значения не возвращает, но принятая установка и no-op `110043` обе означают «стоит запрошенное»). `null` — ответ пришёл без ошибки, но без пригодного числа
 
 ### Collection types (Map с "By" naming):
 - `TickerBySymbol = Map<string, Ticker>`

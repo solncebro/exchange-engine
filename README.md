@@ -4,19 +4,15 @@ Universal TypeScript client library for cryptocurrency trading on Binance and By
 
 ## Latest Release
 
-Current version: `0.18.2`
+Current version: `0.21.0`
 
-- **`fetchIncome` income-type filter** — `fetchIncome({ incomeType: 'funding' })` returns only funding payments for the requested window: Binance filters server-side (`incomeType=FUNDING_FEE`), Bybit forwards the time window to the transaction log and filters locally, throwing when the page limit would make the result incomplete.
+- **Order origin remembered on creation** — regular (non-conditional) Binance Futures orders now register their origin in the same in-memory registry conditional orders already used (single, batch, and the conditional-fallback path). The first read/cancel by order id hits one service instead of probing both — the second service used to answer every such probe with `-2013`.
+- **`setLeverage` returns confirmation** — `SetLeverageResult.confirmedLeverage` is what the exchange actually confirmed, not an echo of the request. Binance parses the value from the `/fapi/v1/leverage` response body (`null` when no usable number comes back); Bybit doesn't return a value at all, so both a successful set and the "not modified" no-op (`110043`) report the requested value confirmed.
+- **Fix — `fetchClosedPnl` on Binance was built from a truncated trade sample** — Binance has no closed-positions endpoint, so results are assembled from the account's own trades, and `limit` used to be forwarded straight into that request where it means "this many fills" rather than "this many result rows" like on Bybit. A market close on a thin symbol can fragment into hundreds of fills, so a caller asking for 50 rows got less than half the trade and logged it as the exchange's own number. `limit` now means the same thing on both exchanges; with `startTime` the trade history is paginated by trade id (Binance forbids combining it with a time window) to cover fragmented closes in full.
 
-Previously in `0.18.1`:
+Previously in `0.20.0` — outbound WebSocket command pacing (`OutboundCommandQueue`) to stop resubscribe cascades from tripping Binance's 10-commands/sec connection limit, batched `resubscribeKlineList`, per-connection kline stream sharding via `publicStreamConnectionPacking`, and a nine-stage Binance↔Bybit parity audit (working Bybit trailing stop, `trailingDelta` removed in favor of `callbackRate` everywhere, closing-order intent parity, `workingType` respected on Bybit, spot market-unit default fixed in the batch path).
 
-- **Fix — batch order cancel on Binance Futures never worked** — `orderIdList` was sent as a JSON array of strings (`["123"]`), while Binance requires numbers (`[123]`) and rejected every request with `-1130`. Serialization moved to `serializeBinanceOrderIdList`; non-numeric ids are no longer sent and come back as per-order failures without breaking result alignment. The public `cancelBatchOrders(symbol, orderIdList: string[])` contract is unchanged (Bybit uses string ids).
-
-Previously in `0.18.0`:
-
-- **`isTradifi: boolean` on `TradeSymbol`** — tokenized TradFi perpetuals (stocks, ETFs, commodities/metals) are now flagged uniformly across both exchanges. Binance marks them via `contractType: 'TRADIFI_PERPETUAL'`; Bybit keeps a regular `contractType: 'LinearPerpetual'`, so the only marker is `symbolType` (`'stock'` / `'commodity'`; `'innovation'` is ordinary crypto). Binance stream name selection now reads this single field instead of an inline `contractType` check.
-- **Fix — Bybit ticker delta no longer zeroes `indexPrice`** — Bybit sends ticker deltas with only changed fields, so a frame carrying `markPrice` but not `indexPrice` used to emit `indexPrice: 0`. The last known index is now retained per symbol (`lastIndexPriceBySymbol`); `0` is emitted only until the first index ever arrives.
-- **Fix — Bybit market order (WS) no longer carries `price`** — `buildBybitOrderParams` applies `price` only to limit-like types (`Limit` / `StopLimit` / `TakeProfitLimit`); a market request never puts price on the wire, even when the caller passed a stray/reused value.
+Previously in `0.18.x` — `fetchIncome` income-type filter, a batch order cancel fix on Binance Futures (`-1130` on every request), the `isTradifi` flag for tokenized TradFi perpetuals, and two Bybit fixes (ticker delta zeroing `indexPrice`, market orders carrying a stray `price`).
 
 Previously in `0.16.0` — public-stream efficiency: opt-in lazy orderbook parse (`ExchangeConfig.lazyOrderbookParse`, Bybit), best bid/ask level 1 on `Ticker` (`bid1Price`/`ask1Price`/…) with a live `subscribeAllTickers` stream, Binance Futures public trades via `@aggTrade`, `fetchOpenConditionalOrders(settleCoin)`, `getMaxOrderQty` / `getMarketMaxOrderQty`, and the lightweight `@solncebro/exchange-engine/public` subpath export.
 
@@ -29,7 +25,7 @@ Full release notes: [CHANGELOG.md](./CHANGELOG.md)
 - 📊 **REST & WebSocket support** — fetch historical data and subscribe to real-time streams
 - 🔄 **Automatic reconnection** — resilient WebSocket connections with exponential backoff
 - 📝 **Comprehensive logging** — built-in structured logging via custom logger interface
-- 🚀 **Zero dependencies** — only axios and websocket-engine
+- 🚀 **Minimal dependencies** — axios, agentkeepalive and websocket-engine
 
 ## Installation
 
@@ -161,7 +157,7 @@ await client.fetchOpenOrders(symbol?: string): Promise<Order[]>;
 await client.fetchPosition(symbol: string): Promise<Position>;
 
 // Set leverage (Binance: 2-125x, Bybit: 1-99.5x)
-await client.setLeverage(leverage: number, symbol: string): Promise<void>;
+await client.setLeverage(leverage: number, symbol: string): Promise<SetLeverageResult>;
 
 // Set margin mode
 await client.setMarginMode(marginMode: 'isolated' | 'cross', symbol: string): Promise<void>;

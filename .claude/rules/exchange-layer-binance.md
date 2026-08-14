@@ -45,7 +45,9 @@
 ### BinanceFutures
 - `marketLabel = 'futures'`, `klineLimit = 499`
 - Реализует все фьючерсные методы (position, leverage, funding, marginMode)
-- Реализует дополнительные методы (9):
+- `createOrderWebSocket(args)` override: после постановки обычной (не условной) заявки запоминает её происхождение в `conditionalOrderRegistry` как `'plain'` — тем же реестром, которым размечает условные заявки `tryCreateConditionalOrder`. Без этого первое чтение/отмена по номеру только что созданной обычной заявки опрашивала бы обе службы (условную и обычную), и вторая отвечала бы `-2013` на каждую заявку. То же самое делает пакетная постановка (`createBatchOrders`, per-order) и одиночная REST-ветка `tryCreateConditionalOrder` при отказе условной. Для номеров, пришедших извне (после перезапуска процесса — реестр в памяти), двойной опрос остаётся, но логируется уровнем info, не error
+- `setLeverage(leverage, symbol)` → `httpClient.setLeverage()` → `SetLeverageResult`. Подтверждённое значение берётся ТОЛЬКО из числового поля `leverage` ответа `/fapi/v1/leverage`; отсутствие пригодного числа (включая `< 1`) даёт `confirmedLeverage: null` — вызывающий обязан считать плечо неподтверждённым, а не полагаться на эхо своего запроса
+- Реализует дополнительные методы (10):
   - `modifyOrder(args)` → `httpClient.modifyOrder()` → `normalizeBinanceOrder()`
   - `cancelAllOrders(symbol)` → `httpClient.cancelAllOrders()`
   - `createBatchOrders(orderList)` → chunking по `BINANCE_FUTURES_CREATE_BATCH_CHUNK_SIZE` (5) через `chunkList` → последовательные вызовы `httpClient.createBatchOrders()` → `normalizeBinanceOrder()` per item. Per-order ошибки в ответе (элементы с `code < 0`) пропускаются с `logger.warn()` — успешные ордера возвращаются.
@@ -55,6 +57,7 @@
   - `fetchOpenInterest(symbol)` → `httpClient.fetchOpenInterest()` → `normalizeBinanceOpenInterest()`
   - `fetchFeeRate(symbol?)` → `httpClient.fetchCommissionRate()` → `normalizeBinanceCommissionRate()`
   - `fetchIncome(options?)` → `httpClient.fetchIncome()` → `normalizeBinanceIncomeList()`
+  - `fetchClosedPnl(symbol?, options?)` → у Binance нет готовой ручки закрытых позиций — итоги собираются из собственных сделок счёта (`httpClient.fetchUserTrades()`) через `buildBinanceClosedPnlList()`. `options.limit` значит РОВНО то же, что у Bybit — сколько строк ИТОГА вернуть, не сколько исполнений прочитать; отбор самых свежих строк идёт уже после сборки. Без `options.startTime` — одна страница максимального размера (`USER_TRADE_PAGE_SIZE` = 1000). С `startTime` — постраничный сбор через приватный `fetchUserTradeHistory()`: следующая страница адресуется номером сделки `fromId` (документация запрещает сочетать его с окном времени), с дедупом по `id` на стыке страниц, досечением по `endTime` у себя и предохранителем `USER_TRADE_MAX_PAGE_COUNT` = 30 страниц (при достижении — `logger.warn`, отдаётся собранное неполным)
 - `setPositionMode(mode)` → `httpClient.setPositionMode()`, код Binance `-4059` (`No need to change position side.`) обрабатывается как no-op без throw (логируется на HTTP-слое)
 - `setMarginMode(mode, symbol)` для Binance futures: код Binance `-4046` (`No need to change margin type.`) обрабатывается как no-op без throw (логируется на HTTP-слое)
 - HTTP: `BinanceFuturesHttpClient`, WS: `BinanceFuturesPublicStream`

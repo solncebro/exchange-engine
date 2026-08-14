@@ -1,4 +1,4 @@
-import type { CreateOrderWebSocketArgs, ExchangeArgs, FetchPageWithLimitArgs } from '../types/exchange';
+import type { CreateOrderWebSocketArgs, ExchangeArgs, FetchPageWithLimitArgs, SetLeverageResult } from '../types/exchange';
 import type { Position, Order, FundingRateHistory, FundingInfo, MarkPrice, OpenInterest } from '../types/common';
 import { MarginModeEnum, OrderSideEnum, OrderTypeEnum, PositionModeEnum, TimeInForceEnum } from '../types/common';
 import { ExchangeError } from '../errors/ExchangeError';
@@ -300,18 +300,23 @@ class BybitLinear extends BybitBaseClient {
       .map(normalizeBybitPosition);
   }
 
-  async setLeverage(leverage: number, symbol: string): Promise<void> {
+  async setLeverage(leverage: number, symbol: string): Promise<SetLeverageResult> {
     this.logger.info(`Setting leverage to ${leverage}x for ${symbol}`);
 
     try {
       await this.httpClient.setLeverage({ category: 'linear', symbol, buyLeverage: leverage, sellLeverage: leverage });
     } catch (error) {
       if (error instanceof ExchangeError && error.code === BYBIT_LEVERAGE_NOOP_ERROR_CODE) {
-        return;
+        // «Плечо не изменилось» = на бирже УЖЕ стоит ровно запрошенное — это подтверждение.
+        return { confirmedLeverage: leverage };
       }
 
       throw error;
     }
+
+    // Ответ Bybit установленного значения не несёт; принятая без ошибки установка ставит ровно
+    // запрошенное — контракт подтверждения единый с Binance (см. SetLeverageResult).
+    return { confirmedLeverage: leverage };
   }
 
   /**

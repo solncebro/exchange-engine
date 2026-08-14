@@ -56,6 +56,10 @@ BaseExchangeClient (abstract, implements ExchangeClient)
   fetchFeeRate(symbol?): Promise<FeeRate[]>
   fetchIncome(options?: FetchIncomeArgs): Promise<Income[]>
   fetchClosedPnl(symbol?, options?): Promise<ClosedPnl[]>
+    // limit = сколько строк ИТОГА вернуть (одинаково на обеих биржах). У Bybit это готовая ручка
+    // биржи, у Binance итоги собираются из сырых исполнений счёта — с startTime они забираются
+    // постранично (1000 на страницу, дальше по fromId: окно времени биржа с ним не принимает).
+    // Просить окном по времени, а не числом строк: закрытие неликвида — это сотни исполнений.
 
 Trade WebSocket:
   isTradeWebSocketConnected(): boolean
@@ -67,7 +71,7 @@ User Data Stream:
   isUserDataStreamConnected(): boolean
 
 Настройки:
-  setLeverage(leverage, symbol): Promise<void>
+  setLeverage(leverage, symbol): Promise<SetLeverageResult>  // { confirmedLeverage: number | null } — то, что биржа реально подтвердила
   setMarginMode(mode, symbol): Promise<void>
   setPositionMode(mode): Promise<void>
 

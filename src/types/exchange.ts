@@ -173,6 +173,17 @@ export interface CreateOrderItemResult {
 
 export type CreateBatchOrdersResult = CreateOrderItemResult[];
 
+/**
+ * Что биржа ФАКТИЧЕСКИ подтвердила в ответ на установку плеча. Binance возвращает установленное
+ * значение в самом ответе; Bybit значения не возвращает, но и принятая установка, и «leverage not
+ * modified» означают, что на бирже стоит ровно запрошенное. null — запрос прошёл без ошибки, но
+ * фактического значения в ответе не оказалось: вызывающий обязан считать плечо НЕподтверждённым,
+ * а не верить эху собственного запроса (слепая установка без проверки — позиция с чужим плечом).
+ */
+export interface SetLeverageResult {
+  confirmedLeverage: number | null;
+}
+
 export interface CancelOrderItemResult {
   orderId: string;
   isSuccess: boolean;
@@ -216,7 +227,7 @@ export interface ExchangeClient {
   fetchPositionSnapshot(symbol: string, positionIdx?: number): Promise<Position | null>;
   fetchPositionList(symbol: string): Promise<Position[]>;
   fetchAllPositions(): Promise<Position[]>;
-  setLeverage(leverage: number, symbol: string): Promise<void>;
+  setLeverage(leverage: number, symbol: string): Promise<SetLeverageResult>;
   setMarginMode(marginMode: MarginModeEnum, symbol: string): Promise<void>;
   amountToPrecision(symbol: string, amount: number): number;
   priceToPrecision(symbol: string, price: number): number;

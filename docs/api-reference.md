@@ -60,7 +60,7 @@ class Exchange {
 | `fetchBalances` | ✅ | ✅ | ✅ | ✅ |
 | `fetchFeeRate` | ✅ | ❌ | ✅ | ✅ |
 | `fetchIncome` | ✅ | ❌ | ✅ | ✅ |
-| `fetchClosedPnl` | ❌ | ❌ | ✅ | ✅ |
+| `fetchClosedPnl` | ✅ | ❌ | ✅ | ✅ |
 | `fetchPosition` | ✅ | ❌ | ✅ | ❌ |
 | `fetchPositionMode` | ✅ | ❌ | ✅ | ❌ |
 | `setPositionMode` | ✅ | ❌ | ✅ | ❌ |
@@ -449,9 +449,13 @@ fetchClosedPnl(symbol?: string, options?: FetchPageWithLimitArgs): Promise<Close
 
 **Возврат:** `ClosedPnl[]` — массив закрытых PnL.
 
+`limit` на обеих биржах значит одно и то же: **сколько строк ИТОГА вернуть**. Это не мелочь: у Bybit есть готовая ручка закрытых позиций, а у Binance такой ручки нет вовсе — итоги собираются из сырых исполнений счёта, и раньше `limit` уезжал прямо туда, превращаясь в «столько исполнений». Рыночное закрытие неликвида биржа дробит на сотни исполнений, поэтому потребитель получал итог меньше половины сделки и записывал его как факт биржи.
+
+**Просите окно по времени, а не число строк.** С заданным `startTime` Binance-клиент забирает исполнения постранично (страница — потолок биржи в 1000; следующие адресуются номером сделки, потому что биржа запрещает сочетать его с окном) и отдаёт полный итог. Без `startTime` берётся одна страница максимального размера — этого может не хватить на дроблёное закрытие.
+
 | Биржа | Futures | Spot |
 |---|:---:|:---:|
-| Binance | ❌ | ❌ |
+| Binance | ✅ | ❌ |
 | Bybit | ✅ | ✅ |
 
 ---
@@ -523,15 +527,18 @@ setPositionMode(mode: PositionModeEnum): Promise<void>
 ### `setLeverage()`
 
 ```typescript
-setLeverage(leverage: number, symbol: string): Promise<void>
+setLeverage(leverage: number, symbol: string): Promise<SetLeverageResult>
 ```
 
-Устанавливает кредитное плечо.
+Устанавливает кредитное плечо и возвращает то, что биржа фактически подтвердила
+(`SetLeverageResult`) — не эхо запроса.
 
 | Параметр | Тип | Обязательный | Описание |
 |---|---|:---:|---|
 | `leverage` | `number` | да | Множитель плеча (напр. 10) |
 | `symbol` | `string` | да | Торговый символ |
+
+**Возврат:** `SetLeverageResult` — `{ confirmedLeverage: number | null }`.
 
 | Биржа | Futures | Spot |
 |---|:---:|:---:|
@@ -2001,6 +2008,20 @@ type ModifyBatchOrdersResult = ModifyOrderItemResult[];
 ```
 
 Симметрично `CancelOrderItemResult` / `CancelBatchOrdersResult`.
+
+#### `SetLeverageResult`
+
+```typescript
+interface SetLeverageResult {
+  confirmedLeverage: number | null;
+}
+```
+
+То, что биржа ФАКТИЧЕСКИ подтвердила в ответ на установку плеча. Binance берёт значение из
+самого ответа `/fapi/v1/leverage`; Bybit значения не возвращает, но и принятая установка, и
+«leverage not modified» (`110043`) означают, что на бирже стоит ровно запрошенное. `null` —
+запрос прошёл без ошибки, но пригодного числа в ответе не оказалось: считать плечо
+НЕподтверждённым, не полагаться на эхо собственного запроса.
 
 #### `SubscribeKlinesArgs`
 

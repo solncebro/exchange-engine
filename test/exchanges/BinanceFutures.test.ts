@@ -280,6 +280,26 @@ describe('BinanceFutures', () => {
       expect(options.params.symbol).toBe('BTCUSDT');
       expect(options.params.leverage).toBe(20);
     });
+
+    // Подтверждение — это ФАКТ из ответа биржи, не эхо запроса: до 14.08.2026 ответ выбрасывался,
+    // и проверить «плечо действительно стало нужным» было нечем, хотя лог выглядел как подтверждение.
+    it('returns the leverage the exchange actually confirmed', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.post.mockResolvedValue({ data: { symbol: 'BTCUSDT', leverage: 20, maxNotionalValue: '1000000' } });
+
+      const result = await client.setLeverage(20, 'BTCUSDT');
+
+      expect(result.confirmedLeverage).toBe(20);
+    });
+
+    it('reports null when the answer carries no usable leverage — never invents the requested value', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.post.mockResolvedValue({ data: {} });
+
+      const result = await client.setLeverage(20, 'BTCUSDT');
+
+      expect(result.confirmedLeverage).toBeNull();
+    });
   });
 
   describe('fetchFundingRateHistory', () => {
@@ -499,6 +519,34 @@ describe('BinanceFutures', () => {
 
       expect(options.params.price).toBe('65000');
       expect(options.params.timeInForce).toBe('GTC');
+    });
+
+    // Происхождение обычной заявки запоминается ПРИ СОЗДАНИИ: тогда первое же чтение по номеру
+    // идёт одним запросом в свою службу, а не опрашивает обе (вторая всегда отвечала −2013 —
+    // лишний круг по сети прямо в горячем пути постановки лесенки, прод 14.08.2026).
+    it('reads a just-created plain order with a single plain-book request, not both services', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: BINANCE_RAW_EXCHANGE_INFO });
+      await client.loadTradeSymbols();
+
+      mockInstance.post.mockResolvedValue({ data: BINANCE_RAW_ORDER_RESPONSE });
+
+      const created = await client.createOrderWebSocket({
+        symbol: 'BTCUSDT',
+        type: OrderTypeEnum.Limit,
+        side: OrderSideEnum.Sell,
+        amount: 0.5,
+        price: 65000,
+      });
+
+      mockInstance.get.mockClear();
+      mockInstance.get.mockResolvedValue({ data: BINANCE_RAW_ORDER_RESPONSE });
+
+      await client.getOrder('BTCUSDT', created.id);
+
+      const getUrlList = mockInstance.get.mock.calls.map(([url]) => url);
+
+      expect(getUrlList).toEqual(['/fapi/v1/order']);
     });
 
     // С 09.12.2025 условные заявки USDⓈ-M живут в отдельной Algo-службе: старый вход
@@ -1243,6 +1291,97 @@ describe('BinanceFutures', () => {
 
       expect(config.params.symbol).toBeUndefined();
     });
+
+    // Закрытие неликвида биржа дробит на сотни исполнений (VELVETUSDT 14.08.2026 — 129 штук в
+    // одну миллисекунду). Одной страницы на это не хватает, а недобранный хвост занижает итог.
+    function buildClosingPage(startId: number, count: number, orderId: number) {
+      return Array.from({ length: count }, (unused, index) => ({
+        id: startId + index,
+        orderId,
+        symbol: 'BTCUSDT',
+        side: 'BUY',
+        price: '98',
+        qty: '1',
+        realizedPnl: '2',
+        commission: '0.01',
+        time: 5000 + index,
+      }));
+    }
+
+    it('pages through the whole window instead of stopping at the first page', async () => {
+      const { client, mockInstance } = createClient();
+
+      mockInstance.get
+        .mockResolvedValueOnce({ data: buildClosingPage(1, 1000, 20) })
+        .mockResolvedValueOnce({ data: buildClosingPage(1001, 200, 20) });
+
+      const [row] = await client.fetchClosedPnl('BTCUSDT', { startTime: 1000 });
+
+      expect(mockInstance.get).toHaveBeenCalledTimes(2);
+      expect(row.quantity).toBe(1200);
+
+      const [, firstConfig] = mockInstance.get.mock.calls[0];
+      const [, secondConfig] = mockInstance.get.mock.calls[1];
+
+      expect(firstConfig.params.startTime).toBe(1000);
+      expect(firstConfig.params.limit).toBe(1000);
+      // Номер и окно времени биржа вместе не принимает — вторая страница идёт только по номеру.
+      expect(secondConfig.params.fromId).toBe(1001);
+      expect(secondConfig.params.startTime).toBeUndefined();
+    });
+
+    it('does not double-count an execution repeated on the page seam', async () => {
+      const { client, mockInstance } = createClient();
+
+      mockInstance.get
+        .mockResolvedValueOnce({ data: buildClosingPage(1, 1000, 20) })
+        // Биржа повторила последнее исполнение первой страницы в начале второй.
+        .mockResolvedValueOnce({ data: [...buildClosingPage(1000, 1, 20), ...buildClosingPage(1001, 5, 20)] });
+
+      const [row] = await client.fetchClosedPnl('BTCUSDT', { startTime: 1000 });
+
+      expect(row.quantity).toBe(1005);
+    });
+
+    it('stops paging once the executions pass the end of the window', async () => {
+      const { client, mockInstance } = createClient();
+
+      mockInstance.get
+        .mockResolvedValueOnce({ data: buildClosingPage(1, 1000, 20) })
+        // Вторая страница адресуется номером, конца окна биржа для неё уже не применяет.
+        .mockResolvedValueOnce({ data: buildClosingPage(1001, 1000, 20).map((raw) => ({ ...raw, time: 90000 })) })
+        .mockResolvedValue({ data: [] });
+
+      const [row] = await client.fetchClosedPnl('BTCUSDT', { startTime: 1000, endTime: 60000 });
+
+      expect(mockInstance.get).toHaveBeenCalledTimes(2);
+      expect(row.quantity).toBe(1000);
+    });
+
+    it('asks for one page only when no window start is given', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: CLOSING_TRADE_LIST });
+
+      await client.fetchClosedPnl('BTCUSDT');
+
+      expect(mockInstance.get).toHaveBeenCalledTimes(1);
+    });
+
+    it('counts the limit in result rows, the way the other exchange does', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({
+        data: [
+          { id: 1, orderId: 10, symbol: 'BTCUSDT', side: 'SELL', price: '100', qty: '4', realizedPnl: '0', commission: '0.40', time: 1000 },
+          { id: 2, orderId: 20, symbol: 'BTCUSDT', side: 'BUY', price: '99', qty: '1', realizedPnl: '1', commission: '0.01', time: 2000 },
+          { id: 3, orderId: 30, symbol: 'BTCUSDT', side: 'BUY', price: '98', qty: '3', realizedPnl: '6', commission: '0.03', time: 3000 },
+        ],
+      });
+
+      const result = await client.fetchClosedPnl('BTCUSDT', { limit: 1 });
+
+      expect(result).toHaveLength(1);
+      expect(result[0].orderId).toBe('30');
+    });
   });
 
   describe('createBatchOrders', () => {
@@ -1314,6 +1453,32 @@ describe('BinanceFutures', () => {
       expect(result[1].isSuccess).toBe(false);
       expect(result[1].order).toBeNull();
       expect(result[1].errorText).not.toBeNull();
+    });
+
+    // Пакет — теперь основной путь постановки лесенки, и его заявки обязаны запоминать своё
+    // происхождение так же, как одиночные: иначе первая же проверка постановки снова опрашивает
+    // обе службы по каждому номеру.
+    it('reads a batch-created plain order with a single plain-book request', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: BINANCE_RAW_EXCHANGE_INFO });
+      await client.loadTradeSymbols();
+
+      mockInstance.post.mockResolvedValue({ data: [{ ...BINANCE_RAW_ORDER_RESPONSE, orderId: 777 }] });
+
+      const result = await client.createBatchOrders([
+        { symbol: 'BTCUSDT', type: OrderTypeEnum.Limit, side: OrderSideEnum.Sell, amount: 0.5, price: 65000 },
+      ]);
+
+      expect(result[0].isSuccess).toBe(true);
+
+      mockInstance.get.mockClear();
+      mockInstance.get.mockResolvedValue({ data: { ...BINANCE_RAW_ORDER_RESPONSE, orderId: 777 } });
+
+      await client.getOrder('BTCUSDT', '777');
+
+      const getUrlList = mockInstance.get.mock.calls.map(([url]) => url);
+
+      expect(getUrlList).toEqual(['/fapi/v1/order']);
     });
   });
 

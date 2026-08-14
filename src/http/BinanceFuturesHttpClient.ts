@@ -212,10 +212,21 @@ class BinanceFuturesHttpClient extends BinanceBaseHttpClient {
   /**
    * Собственные сделки счёта — единственный вход Binance, дающий реализованный итог и
    * комиссию в разрезе сделки. Символ необязателен: без него отвечает по всему счёту.
+   * `fromId` биржа запрещает сочетать с окном времени, поэтому при нём окно не передаётся:
+   * так устроен постраничный добор (первая страница — по времени, следующие — по номеру).
    */
   async fetchUserTrades(args: BinanceUserTradeQueryArgs): Promise<BinanceUserTradeRaw[]> {
     const params: Record<string, string | number | boolean> = this.buildOptionalSymbolParams(args.symbol);
-    applyTimeRangeOptions(params, args);
+
+    if (args.fromId === undefined) {
+      applyTimeRangeOptions(params, args);
+    } else {
+      params.fromId = args.fromId;
+
+      if (args.limit !== undefined) {
+        params.limit = args.limit;
+      }
+    }
 
     return this.signedGet<BinanceUserTradeRaw[]>('/fapi/v1/userTrades', params);
   }

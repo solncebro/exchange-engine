@@ -9,6 +9,7 @@ import type {
   ModifyBatchOrderArgs,
   ModifyBatchOrdersResult,
   ModifyOrderArgs,
+  SetLeverageResult,
 } from '../types/exchange';
 import type { Position, Order, FundingRateHistory, FundingInfo, AccountBalances, MarkPrice, OpenInterest, FeeRate, Income, ClosedPnl } from '../types/common';
 import { MarginModeEnum, PositionModeEnum, OrderTypeEnum, TimeInForceEnum, TriggerByEnum } from '../types/common';
@@ -20,7 +21,7 @@ import {
   buildRejectedOrderOutcome,
 } from '../normalizers/batchOrderOutcome';
 import { BinanceFuturesHttpClient } from '../http/BinanceFuturesHttpClient';
-import type { BinanceOrderResponseRaw } from '../normalizers/binanceNormalizer';
+import type { BinanceOrderResponseRaw, BinanceUserTradeRaw } from '../normalizers/binanceNormalizer';
 import {
   normalizeBinancePosition,
   normalizeBinanceOrder,
@@ -81,6 +82,14 @@ const BINANCE_ALGO_LIMIT_LIKE_ORDER_TYPE_SET: ReadonlySet<OrderTypeEnum> = new S
 
 /** «Такой заявки нет» — одинаково отвечают обе службы, отличить по коду невозможно. */
 const BINANCE_MISSING_ORDER_ERROR_CODE_LIST = [-2011, -2013];
+
+/** Потолок строк в одном ответе списка собственных сделок (документация биржи: по умолчанию 500,
+ *  максимум 1000). Берём максимум: одно закрытие неликвида — это уже сотня исполнений. */
+const USER_TRADE_PAGE_SIZE = 1000;
+
+/** Предохранитель постраничного добора: 30 страниц — это 30 тысяч исполнений по одному символу
+ *  за окно сделки. Столько не бывает; потолок нужен, чтобы сбойный ответ не крутил цикл вечно. */
+const USER_TRADE_MAX_PAGE_COUNT = 30;
 
 function isBinanceMissingOrderError(error: unknown): boolean {
   const code = parseBinanceErrorCode(error);
@@ -207,6 +216,22 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
     }
 
     return params;
+  }
+
+  /**
+   * Происхождение СВОЕЙ заявки известно в момент создания — запоминаем его сразу (обычная ветка;
+   * условная записывает себя в tryCreateConditionalOrder). Иначе первое же чтение по номеру
+   * опрашивает обе службы, и вторая отвечает −2013: лишний круг по сети прямо в горячем пути
+   * постановки лесенки плюс пугающая строка в логе на каждую заявку (прод rubber, 14.08.2026).
+   */
+  override async createOrderWebSocket(args: CreateOrderWebSocketArgs): Promise<Order> {
+    const order = await super.createOrderWebSocket(args);
+
+    if (!isConditionalOrderType(args.type)) {
+      this.conditionalOrderRegistry.record(order.symbol, order.id, 'plain');
+    }
+
+    return order;
   }
 
   protected async tryCreateConditionalOrder(args: CreateOrderWebSocketArgs): Promise<Order | null> {
@@ -372,7 +397,12 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
     }
 
     if (plainOutcome.status === 'fulfilled') {
-      return normalizeBinanceOrder(plainOutcome.value);
+      const order = normalizeBinanceOrder(plainOutcome.value);
+
+      // Происхождение выяснено — следующие обращения по номеру пойдут одним запросом.
+      this.conditionalOrderRegistry.record(symbol, order.id, 'plain');
+
+      return order;
     }
 
     throw plainOutcome.reason;
@@ -574,9 +604,15 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
       .map(normalizeBinancePosition);
   }
 
-  async setLeverage(leverage: number, symbol: string): Promise<void> {
+  async setLeverage(leverage: number, symbol: string): Promise<SetLeverageResult> {
     this.logger.info(`Setting leverage to ${leverage}x for ${symbol}`);
-    await this.httpClient.setLeverage(symbol, leverage);
+    const raw = await this.httpClient.setLeverage(symbol, leverage);
+    // Подтверждение — ТОЛЬКО значение из ответа /fapi/v1/leverage. Ответ без числа не превращается
+    // в эхо запроса: вызывающий должен увидеть «не подтверждено» и не полагаться на такое плечо.
+    const confirmed = Number((raw as { leverage?: unknown }).leverage);
+
+    // Плечо всегда ≥ 1: Number(null) даёт 0, и без нижней границы пустое поле сошло бы за факт.
+    return { confirmedLeverage: Number.isFinite(confirmed) && confirmed >= 1 ? confirmed : null };
   }
 
   async setMarginMode(marginMode: MarginModeEnum, symbol: string): Promise<void> {
@@ -716,9 +752,13 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
           return;
         }
 
-        resultList[index] = buildPlacedOrderOutcome(
-          normalizeBinanceOrder(rawItem as unknown as BinanceOrderResponseRaw),
-        );
+        const placedOrder = normalizeBinanceOrder(rawItem as unknown as BinanceOrderResponseRaw);
+
+        // Пакет — основной путь постановки лесенки: его заявки запоминают происхождение так же,
+        // как одиночные (см. createOrderWebSocket), иначе проверка постановки снова опрашивает
+        // обе службы по каждому номеру.
+        this.conditionalOrderRegistry.record(placedOrder.symbol, placedOrder.id, 'plain');
+        resultList[index] = buildPlacedOrderOutcome(placedOrder);
       });
     }
 
@@ -919,14 +959,95 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
    * Готовой ручки «итоги закрытия» у Binance нет — собираем их из собственных сделок счёта.
    * Раньше метод не существовал вовсе: базовый класс просто отказывал, и потребитель писал
    * итоги сделок расчётными, без комиссии.
+   *
+   * `limit` значит РОВНО то же, что у соседней биржи: сколько строк итога вернуть, а не сколько
+   * сырых исполнений прочитать. Раньше он уезжал прямо в запрос исполнений, и «50» превращалось
+   * в «50 исполнений»: закрытие тонкой монеты биржа дробит на сотню исполнений, из которых
+   * потребитель видел половину и записывал заниженный итог (VELVETUSDT/ACEUSDT 14.08.2026 —
+   * закрытия из 129 и 91 исполнения, в журнале осело меньше половины убытка).
    */
   async fetchClosedPnl(symbol?: string, options?: FetchPageWithLimitArgs): Promise<ClosedPnl[]> {
     this.logger.debug(`[Binance] Building closed PnL for ${symbol ?? 'the whole account'} from account trades`);
     // Символ необязателен — проверено живым запросом 08.08.2026: без него вход отвечает
     // сделками всего счёта. Соседняя биржа тоже позволяет его не называть.
-    const rawList = await this.httpClient.fetchUserTrades({ symbol, ...options });
+    const rawList = await this.fetchUserTradeHistory(symbol, options);
+    const closedPnlList = buildBinanceClosedPnlList(rawList);
 
-    return buildBinanceClosedPnlList(rawList);
+    if (options?.limit === undefined || closedPnlList.length <= options.limit) {
+      return closedPnlList;
+    }
+
+    // Оставляем самые свежие строки — так же, как отдаёт соседняя биржа; порядок не трогаем.
+    const cutoffList = [...closedPnlList].sort((left, right) => right.timestamp - left.timestamp).slice(0, options.limit);
+    const keptSet = new Set(cutoffList);
+
+    return closedPnlList.filter((row) => keptSet.has(row));
+  }
+
+  /**
+   * Все исполнения счёта за окно. С указанным началом окна идём постранично: биржа отдаёт не
+   * больше USER_TRADE_PAGE_SIZE строк за раз, а одна закрывающая заявка на неликвиде столько и
+   * даёт. Следующая страница адресуется номером сделки — окно времени с ним сочетать нельзя
+   * (запрет документации биржи), поэтому конец окна досекаем у себя.
+   */
+  private async fetchUserTradeHistory(symbol?: string, options?: FetchPageWithLimitArgs): Promise<BinanceUserTradeRaw[]> {
+    if (options?.startTime === undefined) {
+      return this.httpClient.fetchUserTrades({ symbol, endTime: options?.endTime, limit: USER_TRADE_PAGE_SIZE });
+    }
+
+    const collectedList: BinanceUserTradeRaw[] = [];
+    const seenIdSet = new Set<number>();
+    let fromId: number | undefined;
+
+    for (let pageIndex = 0; pageIndex < USER_TRADE_MAX_PAGE_COUNT; pageIndex++) {
+      const pageList = await this.httpClient.fetchUserTrades(
+        fromId === undefined
+          ? { symbol, startTime: options.startTime, endTime: options.endTime, limit: USER_TRADE_PAGE_SIZE }
+          : { symbol, fromId, limit: USER_TRADE_PAGE_SIZE },
+      );
+
+      const windowEnd = options.endTime ?? Number.POSITIVE_INFINITY;
+      let hasPassedWindowEnd = false;
+
+      for (const raw of pageList) {
+        if (raw.time > windowEnd) {
+          hasPassedWindowEnd = true;
+          continue;
+        }
+
+        // Страницы стыкуются по номеру, и повтор на стыке дублировал бы исполнение в итоге.
+        if (Number.isFinite(raw.id)) {
+          if (seenIdSet.has(raw.id)) {
+            continue;
+          }
+
+          seenIdSet.add(raw.id);
+        }
+
+        collectedList.push(raw);
+      }
+
+      // Страница по номеру конца окна не знает: биржа отбирает по нему только первую страницу.
+      // Как только исполнения перешагнули конец, дальше заведомо только более поздние.
+      if (pageList.length < USER_TRADE_PAGE_SIZE || hasPassedWindowEnd) {
+        return collectedList;
+      }
+
+      const lastId = pageList.reduce((latest, raw) => Math.max(latest, raw.id), 0);
+
+      // Без номера следующую страницу не адресовать — дальше идти нечем, отдаём собранное.
+      if (!Number.isFinite(lastId) || lastId <= 0) {
+        return collectedList;
+      }
+
+      fromId = lastId + 1;
+    }
+
+    this.logger.warn(
+      `[Binance] Account trade history for ${symbol ?? 'the whole account'} hit the ${USER_TRADE_MAX_PAGE_COUNT}-page ceiling — the closed PnL below may be incomplete`,
+    );
+
+    return collectedList;
   }
 
   async setPositionMode(mode: PositionModeEnum): Promise<void> {

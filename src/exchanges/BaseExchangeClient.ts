@@ -15,6 +15,7 @@ import type {
   ResubscribeKlinesArgs,
   ResubscribeOrderbookArgs,
   ResubscribePublicTradesArgs,
+  SetLeverageResult,
   SetOrderbookLiveSymbolArgs,
   SubscribeOrderbookArgs,
   SubscribePublicTradesArgs,
@@ -395,7 +396,7 @@ abstract class BaseExchangeClient implements ExchangeClient {
     throw new Error(`Not supported for ${this.marketLabel} market`);
   }
 
-  async setLeverage(_leverage: number, _symbol: string): Promise<void> {
+  async setLeverage(_leverage: number, _symbol: string): Promise<SetLeverageResult> {
     throw new Error(`Not supported for ${this.marketLabel} market`);
   }
 
