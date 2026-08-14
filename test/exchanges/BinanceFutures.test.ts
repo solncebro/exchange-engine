@@ -67,6 +67,40 @@ describe('BinanceFutures', () => {
     );
   });
 
+  it('threads publicStreamConnectionPacking.maxTopicsPerConnection into the public stream cap', () => {
+    const mockInstance = createMockAxiosInstance();
+    mockedAxios.create.mockReturnValue(mockInstance as any);
+    const MockedPublicStream = BinanceFuturesPublicStream as jest.MockedClass<
+      typeof BinanceFuturesPublicStream
+    >;
+    MockedPublicStream.mockClear();
+
+    new BinanceFutures({
+      config: {
+        apiKey: 'testKey',
+        secret: 'testSecret',
+        publicStreamConnectionPacking: { maxTopicsPerConnection: 150 },
+      },
+      logger: createMockLogger(),
+    });
+
+    expect(MockedPublicStream).toHaveBeenCalledWith(
+      expect.objectContaining({ maxStreamsPerConnection: 150 }),
+    );
+  });
+
+  it('leaves the public stream cap undefined when packing is not configured', () => {
+    const MockedPublicStream = BinanceFuturesPublicStream as jest.MockedClass<
+      typeof BinanceFuturesPublicStream
+    >;
+    MockedPublicStream.mockClear();
+    createClient(false);
+
+    expect(MockedPublicStream).toHaveBeenCalledWith(
+      expect.objectContaining({ maxStreamsPerConnection: undefined }),
+    );
+  });
+
   describe('fetchPosition', () => {
     it('normalizes position from raw data', async () => {
       const { client, mockInstance } = createClient();

@@ -74,9 +74,14 @@ export interface PublicStreamConnectionPacking {
   // tickers/klines/orderbook/trades. A partial last connection of a type is left
   // partial, not back-filled with another type. This isolates a churning stream
   // (e.g. orderbook) from dragging unrelated streams (e.g. klines) on reconnect.
+  // Bybit-only: Binance packs by interval group regardless of this flag.
   separateByTopicType?: boolean;
-  // Fallback per-connection topic cap (default 200) used when off, and for any type
-  // without an explicit override below.
+  // Per-connection topic cap. Bybit: default 200. Binance futures: caps kline
+  // streams per connection (default 900); each interval group is sharded into
+  // several connections when it exceeds the cap — under peak load the exchange
+  // starves and resets oversized connections while small ones keep flowing
+  // (prod evidence 2026-08-11: a 523-stream connection lost 471 streams at once
+  // while a 30-stream connection on the same host stayed perfectly clean).
   maxTopicsPerConnection?: number;
   // Per-type cap override, e.g. { orderbook: 100, publicTrade: 100 } shrinks the
   // blast radius of the high-churn streams without fragmenting the stable ones.
@@ -360,6 +365,8 @@ export interface WebSocketConnectionInfo {
   messageCount?: number;
   lastMessageTimestamp?: number;
   reconnectCount?: number;
+  pendingCommandCount?: number;
+  maxCommandsPerSecond?: number;
 }
 
 export interface OrderBookLevel {

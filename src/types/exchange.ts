@@ -260,6 +260,7 @@ export interface ExchangeClient {
   subscribeKlines(args: SubscribeKlinesArgs): void;
   unsubscribeKlines(args: SubscribeKlinesArgs): void;
   resubscribeKlines(args: ResubscribeKlinesArgs): void;
+  resubscribeKlineList(argsList: ResubscribeKlinesArgs[]): void;
   resubscribeOrderbook(args: ResubscribeOrderbookArgs): void;
   resubscribePublicTrades(args: ResubscribePublicTradesArgs): void;
   resubscribeMarkPrices(): void;

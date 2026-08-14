@@ -1,6 +1,7 @@
 import type { ReliableWebSocket } from '@solncebro/websocket-engine';
 
 import type { ExchangeLogger } from '../types/common';
+import type { OutboundCommandQueue } from './OutboundCommandQueue';
 
 export interface BinanceFuturesPublicStreamArgs {
   webSocketUrl: string;
@@ -13,6 +14,9 @@ export interface BinanceFuturesPublicStreamArgs {
   subscribeBatchSize?: number;
   pauseBetweenSubscribeBatchesMs?: number;
   maxStreamsPerConnection?: number;
+  maxCommandsPerSecond?: number;
+  cascadeRecreateStreamCount?: number;
+  resubscribeCoalesceWindowMs?: number;
 }
 
 export interface BinanceCombinedMessage {
@@ -32,4 +36,7 @@ export interface FuturesConnection {
   lastRecreateTimestamp: number;
   readyPromise: Promise<void>;
   resolveReady?: () => void;
+  commandQueue: OutboundCommandQueue;
+  openSend?: (data: unknown) => void;
+  policyViolationUntilTimestamp: number;
 }

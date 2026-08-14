@@ -1,5 +1,5 @@
 import type { KlineInterval, MarkPriceHandler, OrderBookHandler, PublicTradeHandler, RawOrderbookHandler, TickerBySymbol, WebSocketConnectionInfo } from './common';
-import type { KlineHandler } from './exchange';
+import type { KlineHandler, ResubscribeKlinesArgs } from './exchange';
 
 export interface PublicStreamLike {
   subscribeAllTickers(handler: (tickers: TickerBySymbol) => void, symbolList: string[]): void;
@@ -13,6 +13,7 @@ export interface PublicStreamLike {
   subscribePublicTrades?(symbol: string, handler: PublicTradeHandler): void;
   unsubscribePublicTrades?(symbol: string, handler: PublicTradeHandler): void;
   resubscribeStream?(symbol: string, interval: string): void;
+  resubscribeStreamList?(subscriptionList: ResubscribeKlinesArgs[]): void;
   resubscribeOrderbook?(symbol: string, depth: number): void;
   resubscribePublicTrades?(symbol: string): void;
   resubscribeMarkPrices?(): void;

@@ -454,6 +454,8 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
       logger: args.logger,
       onNotify: BaseExchangeClient.createNotifyHandler(args.onNotify),
       label: 'Binance Futures Public WebSocket',
+      maxStreamsPerConnection:
+        args.config.publicStreamConnectionPacking?.maxTopicsPerConnection,
     });
 
     super({

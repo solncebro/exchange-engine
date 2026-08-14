@@ -568,6 +568,30 @@ describe('BybitPublicStream', () => {
 
       expect(mockWebSocket.close).toHaveBeenCalled();
     });
+
+    it('resubscribeMarkPrices recreates the connection instead of a per-topic repair once the subscribed ticker topic count reaches the cascade threshold', async () => {
+      mockWebSocket.getStatus.mockReturnValue('connected');
+
+      const stream = new BybitPublicStream({ url: 'wss://stream.bybit.com/v5/public/linear', logger: mockLogger, onNotify: undefined, label: 'test' });
+      const symbolList = Array.from({ length: 60 }, (_unused, index) => `SYM${index}USDT`);
+      stream.subscribeMarkPrices(jest.fn(), symbolList);
+
+      await Promise.resolve();
+      await Promise.resolve();
+
+      mockWebSocket.sendToConnectedSocket.mockClear();
+      mockWebSocket.close.mockClear();
+
+      stream.resubscribeMarkPrices();
+
+      expect(mockWebSocket.close).toHaveBeenCalledTimes(1);
+      expect(mockWebSocket.sendToConnectedSocket).not.toHaveBeenCalledWith(
+        expect.objectContaining({ op: 'unsubscribe' }),
+      );
+      expect(mockWebSocket.sendToConnectedSocket).not.toHaveBeenCalledWith(
+        expect.objectContaining({ op: 'subscribe' }),
+      );
+    });
   });
 
   describe('resubscribeOrderbook / resubscribePublicTrades / resubscribeMarkPrices (light path)', () => {

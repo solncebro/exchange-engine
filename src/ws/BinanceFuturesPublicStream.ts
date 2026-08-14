@@ -2,7 +2,7 @@ import { ReliableWebSocket, WebSocketStatus } from '@solncebro/websocket-engine'
 
 import type { ExchangeLogger, KlineInterval, MarkPriceHandler, OrderBookHandler, PublicTradeHandler, TickerBySymbol, TradeSymbolBySymbol, WebSocketConnectionInfo } from '../types/common';
 import { WebSocketConnectionTypeEnum } from '../types/common';
-import type { KlineHandler } from '../types/exchange';
+import type { KlineHandler, ResubscribeKlinesArgs } from '../types/exchange';
 import {
   normalizeBinanceAggTradeFromStream,
   normalizeBinanceKlineWebSocketMessage,
@@ -21,6 +21,15 @@ import { resolveUnifiedBinanceInterval } from './binanceWebSocketUtils';
 import type { BinanceCombinedMessage, BinanceFuturesPublicStreamArgs, FuturesConnection } from './BinanceFuturesPublicStream.types';
 import { parseWebSocketMessage } from './parseWebSocketMessage';
 import { chunkList } from '../utils/chunkList';
+import { OutboundCommandQueue } from './OutboundCommandQueue';
+import {
+  BINANCE_WS_CASCADE_RECREATE_STREAM_COUNT,
+  BINANCE_WS_POLICY_VIOLATION_BACKOFF_MS,
+  BINANCE_WS_POLICY_VIOLATION_CLOSE_CODE,
+  BINANCE_WS_QUEUE_RATE_PER_SECOND,
+  BINANCE_WS_RESUBSCRIBE_COALESCE_WINDOW_MS,
+  BINANCE_WS_SOCKET_CAP_PER_SECOND,
+} from './streamCommandRateLimit';
 
 const DEFAULT_PAUSE_BETWEEN_CONNECTIONS_MS = 1100;
 const DEFAULT_STALE_THRESHOLD_MS = 60000;
@@ -28,7 +37,6 @@ const DEFAULT_STALE_CHECK_INTERVAL_MS = 5000;
 const DEFAULT_RECREATE_DEDUP_WINDOW_MS = 2000;
 const POST_RECREATE_GRACE_PERIOD_MS = 60000;
 const DEFAULT_SUBSCRIBE_BATCH_SIZE = 50;
-const DEFAULT_PAUSE_BETWEEN_SUBSCRIBE_BATCHES_MS = 200;
 const DEFAULT_MAX_STREAMS_PER_CONNECTION = 900;
 const NON_KLINE_GROUP_KEY = 'tickers-markprices';
 const AGGTRADE_GROUP_KEY = 'aggTrades';
@@ -114,7 +122,6 @@ class BinanceFuturesPublicStream {
   private readonly staleThresholdMs: number;
   private readonly staleCheckIntervalMs: number;
   private readonly subscribeBatchSize: number;
-  private readonly pauseBetweenSubscribeBatchesMs: number;
   private readonly maxStreamsPerConnection: number;
   private tradeSymbols: TradeSymbolBySymbol = new Map();
   private readonly tickerHandlerSet: Set<(tickers: TickerBySymbol) => void> = new Set();
@@ -123,9 +130,14 @@ class BinanceFuturesPublicStream {
   private readonly publicTradeHandlerBySymbol: Map<string, Set<PublicTradeHandler>> = new Map();
   private readonly orderBookHandlerByStream: Map<string, Set<OrderBookHandler>> = new Map();
   private readonly connectionList: FuturesConnection[] = [];
+  private readonly pendingResubscribeStreamSet: Set<string> = new Set();
+  private readonly maxCommandsPerSecond: number;
+  private readonly cascadeRecreateStreamCount: number;
+  private readonly resubscribeCoalesceWindowMs: number;
   private isConnectScheduled = false;
   private subscriptionIdCounter = 1;
   private staleCheckTimerId?: NodeJS.Timeout;
+  private resubscribeFlushTimerId?: NodeJS.Timeout;
   private connectionsReadyPromise?: Promise<void>;
 
   constructor(args: BinanceFuturesPublicStreamArgs) {
@@ -139,9 +151,12 @@ class BinanceFuturesPublicStream {
     this.staleCheckIntervalMs =
       args.staleCheckIntervalMs ?? DEFAULT_STALE_CHECK_INTERVAL_MS;
     this.subscribeBatchSize = args.subscribeBatchSize ?? DEFAULT_SUBSCRIBE_BATCH_SIZE;
-    this.pauseBetweenSubscribeBatchesMs =
-      args.pauseBetweenSubscribeBatchesMs ?? DEFAULT_PAUSE_BETWEEN_SUBSCRIBE_BATCHES_MS;
     this.maxStreamsPerConnection = args.maxStreamsPerConnection ?? DEFAULT_MAX_STREAMS_PER_CONNECTION;
+    this.maxCommandsPerSecond = args.maxCommandsPerSecond ?? BINANCE_WS_QUEUE_RATE_PER_SECOND;
+    this.cascadeRecreateStreamCount =
+      args.cascadeRecreateStreamCount ?? BINANCE_WS_CASCADE_RECREATE_STREAM_COUNT;
+    this.resubscribeCoalesceWindowMs =
+      args.resubscribeCoalesceWindowMs ?? BINANCE_WS_RESUBSCRIBE_COALESCE_WINDOW_MS;
   }
 
   setTradeSymbols(tradeSymbols: TradeSymbolBySymbol): void {
@@ -297,54 +312,142 @@ class BinanceFuturesPublicStream {
     this.resubscribeStreamByName(buildStreamName(symbol, interval, this.tradeSymbols));
   }
 
-  private resubscribeStreamByName(stream: string): void {
-    for (let index = 0; index < this.connectionList.length; index++) {
-      const connection = this.connectionList[index];
+  resubscribeStreamList(subscriptionList: ResubscribeKlinesArgs[]): void {
+    const streamList = subscriptionList.map((subscription) =>
+      buildStreamName(subscription.symbol, subscription.interval, this.tradeSymbols),
+    );
 
-      if (!connection.streamList.includes(stream)) {
+    this.applyResubscribeStreamList(streamList);
+  }
+
+  private resubscribeStreamByName(stream: string): void {
+    this.pendingResubscribeStreamSet.add(stream);
+    this.scheduleResubscribeFlush();
+  }
+
+  private scheduleResubscribeFlush(): void {
+    if (this.resubscribeFlushTimerId !== undefined) {
+      return;
+    }
+
+    this.resubscribeFlushTimerId = setTimeout(() => {
+      this.resubscribeFlushTimerId = undefined;
+      this.flushPendingResubscribes();
+    }, this.resubscribeCoalesceWindowMs);
+
+    this.resubscribeFlushTimerId.unref?.();
+  }
+
+  private flushPendingResubscribes(): void {
+    if (this.pendingResubscribeStreamSet.size === 0) {
+      return;
+    }
+
+    const streamList = [...this.pendingResubscribeStreamSet];
+
+    this.pendingResubscribeStreamSet.clear();
+    this.applyResubscribeStreamList(streamList);
+  }
+
+  private applyResubscribeStreamList(streamList: string[]): void {
+    const streamListByConnectionIndex = new Map<number, string[]>();
+
+    for (const stream of streamList) {
+      const connectionIndex = this.connectionList.findIndex((connection) =>
+        connection.streamList.includes(stream),
+      );
+
+      if (connectionIndex === -1) {
+        this.logger.warn(`BinanceFuturesPublicStream: stream ${stream} not found in any connection`);
+
         continue;
       }
 
-      if (connection.webSocket.getStatus() !== WebSocketStatus.CONNECTED) {
-        this.recreateConnection(index, `manual resubscribe of ${stream} (ws disconnected)`);
+      const groupedStreamList = streamListByConnectionIndex.get(connectionIndex) ?? [];
 
-        return;
-      }
+      groupedStreamList.push(stream);
+      streamListByConnectionIndex.set(connectionIndex, groupedStreamList);
+    }
 
-      try {
-        connection.webSocket.sendToConnectedSocket({
-          method: 'UNSUBSCRIBE',
-          params: [stream],
-          id: this.subscriptionIdCounter++,
-        });
-        connection.webSocket.sendToConnectedSocket({
-          method: 'SUBSCRIBE',
-          params: [stream],
-          id: this.subscriptionIdCounter++,
-        });
-        this.logger.info(`BinanceFuturesPublicStream: light resubscribe ${stream} on ${connection.label}`);
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        this.logger.warn(`BinanceFuturesPublicStream: light resubscribe failed for ${stream} on ${connection.label}, falling back to recreate (${errorMessage})`);
-        this.recreateConnection(index, `manual resubscribe of ${stream} (light failed)`);
-      }
+    for (const [connectionIndex, connectionStreamList] of streamListByConnectionIndex) {
+      this.repairConnectionStreamList(connectionIndex, connectionStreamList);
+    }
+  }
+
+  private repairConnectionStreamList(connectionIndex: number, streamList: string[]): void {
+    const connection = this.connectionList[connectionIndex];
+
+    if (!connection) {
+      return;
+    }
+
+    if (connection.webSocket.getStatus() !== WebSocketStatus.CONNECTED) {
+      this.recreateConnection(
+        connectionIndex,
+        `resubscribe of ${streamList.length} stream(s) (ws disconnected)`,
+      );
 
       return;
     }
 
-    this.logger.warn(`BinanceFuturesPublicStream: stream ${stream} not found in any connection`);
+    if (Date.now() < connection.policyViolationUntilTimestamp) {
+      this.recreateConnection(
+        connectionIndex,
+        `resubscribe of ${streamList.length} stream(s) (policy violation backoff)`,
+      );
+
+      return;
+    }
+
+    if (streamList.length >= this.cascadeRecreateStreamCount) {
+      this.logger.warn(
+        `BinanceFuturesPublicStream: cascade resubscribe of ${streamList.length} stream(s) on ${connection.label} — recreating connection instead of per-stream repair`,
+      );
+      this.recreateConnection(
+        connectionIndex,
+        `cascade resubscribe of ${streamList.length} stream(s)`,
+      );
+
+      return;
+    }
+
+    const commandList: unknown[] = [];
+
+    for (const batch of chunkList(streamList, this.subscribeBatchSize)) {
+      commandList.push({
+        method: 'UNSUBSCRIBE',
+        params: batch,
+        id: this.subscriptionIdCounter++,
+      });
+      commandList.push({
+        method: 'SUBSCRIBE',
+        params: batch,
+        id: this.subscriptionIdCounter++,
+      });
+    }
+
+    connection.commandQueue.enqueueList(commandList);
+    this.logger.info(
+      `BinanceFuturesPublicStream: light resubscribe of ${streamList.length} stream(s) on ${connection.label} in ${commandList.length} command(s)`,
+    );
   }
 
   getConnectionInfoList(): WebSocketConnectionInfo[] {
-    return this.connectionList.map((connection) => ({
-      label: connection.label,
-      url: connection.url,
-      isConnected: connection.webSocket.getStatus() === WebSocketStatus.CONNECTED,
-      type: WebSocketConnectionTypeEnum.Public,
-      subscriptionList: this.buildSubscriptionList(connection),
-      messageCount: connection.messageCount,
-      lastMessageTimestamp: connection.lastMessageTimestamp,
-    }));
+    return this.connectionList.map((connection) => {
+      const queueSnapshot = connection.commandQueue.getSnapshot();
+
+      return {
+        label: connection.label,
+        url: connection.url,
+        isConnected: connection.webSocket.getStatus() === WebSocketStatus.CONNECTED,
+        type: WebSocketConnectionTypeEnum.Public,
+        subscriptionList: this.buildSubscriptionList(connection),
+        messageCount: connection.messageCount,
+        lastMessageTimestamp: connection.lastMessageTimestamp,
+        pendingCommandCount: queueSnapshot.pendingCommandCount,
+        maxCommandsPerSecond: queueSnapshot.maxCommandsPerSecond,
+      };
+    });
   }
 
   close(): void {
@@ -353,7 +456,15 @@ class BinanceFuturesPublicStream {
       this.staleCheckTimerId = undefined;
     }
 
+    if (this.resubscribeFlushTimerId !== undefined) {
+      clearTimeout(this.resubscribeFlushTimerId);
+      this.resubscribeFlushTimerId = undefined;
+    }
+
+    this.pendingResubscribeStreamSet.clear();
+
     for (const connection of this.connectionList) {
+      connection.commandQueue.dispose();
       connection.webSocket.close();
     }
 
@@ -361,11 +472,20 @@ class BinanceFuturesPublicStream {
   }
 
   async awaitConnectionsReady(): Promise<void> {
+    if (this.resubscribeFlushTimerId !== undefined) {
+      clearTimeout(this.resubscribeFlushTimerId);
+      this.resubscribeFlushTimerId = undefined;
+      this.flushPendingResubscribes();
+    }
+
     if (this.connectionsReadyPromise) {
       await this.connectionsReadyPromise;
     }
 
     await Promise.all(this.connectionList.map((connection) => connection.readyPromise));
+    await Promise.all(
+      this.connectionList.map((connection) => connection.commandQueue.awaitDrained()),
+    );
   }
 
   private scheduleConnect(): void {
@@ -526,7 +646,11 @@ class BinanceFuturesPublicStream {
     }
 
     const connectionIndex = this.connectionList.length;
-    const connectionLabel = `${this.label} ${groupKey}`;
+    const groupShardIndex = this.connectionList.filter(
+      (existingConnection) => existingConnection.groupKey === groupKey,
+    ).length;
+    const shardSuffix = groupShardIndex > 0 ? ` #${groupShardIndex + 1}` : '';
+    const connectionLabel = `${this.label} ${groupKey}${shardSuffix}`;
     const url = this.webSocketUrl;
 
     let resolveReady: () => void = () => {
@@ -550,10 +674,54 @@ class BinanceFuturesPublicStream {
       lastRecreateTimestamp: 0,
       readyPromise,
       resolveReady,
+      commandQueue: this.buildCommandQueue(connectionIndex, connectionLabel),
+      policyViolationUntilTimestamp: 0,
     });
 
     this.logger.info(
       `BinanceFuturesPublicStream: created connection ${groupKey} → ${url} (${streamList.length} streams)`,
+    );
+  }
+
+  private buildCommandQueue(connectionIndex: number, connectionLabel: string): OutboundCommandQueue {
+    return new OutboundCommandQueue({
+      label: connectionLabel,
+      logger: this.logger,
+      maxCommandsPerSecond: this.maxCommandsPerSecond,
+      send: (data) => this.sendForConnection(connectionIndex, data),
+      onSendFailure: () => this.recreateConnection(connectionIndex, 'queued command send failed'),
+    });
+  }
+
+  private sendForConnection(connectionIndex: number, data: unknown): void {
+    const connection = this.connectionList[connectionIndex];
+
+    if (!connection) {
+      throw new Error(`BinanceFuturesPublicStream: connection ${connectionIndex} is gone`);
+    }
+
+    const openSend = connection.openSend;
+
+    if (openSend !== undefined) {
+      openSend(data);
+
+      return;
+    }
+
+    connection.webSocket.sendToConnectedSocket(data);
+  }
+
+  private handleConnectionClose(connectionIndex: number, closeCode: number | undefined): void {
+    const connection = this.connectionList[connectionIndex];
+
+    if (!connection || closeCode !== BINANCE_WS_POLICY_VIOLATION_CLOSE_CODE) {
+      return;
+    }
+
+    connection.policyViolationUntilTimestamp = Date.now() + BINANCE_WS_POLICY_VIOLATION_BACKOFF_MS;
+    connection.commandQueue.clear('policy violation close');
+    this.logger.error(
+      `BinanceFuturesPublicStream: ${connection.label} closed by the exchange for a policy violation — pausing per-stream repairs for ${BINANCE_WS_POLICY_VIOLATION_BACKOFF_MS / 1000}s`,
     );
   }
 
@@ -586,17 +754,22 @@ class BinanceFuturesPublicStream {
           return;
         }
 
+        connection.openSend = context.send;
+
         try {
           if (connection.streamList.length > 0) {
-            await this.sendSubscribeBatches(context, connection, connection.streamList);
+            await this.sendSubscribeBatches(connection, connection.streamList);
           }
         } finally {
+          connection.openSend = undefined;
+
           if (connection.resolveReady) {
             connection.resolveReady();
             connection.resolveReady = undefined;
           }
         }
       },
+      onClose: (closeContext) => this.handleConnectionClose(connectionIndex, closeContext.closeCode),
       onNotify: this.onNotify,
       heartbeat: {
         buildPayload: () => ({
@@ -614,44 +787,28 @@ class BinanceFuturesPublicStream {
       },
       configuration: {
         pingInterval: 30000,
+        maxOutgoingMessagesPerSecond: BINANCE_WS_SOCKET_CAP_PER_SECOND,
+        isHandshakeProbeEnabled: true,
       },
     });
   }
 
   private async sendSubscribeBatches(
-    context: { send: (message: unknown) => void },
     connection: FuturesConnection,
     streamList: string[],
   ): Promise<void> {
-    let batchCount = 0;
-    let sentCount = 0;
+    const batchList = chunkList(streamList, this.subscribeBatchSize);
+    const commandList = batchList.map((batch) => ({
+      method: 'SUBSCRIBE',
+      params: batch,
+      id: this.subscriptionIdCounter++,
+    }));
 
-    while (sentCount < streamList.length) {
-      const batch = streamList.slice(sentCount, sentCount + this.subscribeBatchSize);
-      sentCount += batch.length;
-      batchCount++;
-
-      try {
-        context.send({
-          method: 'SUBSCRIBE',
-          params: batch,
-          id: this.subscriptionIdCounter++,
-        });
-      } catch (error) {
-        this.logger.warn(
-          `BinanceFuturesPublicStream: ${connection.label} SUBSCRIBE batch ${batchCount} failed: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-
-      const hasMoreStreams = sentCount < streamList.length;
-
-      if (hasMoreStreams && this.pauseBetweenSubscribeBatchesMs > 0) {
-        await pause(this.pauseBetweenSubscribeBatchesMs);
-      }
-    }
+    connection.commandQueue.enqueueList(commandList);
+    await connection.commandQueue.awaitDrained();
 
     this.logger.info(
-      `BinanceFuturesPublicStream: ${connection.label} sent ${batchCount} SUBSCRIBE batch(es) for ${sentCount} streams`,
+      `BinanceFuturesPublicStream: ${connection.label} sent ${batchList.length} SUBSCRIBE batch(es) for ${streamList.length} streams`,
     );
   }
 
@@ -803,6 +960,9 @@ class BinanceFuturesPublicStream {
       );
     }
 
+    connection.commandQueue.dispose();
+    this.forgetPendingResubscribes(connection);
+
     let resolveReady: () => void = () => {
       // placeholder; replaced synchronously inside Promise constructor below
     };
@@ -825,7 +985,15 @@ class BinanceFuturesPublicStream {
       lastRecreateTimestamp: nowTimestamp,
       readyPromise,
       resolveReady,
+      commandQueue: this.buildCommandQueue(connectionIndex, connection.label),
+      openSend: undefined,
     };
+  }
+
+  private forgetPendingResubscribes(connection: FuturesConnection): void {
+    for (const stream of connection.streamList) {
+      this.pendingResubscribeStreamSet.delete(stream);
+    }
   }
 
   private calcUniqueSymbolCount(connection: FuturesConnection): number {
@@ -941,19 +1109,11 @@ class BinanceFuturesPublicStream {
       return;
     }
 
-    const message = {
+    connection.commandQueue.enqueue({
       method: 'SUBSCRIBE',
       params: [stream],
       id: this.subscriptionIdCounter++,
-    };
-
-    try {
-      connection.webSocket.sendToConnectedSocket(message);
-    } catch {
-      this.logger.warn(
-        `BinanceFuturesPublicStream: ${connection.label} SUBSCRIBE failed for ${stream}, socket not connected`,
-      );
-    }
+    });
   }
 
   private removeStreamFromConnection(stream: string): void {
@@ -962,16 +1122,11 @@ class BinanceFuturesPublicStream {
 
       if (index !== -1) {
         connection.streamList.splice(index, 1);
-
-        try {
-          connection.webSocket.sendToConnectedSocket({
-            method: 'UNSUBSCRIBE',
-            params: [stream],
-            id: this.subscriptionIdCounter++,
-          });
-        } catch {
-          this.logger.warn('BinanceFuturesPublicStream: failed to unsubscribe, socket not connected');
-        }
+        connection.commandQueue.enqueue({
+          method: 'UNSUBSCRIBE',
+          params: [stream],
+          id: this.subscriptionIdCounter++,
+        });
 
         break;
       }

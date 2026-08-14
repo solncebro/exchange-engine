@@ -7,6 +7,7 @@ import type { KlineHandler } from '../types/exchange';
 import { normalizeBybitKlineWebSocketMessage, normalizeBybitOrderBookUpdate, normalizeBybitPublicTradeFromStream, normalizeBybitTickers } from '../normalizers/bybitNormalizer';
 import type { BybitOrderBookRaw, BybitPublicTradeDataRaw, BybitTickerRaw, BybitWebSocketKlineRaw } from '../normalizers/bybitNormalizer';
 import { BYBIT_KLINE_INTERVAL } from '../constants/bybit';
+import { BYBIT_WS_CASCADE_RECREATE_TOPIC_COUNT } from './streamCommandRateLimit';
 import { BYBIT_HEARTBEAT_CONFIG, BYBIT_PING_INTERVAL } from './bybitWebSocketUtils';
 import type { BybitConnection, BybitPublicStreamArgs, BybitWebSocketMessage } from './BybitPublicStream.types';
 import { TradeToKlineAggregator } from './TradeToKlineAggregator';
@@ -438,6 +439,15 @@ class BybitPublicStream {
 
       if (connection.webSocket.getStatus() !== WebSocketStatus.CONNECTED) {
         this.recreateConnection(index, `manual resubscribe of ${connectionTopicList.length} topic(s) (ws disconnected)`);
+
+        continue;
+      }
+
+      if (connectionTopicList.length >= BYBIT_WS_CASCADE_RECREATE_TOPIC_COUNT) {
+        this.logger.warn(
+          `BybitPublicStream: cascade resubscribe of ${connectionTopicList.length} topic(s) on ${connection.label} — recreating connection instead of per-topic repair`,
+        );
+        this.recreateConnection(index, `cascade resubscribe of ${connectionTopicList.length} topic(s)`);
 
         continue;
       }

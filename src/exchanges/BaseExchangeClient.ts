@@ -167,6 +167,18 @@ abstract class BaseExchangeClient implements ExchangeClient {
     this.getPublicStream().resubscribeStream?.(args.symbol, args.interval);
   }
 
+  resubscribeKlineList(argsList: ResubscribeKlinesArgs[]): void {
+    const publicStream = this.getPublicStream();
+
+    if (publicStream.resubscribeStreamList !== undefined) {
+      publicStream.resubscribeStreamList(argsList);
+
+      return;
+    }
+
+    argsList.forEach((args) => publicStream.resubscribeStream?.(args.symbol, args.interval));
+  }
+
   resubscribeOrderbook(args: ResubscribeOrderbookArgs): void {
     this.getPublicStream().resubscribeOrderbook?.(args.symbol, args.depth);
   }
