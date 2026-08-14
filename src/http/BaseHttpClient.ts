@@ -16,6 +16,16 @@ const DEFAULT_HTTPS_AGENT = new KeepAliveHttpsAgent({
 const MAX_RETRIES = 3;
 const RETRY_BASE_DELAY_MILLISECONDS = 1000;
 const BINANCE_NOOP_ERROR_CODE_LIST = [-4059, -4046];
+/** Binance answers the caller EXPECTS to get, so they belong in the log at info level, not as errors.
+ *  -2013 "Order does not exist" is the routine one: an order id may live in the plain order service OR
+ *  in the conditional (algo) one, and Binance offers no way to ask "which service owns this id" — so
+ *  reading an order asks BOTH in parallel and keeps whichever recognises it (see BinanceFutures
+ *  readOrderFromOwningService / getOrderByClientOrderId). The other service always answers -2013, by
+ *  design: on a live bot that is dozens of scary ERROR lines a day sitting right next to a perfectly
+ *  successful read. Only the LOG LEVEL changes here — the error object handed to the caller keeps its
+ *  "[code] message" form, because callers match on that text (a cancel of an already-gone order is
+ *  treated as done) and every caller that genuinely cares about a missing order reports it itself. */
+const BINANCE_EXPECTED_ERROR_CODE_LIST = [-2013];
 
 function isRetryable(error: AxiosError): boolean {
   if (!error.response) {
@@ -59,6 +69,20 @@ function isBinanceNoopHttpError(data: unknown): data is HttpErrorResponseData {
   }
 
   return BINANCE_NOOP_ERROR_CODE_LIST.includes(record.code);
+}
+
+function isBinanceExpectedHttpError(data: unknown): data is HttpErrorResponseData {
+  if (!data || typeof data !== 'object') {
+    return false;
+  }
+
+  const record = data as HttpErrorResponseData;
+
+  if (typeof record.code !== 'number') {
+    return false;
+  }
+
+  return BINANCE_EXPECTED_ERROR_CODE_LIST.includes(record.code);
 }
 
 function parseBinanceNoopHttpErrorMessage(data: unknown): string | null {
@@ -223,6 +247,15 @@ abstract class BaseHttpClient {
         }
 
         this.logger.info(`HTTP ${error.response.status}`);
+
+        return;
+      }
+
+      if (isBinanceExpectedHttpError(error.response.data)) {
+        this.logger.info(
+          { status: error.response.status, data: error.response.data as HttpRecord },
+          `HTTP ${error.response.status} (expected, handled by the caller)`,
+        );
 
         return;
       }
