@@ -1,8 +1,12 @@
 import axios from 'axios';
+import type { AxiosError as AxiosErrorType } from 'axios';
 import { BinanceBaseHttpClient } from '../../src/http/BinanceBaseHttpClient';
 import type { BinanceEndpoints, BinanceHttpClientArgs } from '../../src/http/BinanceBaseHttpClient';
 import { createMockLogger } from '../fixtures/mockLogger';
 import { createMockAxiosInstance } from '../fixtures/mockAxios';
+
+const actualAxios = jest.requireActual<typeof import('axios')>('axios');
+const { AxiosError, AxiosHeaders } = actualAxios;
 
 jest.mock('axios');
 const mockedAxios = axios as jest.Mocked<typeof axios>;
@@ -23,6 +27,10 @@ class TestBinanceHttpClient extends BinanceBaseHttpClient {
 
   constructor(args: BinanceHttpClientArgs) {
     super(args, 30000);
+  }
+
+  exposeSignedPut<T>(path: string, params?: Record<string, string | number | boolean>) {
+    return this.signedPut<T>(path, params);
   }
 
   exposeSignedGet<T>(path: string, params?: Record<string, string | number | boolean>) {
@@ -73,6 +81,99 @@ describe('BinanceBaseHttpClient', () => {
       const [, callOptions] = mockInstance.get.mock.calls[0];
 
       expect(callOptions.headers['X-MBX-APIKEY']).toBe('testKey');
+    });
+  });
+
+  describe('stale timestamp', () => {
+    function createBinanceRefusal(status: number, code: number, message: string): AxiosErrorType {
+      const headers = new AxiosHeaders();
+
+      return new AxiosError(`Request failed with status code ${status}`, 'ERR_BAD_REQUEST', undefined, {}, {
+        status,
+        data: { code, msg: message },
+        statusText: 'Refused',
+        headers,
+        config: { headers },
+      } as never);
+    }
+
+    function createStaleTimestampError(): AxiosErrorType {
+      return createBinanceRefusal(400, -1021, 'Timestamp for this request is outside of the recvWindow.');
+    }
+
+    it('signs at send time, not in advance — a retried read carries a fresh timestamp', async () => {
+      let nowMs = 1700000000000;
+
+      jest.spyOn(Date, 'now').mockImplementation(() => nowMs);
+      mockInstance.get
+        .mockImplementationOnce(() => {
+          // Биржа приняла запрос протухшим и ответила «слишком занят» — пауза перед повтором ещё
+          // состарит его, поэтому повтор обязан идти с новой подписью.
+          nowMs += 4000;
+
+          return Promise.reject(createBinanceRefusal(500, -1000, 'Internal error.'));
+        })
+        .mockResolvedValueOnce({ data: { ok: true } });
+
+      await client.exposeSignedGet('/test');
+
+      const [, firstOptions] = mockInstance.get.mock.calls[0];
+      const [, secondOptions] = mockInstance.get.mock.calls[1];
+
+      expect(firstOptions.params.timestamp).toBe(1700000000000);
+      expect(secondOptions.params.timestamp).toBe(1700000004000);
+    }, 15000);
+
+    it('re-signs with a fresh timestamp and retries', async () => {
+      let nowMs = 1700000000000;
+
+      jest.spyOn(Date, 'now').mockImplementation(() => nowMs);
+      mockInstance.get
+        .mockImplementationOnce(() => {
+          // Отказ приходит, когда запрос уже состарился в пути: следующая попытка обязана нести
+          // СВЕЖУЮ отметку, иначе повтор бессмыслен.
+          nowMs += 9000;
+
+          return Promise.reject(createStaleTimestampError());
+        })
+        .mockResolvedValueOnce({ data: { ok: true } });
+
+      const response = await client.exposeSignedGet<{ ok: boolean }>('/test');
+
+      expect(response).toEqual({ ok: true });
+      expect(mockInstance.get).toHaveBeenCalledTimes(2);
+
+      const [, firstOptions] = mockInstance.get.mock.calls[0];
+      const [, secondOptions] = mockInstance.get.mock.calls[1];
+
+      expect(firstOptions.params.timestamp).toBe(1700000000000);
+      expect(secondOptions.params.timestamp).toBe(1700000009000);
+      expect(secondOptions.params.signature).not.toBe(firstOptions.params.signature);
+    });
+
+    it('retries an order placement too — a rejected request never reached the book', async () => {
+      mockInstance.post
+        .mockRejectedValueOnce(createStaleTimestampError())
+        .mockResolvedValueOnce({ data: { orderId: 7 } });
+
+      const response = await client.exposeSignedPost<{ orderId: number }>('/test/order', { symbol: 'BTCUSDT' });
+
+      expect(response).toEqual({ orderId: 7 });
+      expect(mockInstance.post).toHaveBeenCalledTimes(2);
+    });
+
+    it('gives up after the second rejection instead of hammering', async () => {
+      mockInstance.get.mockRejectedValue(createStaleTimestampError());
+
+      await expect(client.exposeSignedGet('/test')).rejects.toThrow('-1021');
+      expect(mockInstance.get).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not retry any other refusal', async () => {
+      mockInstance.get.mockRejectedValue(createBinanceRefusal(400, -2013, 'Order does not exist.'));
+
+      await expect(client.exposeSignedGet('/test')).rejects.toThrow('-2013');
+      expect(mockInstance.get).toHaveBeenCalledTimes(1);
     });
   });
 

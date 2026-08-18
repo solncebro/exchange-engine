@@ -60,8 +60,9 @@ class BybitHttpClient extends BaseHttpClient {
     path: string,
     params: Record<string, string | number | boolean>,
   ): Promise<T> {
-    const headers = this.buildAuthHeaders(serializeQueryParams(params));
-    const response = await this.get<T & BybitApiResponse>(path, params, headers);
+    // Заголовки подписи строятся фабрикой: у Bybit отметка времени тоже проверяется на приёме, а
+    // между сборкой и отправкой стоит пауза перед повтором.
+    const response = await this.get<T & BybitApiResponse>(path, params, () => this.buildAuthHeaders(serializeQueryParams(params)));
 
     this.validateResponse(response);
 

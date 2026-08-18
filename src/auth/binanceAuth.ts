@@ -5,6 +5,13 @@ export function buildBinanceSignature(queryString: string, secret: string): stri
   return hmacSha256(queryString, secret);
 }
 
+/**
+ * Окно приёма подписанного запроса. Биржа меряет возраст отметки времени в момент ПРИЁМА, а не
+ * отправки, и всё старше окна отвергает кодом -1021 — поэтому подпись обязана строиться
+ * непосредственно перед отправкой, а не заранее «на всю пачку» (см. `BaseHttpClient.get`).
+ */
+export const BINANCE_RECV_WINDOW_MS = 5000;
+
 export interface BuildBinanceSignedParamsArgs {
   params: Record<string, string | number | boolean>;
   secret: string;
@@ -19,7 +26,7 @@ interface TimestampedParamsResult {
 function buildTimestampedParams(
   args: BuildBinanceSignedParamsArgs,
 ): TimestampedParamsResult {
-  const { params, secret, recvWindow = 5000 } = args;
+  const { params, secret, recvWindow = BINANCE_RECV_WINDOW_MS } = args;
   const timestamp = Date.now();
   const signedParams: Record<string, string | number> = {
     ...params,

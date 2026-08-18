@@ -24,3 +24,12 @@ export interface HttpQueryParams {
 export interface HttpHeaders {
   [key: string]: string;
 }
+
+/**
+ * Параметры запроса — готовые ИЛИ функция, которая их строит. Функция нужна подписанным запросам:
+ * подпись обязана рождаться в момент отправки, а не заранее, потому что биржа меряет возраст
+ * отметки времени на приёме (см. `BaseHttpClient.get`).
+ */
+export type HttpQueryParamsSource = HttpQueryParams | (() => HttpQueryParams);
+
+export type HttpHeadersSource = HttpHeaders | (() => HttpHeaders);

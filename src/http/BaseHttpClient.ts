@@ -3,7 +3,15 @@ import { HttpsAgent as KeepAliveHttpsAgent } from 'agentkeepalive';
 
 import type { ExchangeLogger } from '../types/common';
 import { serializeQueryParams } from '../utils/serializeQueryParams';
-import type { BaseHttpClientArgs, HttpErrorResponseData, HttpHeaders, HttpQueryParams, HttpRecord } from './BaseHttpClient.types';
+import type {
+  BaseHttpClientArgs,
+  HttpErrorResponseData,
+  HttpHeaders,
+  HttpHeadersSource,
+  HttpQueryParams,
+  HttpQueryParamsSource,
+  HttpRecord,
+} from './BaseHttpClient.types';
 
 const DEFAULT_HTTPS_AGENT = new KeepAliveHttpsAgent({
   maxSockets: 100,
@@ -51,6 +59,14 @@ function getRetryDelayMilliseconds(error: AxiosError, attempt: number): number {
   }
 
   return RETRY_BASE_DELAY_MILLISECONDS * Math.pow(2, attempt);
+}
+
+function resolveQueryParams(source: HttpQueryParamsSource | undefined): HttpQueryParams | undefined {
+  return typeof source === 'function' ? source() : source;
+}
+
+function resolveHeaders(source: HttpHeadersSource | undefined): HttpHeaders | undefined {
+  return typeof source === 'function' ? source() : source;
 }
 
 function sleep(milliseconds: number): Promise<void> {
@@ -123,17 +139,29 @@ abstract class BaseHttpClient {
 
   protected onResponse(_status: number | undefined, _headers: unknown): void {}
 
+  /**
+   * Чтение с повторами. Параметры и заголовки могут приезжать функциями — тогда они строятся ЗДЕСЬ,
+   * непосредственно перед отправкой, и заново на каждой попытке.
+   *
+   * Так устроено ради подписанных запросов: между сборкой и приёмом на бирже стоят ожидание по
+   * лимиту веса (до двух секунд) и пауза перед повтором (до четырёх), а биржа меряет возраст отметки
+   * времени в момент приёма и отвергает всё старше своего окна. Заранее подписанный запрос, дождавшись
+   * своей очереди, приезжал протухшим.
+   */
   protected async get<T>(
     url: string,
-    params?: HttpQueryParams,
-    headers?: HttpHeaders
+    params?: HttpQueryParamsSource,
+    headers?: HttpHeadersSource
   ): Promise<T> {
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       await this.beforeRequest();
 
+      const effectiveParams = resolveQueryParams(params);
+      const effectiveHeaders = resolveHeaders(headers);
+
       try {
-        this.logger.debug({ url, params }, `GET ${url}`);
-        const response = await this.axiosInstance.get<T>(url, { params, headers });
+        this.logger.debug({ url, params: effectiveParams }, `GET ${url}`);
+        const response = await this.axiosInstance.get<T>(url, { params: effectiveParams, headers: effectiveHeaders });
         this.onResponse(response.status, response.headers);
         this.logger.debug({ url, response: response.data as HttpRecord }, `GET ${url} response`);
 

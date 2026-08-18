@@ -73,9 +73,7 @@ async fetchNewEntity(symbol?: string): Promise<NewEntity[]> {
 
 ### 8. Экспорты
 
-1. `src/types/index.ts` — добавить новый тип в `export type { ... } from './common'`
-2. `src/index.ts` — добавить в соответствующий блок export
-3. Если новый enum — добавить в блок `export { ... }` (runtime), не `export type`
+`src/index.ts` отдаёт `export * from './types/common'` и `export * from './types/exchange'` — новый тип/enum, объявленный в одном из этих двух файлов (`export interface`/`export type`/`export enum`), становится публичным сам, без ручной правки `src/index.ts`. Файла `src/types/index.ts` больше нет (удалён в 0.22.0 как неиспользуемый второй список экспортов).
 
 ### 9. Фикстуры
 
@@ -154,7 +152,7 @@ yarn build          # компиляция без ошибок
 - [ ] HTTP-метод
 - [ ] Exchange-метод (BinanceFutures)
 - [ ] Реализация/наследование default throw (BinanceSpot, BybitLinear, BybitSpot)
-- [ ] Экспорт из `types/index.ts` и `src/index.ts`
+- [ ] Тип объявлен в `types/common.ts`/`types/exchange.ts` (наружу выходит сам через `export *` в `src/index.ts`)
 - [ ] Фикстуры
 - [ ] Тесты: нормализатор, HTTP, exchange
 - [ ] Верификация: lint, test, smoke, build

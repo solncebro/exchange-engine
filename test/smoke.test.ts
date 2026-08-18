@@ -41,6 +41,13 @@ import {
   FeeRate,
   Income,
   ClosedPnl,
+  // Эти четыре стоят в СИГНАТУРАХ ExchangeClient, но наружу не выходили вовсе: публичный вход
+  // перечислял типы поимённо и разошёлся с соседним списком. Теперь вход сквозной — проверяем,
+  // что потерять их снова нельзя.
+  FetchIncomeArgs,
+  IncomeTypeFilter,
+  ResubscribeOrderbookArgs,
+  ResubscribePublicTradesArgs,
 } from '../dist/index';
 
 const exchangeIsClass: typeof Exchange = Exchange;
@@ -222,6 +229,13 @@ type _CheckOpenInterest     = AssertAssignable<OpenInterest>;
 type _CheckFeeRate          = AssertAssignable<FeeRate>;
 type _CheckIncome           = AssertAssignable<Income>;
 type _CheckClosedPnl        = AssertAssignable<ClosedPnl>;
+type _CheckFetchIncomeArgs  = AssertAssignable<FetchIncomeArgs>;
+type _CheckIncomeTypeFilter = AssertAssignable<IncomeTypeFilter>;
+type _CheckResubscribeOrderbookArgs = AssertAssignable<ResubscribeOrderbookArgs>;
+type _CheckResubscribePublicTradesArgs = AssertAssignable<ResubscribePublicTradesArgs>;
+
+const _fetchIncomeArgs: FetchIncomeArgs = { symbol: 'BTCUSDT', incomeType: 'funding' };
+void _fetchIncomeArgs;
 
 const _kline: Kline = {
   openTimestamp:              0,

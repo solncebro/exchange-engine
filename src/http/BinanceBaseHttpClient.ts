@@ -11,6 +11,7 @@ import { buildBinanceSignedParams, buildBinanceAuthHeaders } from '../auth/binan
 import { ExchangeError } from '../errors/ExchangeError';
 import { applyTimeRangeOptions } from '../utils/httpParams';
 import { BaseHttpClient } from './BaseHttpClient';
+import { isBinanceStaleTimestampError } from './binanceTimestampError';
 import {
   BINANCE_REQUEST_WEIGHT_LIMIT_PER_MIN,
   parseRetryAfterMs,
@@ -24,6 +25,13 @@ import type {
   BinanceListenKeyResponse,
   SignRequestResult,
 } from './BinanceBaseHttpClient.types';
+
+/**
+ * Сколько раз запрос собирается заново, если биржа отвергла отметку времени. Двух хватает: повтор
+ * идёт с только что поставленной отметкой, и не пройти он может лишь если процесс снова встал на те
+ * же секунды — тогда честнее отдать отказ вызывающему, чем молотить бесконечно.
+ */
+const STALE_TIMESTAMP_ATTEMPT_LIMIT = 2;
 
 abstract class BinanceBaseHttpClient extends BaseHttpClient {
   protected readonly secret: string;
@@ -68,51 +76,72 @@ abstract class BinanceBaseHttpClient extends BaseHttpClient {
     path: string,
     params: Record<string, string | number | boolean> = {},
   ): Promise<T> {
-    return this.signedRequest(params, (signedParams, headers) =>
-      this.get<T>(path, signedParams, headers),
-    );
+    // Подпись едет фабрикой: транспорт строит её сам перед каждой отправкой, в том числе перед
+    // повтором после паузы — старая отметка времени в повторе гарантированно не прошла бы.
+    return this.signedRequest(() => this.get<T>(path, () => this.signRequest(params).signedParams, this.authHeaders()));
   }
 
   protected async signedPost<T>(
     path: string,
     params: Record<string, string | number | boolean> = {},
   ): Promise<T> {
-    return this.signedRequest(params, (signedParams, headers) =>
-      this.postWithParams<T>(path, signedParams, headers),
-    );
+    return this.signedSend(params, (signedParams, headers) => this.postWithParams<T>(path, signedParams, headers));
   }
 
   protected async signedPut<T>(
     path: string,
     params: Record<string, string | number | boolean> = {},
   ): Promise<T> {
-    return this.signedRequest(params, (signedParams, headers) =>
-      this.putWithParams<T>(path, signedParams, headers),
-    );
+    return this.signedSend(params, (signedParams, headers) => this.putWithParams<T>(path, signedParams, headers));
   }
 
   protected async signedDelete<T>(
     path: string,
     params: Record<string, string | number | boolean> = {},
   ): Promise<T> {
-    return this.signedRequest(params, (signedParams, headers) =>
-      this.delete<T>(path, signedParams, headers),
-    );
+    return this.signedSend(params, (signedParams, headers) => this.delete<T>(path, signedParams, headers));
   }
 
-  private async signedRequest<T>(
+  /** Пути без повторов внутри транспорта: подпись ставится здесь и тут же уходит в сеть. */
+  private signedSend<T>(
     params: Record<string, string | number | boolean>,
-    execute: (
+    send: (
       signedParams: Record<string, string | number | boolean>,
       headers: Record<string, string>,
     ) => Promise<T>,
   ): Promise<T> {
-    const { signedParams, headers } = this.signRequest(params);
-    const response = await execute(signedParams, headers);
+    return this.signedRequest(() => {
+      const { signedParams, headers } = this.signRequest(params);
 
-    this.validateResponse(response);
+      return send(signedParams, headers);
+    });
+  }
 
-    return response;
+  /**
+   * Подписанный запрос с одной пересдачей, если биржа отвергла отметку времени.
+   *
+   * Отметка стареет между сборкой запроса и его приёмом на бирже, а меряет биржа возраст именно на
+   * приёме: на боевом сервере rubber это дало восемь отказов за журнал — три на чтении заявки
+   * обратно после постановки (читалось как «заявка не встала») и один похоронил биржевую половину
+   * суточного отчёта (18.08.2026). Повтор осмыслен только потому, что подпись строится заново; та же
+   * подпись со старой отметкой была бы отвергнута снова.
+   */
+  private async signedRequest<T>(send: () => Promise<T>): Promise<T> {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        const response = await send();
+
+        this.validateResponse(response);
+
+        return response;
+      } catch (error) {
+        if (attempt >= STALE_TIMESTAMP_ATTEMPT_LIMIT || !isBinanceStaleTimestampError(error)) {
+          throw error;
+        }
+
+        this.logger.warn(`Binance rejected a stale timestamp; re-signing and retrying (attempt ${attempt + 1}/${STALE_TIMESTAMP_ATTEMPT_LIMIT})`);
+      }
+    }
   }
 
   private validateResponse(response: unknown): void {

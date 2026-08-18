@@ -15,8 +15,8 @@ BaseHttpClient (abstract)
 Базовый HTTP-клиент с retry-логикой и обработкой ошибок.
 
 ### Защищённые методы (все HTTP-глаголы):
-- `get<T>(url, params?, headers?): Promise<T>` — **единственный с retry**
-- `post<T>(url, data?, headers?): Promise<T>` — без retry
+- `get<T>(url, params?, headers?): Promise<T>` — **единственный с retry**. `params`/`headers` принимают либо готовое значение, либо фабрику (`HttpQueryParamsSource`/`HttpHeadersSource` из `BaseHttpClient.types.ts`: `T | (() => T)`) — фабрика вызывается заново на КАЖДОЙ попытке, непосредственно перед отправкой (после `beforeRequest()`, то есть после ожидания по rate-limit). Нужно это подписанным запросам: подпись, собранная заранее, успевала протухнуть за время ожидания по весу (до 2s) и паузы перед повтором (до 4s) — биржа меряет возраст отметки времени на приёме, не на отправке
+- `post<T>(url, data?, headers?): Promise<T>` — без retry, `data`/`headers` только готовым значением (фабрики не поддерживает)
 - `postWithParams<T>(url, params?, headers?): Promise<T>` — параметры в query string
 - `put<T>(url, data?, headers?): Promise<T>`
 - `putWithParams<T>(url, params?, headers?): Promise<T>`
@@ -66,8 +66,8 @@ Rate limiting в `BaseHttpClient` — **только реактивный** (н�
 Добавляет Binance-специфичное:
 
 ### Signing-обёртки:
-- `signedGet<T>(path, params?)` — добавляет timestamp, recvWindow, signature к params
-- `signedPost<T>(path, params?)` — то же для POST
+- `signedGet<T>(path, params?)` — подпись строится фабрикой внутри `get()`: `signRequest(params).signedParams` вызывается заново на каждой попытке (retry `get()` и пересдача при протухшей отметке, см. ниже), заголовки — статический `authHeaders()`
+- `signedPost<T>(path, params?)` — то же для POST, через `signedSend` (подпись строится один раз непосредственно перед отправкой — `postWithParams` без внутреннего retry)
 - `signedPut<T>(path, params?)` — то же для PUT (через `putWithParams` + `validateResponse`); используется в `modifyOrder`/`modifyBatchOrders`
 - `signedDelete<T>(path, params?)` — то же для DELETE
 - `authHeaders()` → `{ 'X-MBX-APIKEY': apiKey }`
@@ -76,16 +76,34 @@ Rate limiting в `BaseHttpClient` — **только реактивный** (н�
 - `validateResponse(data)` — бросает `ExchangeError` при `code < 0` в ответе Binance API
 
 ### Private хелперы:
-- `signRequest(params)` → `{ signedParams, headers }` — единая точка подписи, используется всеми signed-методами
+- `signRequest(params)` → `{ signedParams, headers }` — единая точка подписи (`timestamp = Date.now()` берётся в момент вызова), используется всеми signed-методами
+- `signedSend<T>(params, send)` — подписывает `params` один раз и сразу передаёт в `send(signedParams, headers)`; используется `signedPost`/`signedPut`/`signedDelete`
+- `signedRequest<T>(send: () => Promise<T>)` — общая точка для всех signed-методов (включая `signedGet`, где `send` сам оборачивает лениво пересобираемую подпись): выполняет `send()`, валидирует ответ через `validateResponse`, и при отказе биржи по протухшей отметке времени (см. «Пересдача при протухшей отметке» ниже) пересобирает запрос через повторный вызов `send()` — до `STALE_TIMESTAMP_ATTEMPT_LIMIT` (2) попыток
 - `buildOptionalSymbolParams(symbol?)` → `Record<string, ...>` — protected, строит params с optional symbol (используется в `getOpenOrders` и наследниках)
 
 ### Binance signing (src/auth/binanceAuth.ts):
-1. Добавить `timestamp = Date.now()` и `recvWindow = 5000` к params
+1. Добавить `timestamp = Date.now()` и `recvWindow = BINANCE_RECV_WINDOW_MS` (5000) к params
 2. Собрать query string через `serializeQueryParams` (`src/utils/serializeQueryParams.ts`) — `URLSearchParams` поверх `Object.entries`, сохраняет порядок вставки
 3. `signature = HMAC-SHA256(queryString, secret)` → hex
 4. Добавить `signature` к params
 
 **Wire-parity (критично):** `BaseHttpClient` настраивает axios `paramsSerializer.serialize = serializeQueryParams` — та же функция, что и при подписи. Это гарантирует, что строка, реально отправляемая axios, байт-в-байт совпадает с подписанной (иначе спецсимволы `,`/`:` в payload, например JSON batch-ордеров, ломают подпись → Binance `-1022`). Тот же сериализатор применяется к Bybit GET (`BybitHttpClient.authenticatedGet`), где Bybit REST recvWindow = `BYBIT_RECV_WINDOW` (7000).
+
+### Подпись строится непосредственно перед отправкой (0.22.0)
+
+И Binance, и Bybit подписывают запрос заново на каждую фактическую отправку, а не один раз заранее — иначе отметка времени, поставленная до ожидания по rate-limit/паузы перед повтором, приезжает на биржу уже протухшей (биржа меряет возраст на приёме).
+
+- **Binance**: `signedGet` передаёт в `get()` фабрику параметров (`() => this.signRequest(params).signedParams`) — она вызывается на каждой попытке внутри `get()`. `signedPost`/`signedPut`/`signedDelete` подписывают один раз внутри `signedSend`, но сам `signedSend` обёрнут в `signedRequest` — при отказе по протухшей отметке `signedRequest` вызывает `send` заново, и та же замыкающая функция пересобирает подпись со свежим `timestamp`
+- **Bybit**: `authenticatedGet` передаёт в `get()` фабрику заголовков (`() => this.buildAuthHeaders(serializeQueryParams(params))`) — подпись в заголовке (`X-BAPI-SIGN`/`X-BAPI-TIMESTAMP`) пересобирается на каждой попытке `get()`. Query-параметры не несут отметку времени у Bybit (она только в заголовках), поэтому им фабрика не нужна
+
+### Пересдача при протухшей отметке времени (-1021, src/http/binanceTimestampError.ts)
+
+Только Binance (Bybit-эквивалента нет — не требуется, т.к. отдельного HTTP 400 «stale timestamp» кода в текущем флоу не встречалось).
+
+- `BINANCE_STALE_TIMESTAMP_CODE = -1021` — код Binance «Timestamp for this request is outside of the recvWindow»
+- `isBinanceStaleTimestampError(error)` → `boolean` — распознаёт код и в `ExchangeError.code`, и в тексте обогащённого `Error` (`enrichError` в `BaseHttpClient` форматирует его как `[-1021] ...`)
+- `signedRequest` в `BinanceBaseHttpClient` — единственное место, где это используется: при поимке ошибки, если `isBinanceStaleTimestampError(error)` истинно и попыток ещё не исчерпано (`STALE_TIMESTAMP_ATTEMPT_LIMIT = 2` — то есть одна пересдача), запрос собирается и подписывается заново с текущим `Date.now()`. HTTP 400 не входит в `isRetryable()` `BaseHttpClient`, поэтому обычный retry-механизм `get()` эту ошибку не трогает — пересдача идёт отдельным, более узким путём
+- Применяется ко всем четырём signed-обёрткам: `signedGet`/`signedPost`/`signedPut`/`signedDelete` — включая постановку заявки (`createOrder` → `signedPost`), где повтор безопасен именно потому, что отвергнутый запрос до книги биржи не дошёл
 
 ### Rate-limit awareness (REQUEST_WEIGHT / HTTP 418, src/http/binanceRateLimit.ts)
 
@@ -168,7 +186,7 @@ order, openOrders, allOrders, account, listenKey
 - `validateResponse(data)` — бросает `ExchangeError` при `retCode !== 0` в ответе Bybit API
 
 ### Приватные хелперы:
-- `authenticatedGet<T>(path, params)` — строит query string → подписывает → GET
+- `authenticatedGet<T>(path, params)` — GET с подписью в заголовке, построенной фабрикой в момент отправки (см. «Подпись строится непосредственно перед отправкой» выше) — не заранее
 - `authenticatedPost<T>(path, body)` — JSON.stringify body → подписывает → POST
 
 ### Private хелпер:

@@ -5,96 +5,13 @@ export type { ParseBybitOrderbookRawFrameArgs } from './normalizers/bybitNormali
 export { formatWebSocketConnectionsReport } from './utils/formatWebSocketConnectionsReport';
 export type { FormatWebSocketConnectionsReportArgs } from './utils/formatWebSocketConnectionsReport';
 
-export type {
-  ExchangeClient,
-  ExchangeArgs,
-  CreateOrderWebSocketArgs,
-  FetchAllKlinesOptions,
-  FetchPageWithLimitArgs,
-  ModifyOrderArgs,
-  ModifyBatchOrderArgs,
-  SubscribeKlinesArgs,
-  ResubscribeKlinesArgs,
-  KlineHandler,
-  SubscribeOrderbookArgs,
-  SubscribePublicTradesArgs,
-  SetOrderbookLiveSymbolArgs,
-  CreateOrderItemResult,
-  CreateBatchOrdersResult,
-  CancelOrderItemResult,
-  CancelBatchOrdersResult,
-  ModifyOrderItemResult,
-  ModifyBatchOrdersResult,
-  OrderRateLimit,
-  OrderRateLimitSource,
-  SetLeverageResult,
-} from './types/exchange';
-
-export {
-  ExchangeNameEnum,
-  MARKET_TYPE_LIST,
-  OrderSideEnum,
-  OrderTypeEnum,
-  MarginModeEnum,
-  PositionSideEnum,
-  PositionModeEnum,
-  TradeSymbolTypeEnum,
-  TimeInForceEnum,
-  WorkingTypeEnum,
-  TriggerByEnum,
-  OrderFilterEnum,
-  MarketUnitEnum,
-  MarketTypeEnum,
-  WebSocketConnectionTypeEnum,
-} from './types/common';
-
-export type {
-  KlineInterval,
-  ExchangeConfig,
-  BybitPublicTopicType,
-  PublicStreamConnectionPacking,
-  ExchangeLogger,
-  Ticker,
-  TickerBySymbol,
-  Kline,
-  TradeSymbol,
-  TradeSymbolBySymbol,
-  TradeSymbolFilter,
-  Position,
-  Order,
-  OrderRateLimitSnapshot,
-  Balance,
-  BalanceByAsset,
-  AccountBalances,
-  FundingRateHistory,
-  FundingInfo,
-  WebSocketConnectionInfo,
-  OrderBook,
-  OrderBookLevel,
-  OrderBookUpdate,
-  OrderBookUpdateType,
-  OrderBookRawLevel,
-  OrderBookHandler,
-  RawOrderbookFrame,
-  RawOrderbookHandler,
-  PublicTrade,
-  PublicTradeHandler,
-  MarkPrice,
-  MarkPriceUpdate,
-  MarkPriceHandler,
-  OpenInterest,
-  FeeRate,
-  Income,
-  ClosedPnl,
-  OrderUpdateEvent,
-  PositionUpdateEvent,
-  BalanceUpdateEvent,
-  BalanceUpdateItem,
-  OrderUpdateHandler,
-  PositionUpdateHandler,
-  BalanceUpdateHandler,
-  UserDataStreamHandlerArgs,
-  PriceLimitRisk,
-  LeverageFilter,
-  TradingFunding,
-} from './types/common';
+// Публичная поверхность отдаётся ЦЕЛИКОМ, а не поимённым перечнем. Перечень уже разъезжался:
+// рядом жил второй список (`./types/index`), который никто не импортировал, и четыре типа из
+// СИГНАТУР `ExchangeClient` не выходили наружу вовсе — `FetchIncomeArgs`, `IncomeTypeFilter`,
+// `ResubscribeOrderbookArgs`, `ResubscribePublicTradesArgs`. Потребитель мог вызвать метод, но не
+// мог назвать тип его аргументов, и лечилось это каждый раз новой публикацией пакета (в верхней
+// библиотеке — восемь выпусков за пять месяцев, один из них в тот же день, что и предыдущий).
+// Сквозной реэкспорт делает такую потерю невозможной: новый тип в этих файлах виден снаружи сам.
+// Имена двух файлов не пересекаются — проверено; сторож-тест держит это правило.
+export * from './types/common';
+export * from './types/exchange';
