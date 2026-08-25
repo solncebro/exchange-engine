@@ -1,6 +1,6 @@
 {
   "name": "@solncebro/exchange-engine",
-  "version": "0.22.0",
+  "version": "0.23.0",
   "description": "Universal TypeScript client library for Binance and Bybit with unified API, type safety, and WebSocket support",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -62,11 +62,14 @@
     "node": ">=22.0.0"
   },
   "dependencies": {
-    "@solncebro/websocket-engine": "^0.5.0",
     "agentkeepalive": "^4.6.0",
     "axios": "^1.7.7"
   },
+  "peerDependencies": {
+    "@solncebro/websocket-engine": ">=0.6.0 <1.0.0"
+  },
   "devDependencies": {
+    "@solncebro/websocket-engine": ">=0.6.0 <1.0.0",
     "@types/jest": "^30.0.0",
     "@types/node": "^22.0.0",
     "@types/ws": "^8.18.1",

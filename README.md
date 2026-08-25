@@ -4,10 +4,11 @@ Universal TypeScript client library for cryptocurrency trading on Binance and By
 
 ## Latest Release
 
-Current version: `0.22.0`
+Current version: `0.23.0`
 
-- **Fix — signed requests are now signed at send time, not in advance** — `BaseHttpClient.get` accepts params/headers as either a value or a factory function, and calls the factory *after* every wait (rate-limit backoff, retry delay). Signed Binance/Bybit calls were switched to this path: a signature built before those waits could arrive stale, since the exchange measures the timestamp's age on receipt, not on signing. A signed request rejected as stale (`-1021`) is now re-signed and retried once — the rejected attempt never reached the exchange's book, so the retry can't double an order.
-- **Fix — four `ExchangeClient` argument types never left the package** — `FetchIncomeArgs`, `IncomeTypeFilter`, `ResubscribeOrderbookArgs`, `ResubscribePublicTradesArgs`. A dead second export list (`src/types/index.ts`, nobody imported it) kept drifting from the real one. `src/index.ts` now re-exports everything from `./types/common` and `./types/exchange` wholesale instead of naming types one by one, so a type declared there can't be forgotten again; the dead file is gone.
+- **Breaking — `@solncebro/websocket-engine` moved from a regular dependency to a peer dependency** (range `>=0.6.0 <1.0.0`; it stays a dev dependency so this package can still build and test itself). While it was a regular dependency pinned as `^0.5.0`, a consumer already running a newer branch of that channel was forced to carry a *second*, older copy nested inside this package — pre-1.0 caret ranges don't cross a minor boundary. Two implementations of the channel ended up in one process, and the sockets that actually talk to the exchange ran on the stale one, while fixes landed only in the app's own copy. A peer dependency removes the possibility itself, not just today's mismatch — this package no longer has the right to carry its own copy of the channel. Behavior is unchanged: the same two exports are used, the socket class and the status enum. **Action required on upgrade**: if you depend on this package directly, declare the channel yourself — `"@solncebro/websocket-engine": ">=0.6.0 <1.0.0"`. Yarn classic does not auto-install peer dependencies, so without that line the package won't find the channel at runtime. If the channel is already in your tree — your own install, or another package that declares it — there is nothing to do.
+
+Previously in `0.22.0` — signed requests are now signed at send time rather than in advance (fixes stale-timestamp `-1021` rejections on Binance/Bybit), and four `ExchangeClient` argument types (`FetchIncomeArgs`, `IncomeTypeFilter`, `ResubscribeOrderbookArgs`, `ResubscribePublicTradesArgs`) that never left the package are now exported.
 
 Previously in `0.21.0` — regular Binance Futures order origin remembered on creation (avoids a redundant `-2013` probe on first read/cancel), `setLeverage` returns the exchange-confirmed value instead of echoing the request, and a `fetchClosedPnl` fix on Binance (was built from a truncated trade sample when a close fragmented into hundreds of fills).
 
@@ -30,8 +31,10 @@ Full release notes: [CHANGELOG.md](./CHANGELOG.md)
 
 ## Installation
 
+`@solncebro/websocket-engine` is a peer dependency — install it alongside this package:
+
 ```bash
-yarn add @solncebro/exchange-engine
+yarn add @solncebro/exchange-engine @solncebro/websocket-engine
 ```
 
 ## Quick Start
