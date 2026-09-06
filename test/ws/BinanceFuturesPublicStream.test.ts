@@ -581,6 +581,34 @@ describe('BinanceFuturesPublicStream', () => {
       expect(streamNameList).toContain('btcusdt@depth20@100ms');
     });
 
+    it('opens the order-book connection on its own endpoint while every other group keeps the market one', async () => {
+      // Live 06.09.2026: `/market/ws` answered a depth SUBSCRIBE with `{result:null}` and then sent
+      // nothing for BTCUSDT and 1000000BOBUSDT alike (klines on the same socket flowed); `/stream`
+      // delivered the book wrapped as `{ stream, data }` — the shape the router below reads.
+      const { ReliableWebSocket } = require('@solncebro/websocket-engine');
+      const marketUrl = 'wss://fstream.binance.com/market/ws';
+      const orderbookUrl = 'wss://fstream.binance.com/stream';
+      const stream = trackStream(
+        new BinanceFuturesPublicStream({
+          webSocketUrl: marketUrl,
+          orderbookWebSocketUrl: orderbookUrl,
+          logger: mockLogger,
+          onNotify: undefined,
+          label: 'test',
+          pauseBetweenConnectionsMs: 0,
+        }),
+      );
+      stream.subscribeKlines('BTCUSDT', '1m', jest.fn());
+      stream.subscribeOrderbook('BTCUSDT', 20, jest.fn());
+
+      await flushAsync();
+
+      const urlList = ReliableWebSocket.mock.calls.map((call: [{ url: string }]) => call[0].url);
+      expect(urlList).toContain(orderbookUrl);
+      expect(urlList).toContain(marketUrl);
+      expect(urlList.filter((candidate: string) => candidate === orderbookUrl)).toHaveLength(1);
+    });
+
     it('delivers the book to the handler in the shape both exchanges share', async () => {
       const stream = createStreamForTest({ url, mockLogger });
       const received: unknown[] = [];

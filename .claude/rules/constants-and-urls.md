@@ -39,6 +39,7 @@
 | BYBIT_REQUEST_TIMEOUT | 30000 ms |
 | BYBIT_PING_INTERVAL | 20000 ms |
 | BYBIT_TRANSACTION_LOG_MAX_LIMIT | 50 (максимум `limit` для `/v5/account/transaction-log`, `fetchIncome` клампит к этому значению) |
+| BYBIT_FUNDING_INCOME_TYPE_SET | `Set(['FUNDING', 'SETTLEMENT'])` — типы записи журнала, несущие начисление фандинга (нулевой `cashFlow`, сумма в поле `funding`); общий список для `BybitBaseClient.fetchIncome` (фильтрация) и `normalizeBybitIncomeList` (чтение суммы) |
 
 ## Конвертация интервалов Bybit
 

@@ -115,6 +115,7 @@ function toAggTradeRaw(record: Record<string, unknown>): BinanceAggTradeWebSocke
 
 class BinanceFuturesPublicStream {
   private readonly webSocketUrl: string;
+  private readonly orderbookWebSocketUrl: string;
   private readonly logger: ExchangeLogger;
   private readonly label: string;
   private readonly onNotify?: (message: string) => void | Promise<void>;
@@ -142,6 +143,7 @@ class BinanceFuturesPublicStream {
 
   constructor(args: BinanceFuturesPublicStreamArgs) {
     this.webSocketUrl = args.webSocketUrl;
+    this.orderbookWebSocketUrl = args.orderbookWebSocketUrl ?? args.webSocketUrl;
     this.logger = args.logger;
     this.onNotify = args.onNotify;
     this.label = args.label;
@@ -651,7 +653,9 @@ class BinanceFuturesPublicStream {
     ).length;
     const shardSuffix = groupShardIndex > 0 ? ` #${groupShardIndex + 1}` : '';
     const connectionLabel = `${this.label} ${groupKey}${shardSuffix}`;
-    const url = this.webSocketUrl;
+    // The market endpoint never delivers depth frames (see BinanceFuturesPublicStreamArgs); the book
+    // rides its own endpoint, every other group stays where it was.
+    const url = groupKey === ORDERBOOK_GROUP_KEY ? this.orderbookWebSocketUrl : this.webSocketUrl;
 
     let resolveReady: () => void = () => {
       // placeholder; replaced synchronously inside Promise constructor below

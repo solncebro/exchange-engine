@@ -175,6 +175,25 @@ export const BINANCE_RAW_FUTURES_ACCOUNT: BinanceFuturesAccountRaw = {
   ],
 };
 
+/**
+ * Ответ /fapi/v3/account с ОТКРЫТОЙ позицией и всеми сводными полями, которые биржа действительно
+ * отдаёт. Именно этот случай показывает, зачем читать занятую маржу, а не выводить её вычитанием:
+ * свободные средства биржа уже уменьшила на нереализованный убыток (маржа 300, убыток 50, поэтому
+ * свободно 850 при кошельке 1200), и разность кошелька со свободными дала бы 350 вместо 300.
+ */
+export const BINANCE_RAW_FUTURES_ACCOUNT_WITH_POSITION: BinanceFuturesAccountRaw = {
+  totalWalletBalance: '1200.00',
+  availableBalance: '850.00',
+  totalMarginBalance: '1150.00',
+  totalUnrealizedProfit: '-50.00',
+  totalInitialMargin: '300.00',
+  totalPositionInitialMargin: '250.00',
+  totalOpenOrderInitialMargin: '50.00',
+  assets: [
+    { asset: 'USDT', walletBalance: '1200.00', availableBalance: '850.00' },
+  ],
+};
+
 export const BINANCE_RAW_FUNDING_RATE_HISTORY_LIST: BinanceFundingRateHistoryRaw[] = [
   { symbol: 'BTCUSDT', fundingRate: '0.00010000', fundingTime: 1700006400000, markPrice: '65500.00' },
   { symbol: 'BTCUSDT', fundingRate: '-0.00005000', fundingTime: 1700035200000, markPrice: '' },

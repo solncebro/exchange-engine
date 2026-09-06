@@ -277,6 +277,8 @@ export interface Order {
 
 export interface Balance {
   asset: string;
+  /** Остаток и маржа — В ЕДИНИЦАХ САМОЙ МОНЕТЫ. Складывать их между монетами нельзя: так биткойн
+   *  оказывается равен доллару (инцидент экрана баланса 29.08.2026). Для свода — только usdValue. */
   free: number;
   locked: number;
   total: number;
@@ -284,6 +286,9 @@ export interface Balance {
   availableToWithdraw?: number;
   totalOrderInitialMargin?: number;
   totalPositionInitialMargin?: number;
+  /** Долларовая оценка остатка монеты по курсу биржи. Единственная величина, которую допустимо
+   *  складывать по разным монетам. */
+  usdValue?: number;
 }
 
 export type BalanceByAsset = Map<string, Balance>;
@@ -295,6 +300,10 @@ export interface AccountBalances {
   accountType?: string;
   totalMarginBalance?: number;
   totalInitialMargin?: number;
+  /** Откуда взяты свободные средства: готовое поле биржи, выведение из остатка и маржи, либо
+   *  посчитать было нечем. Потребитель обязан различать факт и расчёт — число, помеченное
+   *  'unknown', фактом не является и показывать его как остаток счёта нельзя. */
+  availableBalanceSource?: 'exchange' | 'derived' | 'unknown';
 }
 
 export interface FundingRateHistory {
@@ -467,6 +476,15 @@ export interface Income {
   quantity?: number;
 }
 
+/**
+ * Итог одного закрытия по записям биржи. `closedPnl` — ЧИСТЫЙ после торговых комиссий
+ * (открытия и закрытия), но БЕЗ фандинга: на обеих биржах выполняется
+ * «(entryPrice − exitPrice) × quantity − closedPnl = комиссии» (для закрытия шорта; для
+ * лонга разность цен наоборот). Фандинг — отдельный поток начислений (`fetchIncome`,
+ * `incomeType: 'funding'`); потребитель складывает их сам. У Binance итог собирается из
+ * исполнений, у Bybit — из полей записи закрытия, потому что биржевое поле там уже включает
+ * фандинг (02.09.2026).
+ */
 export interface ClosedPnl {
   symbol: string;
   orderId: string;

@@ -51,6 +51,8 @@ import {
   BINANCE_DEMO_FUTURES_WEBSOCKET_STREAM_URL,
   BINANCE_FUTURES_WEBSOCKET_MARKET_URL,
   BINANCE_DEMO_FUTURES_WEBSOCKET_MARKET_URL,
+  BINANCE_FUTURES_WEBSOCKET_COMBINED_URL,
+  BINANCE_DEMO_FUTURES_WEBSOCKET_COMBINED_URL,
   BINANCE_FUTURES_CANCEL_BATCH_CHUNK_SIZE,
   BINANCE_FUTURES_CREATE_BATCH_CHUNK_SIZE,
   BINANCE_FUTURES_MODIFY_BATCH_CHUNK_SIZE,
@@ -463,6 +465,12 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
       ? BINANCE_DEMO_FUTURES_WEBSOCKET_MARKET_URL
       : BINANCE_FUTURES_WEBSOCKET_MARKET_URL;
 
+    // Depth streams: the market endpoint acknowledges the subscription and streams nothing (verified
+    // live 06.09.2026), the combined endpoint streams the book wrapped — the shape the router reads.
+    const orderbookWebSocketUrl = isDemoMode
+      ? BINANCE_DEMO_FUTURES_WEBSOCKET_COMBINED_URL
+      : BINANCE_FUTURES_WEBSOCKET_COMBINED_URL;
+
     const tradeWebSocketUrl = isDemoMode
       ? BINANCE_DEMO_FUTURES_TRADE_WEBSOCKET_URL
       : BINANCE_FUTURES_TRADE_WEBSOCKET_URL;
@@ -481,6 +489,7 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
 
     const publicStream = new BinanceFuturesPublicStream({
       webSocketUrl: webSocketStreamUrl,
+      orderbookWebSocketUrl,
       logger: args.logger,
       onNotify: BaseExchangeClient.createNotifyHandler(args.onNotify),
       label: 'Binance Futures Public WebSocket',

@@ -332,6 +332,15 @@ interface BinanceFuturesAssetRaw {
 export interface BinanceFuturesAccountRaw {
   totalWalletBalance: string;
   availableBalance: string;
+  /** Сводные числа счёта, которые биржа отдаёт вместе с балансом. Необязательные: у ответа могут
+   *  отсутствовать, а выдумывать их нельзя. Занятая маржа нужна отдельным числом потому, что
+   *  свободные средства биржа считает уже с учётом нереализованного итога, и разность кошелька со
+   *  свободными занятую маржу не даёт (экран баланса 29.08.2026). */
+  totalMarginBalance?: string;
+  totalUnrealizedProfit?: string;
+  totalInitialMargin?: string;
+  totalPositionInitialMargin?: string;
+  totalOpenOrderInitialMargin?: string;
   assets: BinanceFuturesAssetRaw[];
 }
 
@@ -777,9 +786,43 @@ export function normalizeBinanceFuturesBalances(raw: BinanceFuturesAccountRaw): 
   }
 
   const totalWalletBalance = parseFloat(raw.totalWalletBalance);
-  const totalAvailableBalance = parseFloat(raw.availableBalance);
+  const exchangeAvailable = parseFloat(raw.availableBalance);
+  const initialMargin = raw.totalInitialMargin !== undefined ? parseFloat(raw.totalInitialMargin) : NaN;
 
-  return { totalWalletBalance, totalAvailableBalance, balanceByAsset: result };
+  let totalAvailableBalance: number;
+  let availableBalanceSource: NonNullable<AccountBalances['availableBalanceSource']>;
+
+  if (!isNaN(exchangeAvailable)) {
+    totalAvailableBalance = exchangeAvailable;
+    availableBalanceSource = 'exchange';
+  } else if (!isNaN(initialMargin) && !isNaN(totalWalletBalance)) {
+    totalAvailableBalance = totalWalletBalance - initialMargin;
+    availableBalanceSource = 'derived';
+  } else {
+    totalAvailableBalance = 0;
+    availableBalanceSource = 'unknown';
+  }
+
+  const balances: AccountBalances = {
+    totalWalletBalance,
+    totalAvailableBalance,
+    balanceByAsset: result,
+    availableBalanceSource,
+  };
+
+  // Занятая маржа читается, а не выводится: свободные средства биржа уже уменьшила на нереализованный
+  // итог, поэтому разность кошелька со свободными завышает занятое на прибыль и занижает на убыток.
+  if (!isNaN(initialMargin)) {
+    balances.totalInitialMargin = initialMargin;
+  }
+
+  const marginBalance = raw.totalMarginBalance !== undefined ? parseFloat(raw.totalMarginBalance) : NaN;
+
+  if (!isNaN(marginBalance)) {
+    balances.totalMarginBalance = marginBalance;
+  }
+
+  return balances;
 }
 
 export interface BinanceFundingRateHistoryRaw {

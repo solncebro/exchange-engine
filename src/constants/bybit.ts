@@ -54,3 +54,11 @@ export const BYBIT_KLINE_INTERVAL_MS: Record<string, number> = {
 };
 
 export const BYBIT_TRANSACTION_LOG_MAX_LIMIT = 50;
+
+/**
+ * Записи журнала операций, несущие начисление фандинга. У них нулевой денежный поток, а
+ * сама сумма лежит в поле `funding` (живой счёт 02.09.2026, FLOCKUSDT: `cashFlow=0`,
+ * `funding=-2.3156522`). Один список на клиент и нормализатор — чтобы фильтр и чтение суммы
+ * не разошлись.
+ */
+export const BYBIT_FUNDING_INCOME_TYPE_SET = new Set(['FUNDING', 'SETTLEMENT']);

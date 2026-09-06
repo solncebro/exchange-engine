@@ -61,10 +61,12 @@ BinanceTicker24hrRaw { symbol, lastPrice: string, priceChangePercent: string, ti
   - `orderId` number → string
 - `normalizeBinanceBalances(raw)` → `BalanceByAsset` (Map)
   - Пропускает нулевые балансы (`free + locked === 0`) и невалидные (`NaN` в `free`/`locked` → `continue`)
-- `normalizeBinanceFuturesBalances(raw)` → `BalanceByAsset` (Map)
+- `normalizeBinanceFuturesBalances(raw)` → `AccountBalances`
   - Отдельная функция для фьючерсного баланса — использует `walletBalance`/`availableBalance` вместо `free`/`locked`
   - Пропускает записи с `walletBalance === 0`
   - `free = availableBalance`, `locked = walletBalance - availableBalance`, `total = walletBalance`
+  - `totalAvailableBalance`/`availableBalanceSource`: `raw.availableBalance` в приоритете (`'exchange'`); если его нет — `totalWalletBalance − raw.totalInitialMargin` (`'derived'`); иначе `0` и `'unknown'` — занятая маржа НЕ выводится вычитанием кошелька со свободными (свободные уже уменьшены биржей на нереализованный итог)
+  - `totalInitialMargin` — читается из `raw.totalInitialMargin`, если есть; `totalMarginBalance` — из `raw.totalMarginBalance`
 - `normalizeBinanceFundingRateHistory(rawList)` → `FundingRateHistory[]`
   - Пустой markPrice → `null`
 - `normalizeBinanceFundingInfo(rawList)` → `FundingInfo[]`
@@ -105,7 +107,7 @@ REST:
 - `BybitOpenInterestRaw` — `{ openInterest, timestamp }` (оба string)
 - `BybitFeeRateRaw` — `{ symbol, makerFeeRate, takerFeeRate }`
 - `BybitFundingRateHistoryRaw` — `{ symbol, fundingRate, fundingRateTimestamp }`
-- `BybitClosedPnlRaw` — `{ symbol, orderId, side, qty, avgEntryPrice, avgExitPrice, closedPnl, createdTime }`
+- `BybitClosedPnlRaw` — `{ symbol, orderId, side, qty, avgEntryPrice, avgExitPrice, cumEntryValue, cumExitValue, openFee, closeFee, closedPnl, createdTime }` (`closedPnl` — биржевой итог, наружу не отдаётся — см. `normalizeBybitClosedPnlList`)
 - `BybitTransactionLogRaw` — `{ symbol, type, qty, cashFlow, currency, transactionTime, tradeId, orderId }`
 
 WebSocket:
@@ -150,8 +152,10 @@ WebSocket:
   - `free = walletBalance - totalPositionIM - totalOrderIM`
   - `locked` = frozenAmount или locked, fallback `walletBalance - free`
   - Пропускает нулевые балансы (`free + locked === 0`)
-  - На каждый asset заполняет `walletBalance`, `totalOrderInitialMargin`, `totalPositionInitialMargin`; `availableToWithdraw` — если не пусто
-  - На уровне `AccountBalances` возвращает `accountType` (primary account), `totalMarginBalance`, `totalInitialMargin`
+  - На каждый asset заполняет `walletBalance`, `totalOrderInitialMargin`, `totalPositionInitialMargin`, `usdValue` (если прислан); `availableToWithdraw` — если не пусто
+  - Свод счёта строится ТОЛЬКО из `usdValue` монет (`sumBalanceUsdValue`/`sumMarginUsdValue`, private) — остатки в собственных единицах монет складывать нельзя (биткойн иначе весит как доллар). `null` от этих хелперов (хоть у одной ненулевой монеты нет `usdValue`) — сигнал считать неполную сумму нельзя
+  - `totalWalletBalance`/`totalAvailableBalance`/`availableBalanceSource`: биржевое поле в приоритете (`'exchange'`); иначе `marginBalance − initialMargin` или `totalWalletBalance − initialMargin` (`'derived'`); иначе — если есть долларовая оценка занятой маржи по монетам — `totalWalletBalance − marginUsd` (`'derived'`); иначе `0` и `'unknown'`
+  - На уровне `AccountBalances` возвращает `accountType` (primary account), `totalMarginBalance`, `totalInitialMargin` (биржевое поле или `marginUsd`, если биржа не дала), `availableBalanceSource`
 - `normalizeBybitOrderBook(raw, symbol)` → `OrderBook`
   - symbol передаётся отдельно, `a → askList`, `b → bidList`, `ts → timestamp`, `u → updateId`
 - `normalizeBybitOrderBookUpdate(raw, symbol, updateType, receivedTimestamp, envelopeTimestamp?)` → `OrderBookUpdate`
@@ -181,8 +185,10 @@ WebSocket:
   - `fundingRateTimestamp → fundingTime`, `markPrice` всегда `null` (Bybit не возвращает)
 - `normalizeBybitClosedPnlList(rawList)` → `ClosedPnl[]`
   - `avgEntryPrice → entryPrice`, `avgExitPrice → exitPrice`, side через `BYBIT_ORDER_SIDE` маппинг
+  - `closedPnl` НЕ читается из биржевого поля — оно уже вычитает фандинг за жизнь позиции. Пересчитывается как `bybitGrossPnl(raw, side) − openFee − closeFee`, где `bybitGrossPnl` — `cumEntryValue − cumExitValue` (закрытие шорта покупкой) или наоборот для лонга. Тот же смысл, что у Binance: чистый после торговых комиссий, без фандинга
 - `normalizeBybitIncomeList(rawList)` → `Income[]`
-  - Использует `BybitTransactionLogRaw`, `cashFlow → income`, `currency → asset`, `type → incomeType`
+  - Использует `BybitTransactionLogRaw`, `currency → asset`, `type → incomeType`
+  - `income` — через приватный `bybitIncomeAmount`: для типов из `BYBIT_FUNDING_INCOME_TYPE_SET` (`FUNDING`/`SETTLEMENT`, `src/constants/bybit.ts`) берётся поле `funding` (у этих строк `cashFlow` всегда 0), иначе — `cashFlow`
   - `info` собирается из `{ tradeId, orderId }`
   - `quantity = parseFloat(raw.qty)`
 
@@ -222,8 +228,8 @@ WebSocket:
 - `Position` — `{ symbol, side, direction: 'long' | 'short' | null, contracts, entryPrice, markPrice, unrealizedPnl, leverage, marginMode, liquidationPrice, positionIdx?, info }`
 - `Order` — `{ id, clientOrderId, symbol, side, type, amount, price, avgPrice, stopPrice, filledAmount, filledQuoteAmount, status, timeInForce, reduceOnly, timestamp, updatedTimestamp, rateLimit?: OrderRateLimitSnapshot }`. Поле `rateLimit?` опциональное — заполняется только для одиночных order-операций через WebSocket Trade Stream.
 - `OrderRateLimitSnapshot` — `{ limit: number; remaining: number; resetMs: number }`. Per-response runtime snapshot per-UID rate-limit, извлечённый из заголовков ответа на одиночный `createOrder` через WS. Bybit: парсится из `header['X-Bapi-Limit' / 'X-Bapi-Limit-Status' / 'X-Bapi-Limit-Reset-Timestamp']` через `parseBybitHeaderRateLimit`. Binance: из массива `message.rateLimits[]` (поиск entry с `rateLimitType === 'ORDERS' && interval === 'SECOND'`) через `parseBinanceRateLimitArray`, `remaining = limit - count`, `resetMs = Date.now() + intervalNum * 1000`. Отличается от `OrderRateLimit` (см. `getOrderRateLimit()`): тот возвращает статический per-UID лимит из exchange-info, этот — runtime snapshot после конкретной операции.
-- `Balance` — `{ asset, free, locked, total, walletBalance?, availableToWithdraw?, totalOrderInitialMargin?, totalPositionInitialMargin? }` (опциональные поля — Bybit Unified Account)
-- `AccountBalances` — `{ totalWalletBalance, totalAvailableBalance, balanceByAsset, accountType?, totalMarginBalance?, totalInitialMargin? }`
+- `Balance` — `{ asset, free, locked, total, walletBalance?, availableToWithdraw?, totalOrderInitialMargin?, totalPositionInitialMargin?, usdValue? }` (опциональные поля — Bybit Unified Account). `free`/`locked`/`total` — в единицах САМОЙ монеты, монеты между собой складывать нельзя (иначе биткойн весит как доллар — инцидент 29.08.2026); `usdValue?` — единственная величина, допустимая для свода по счёту
+- `AccountBalances` — `{ totalWalletBalance, totalAvailableBalance, balanceByAsset, accountType?, totalMarginBalance?, totalInitialMargin?, availableBalanceSource? }`. `availableBalanceSource` — `'exchange'` (готовое поле биржи) / `'derived'` (выведено из остатка и занятой маржи) / `'unknown'` (посчитать нечем, число нулевое и фактом не является) — потребитель обязан различать факт и расчёт
 - `FundingRateHistory` — `{ symbol, fundingRate, fundingTime, markPrice: number | null }`
 - `FundingInfo` — `{ symbol, fundingIntervalHours, adjustedFundingRateCap, adjustedFundingRateFloor }`
 - `WebSocketConnectionInfo` — `{ label, url, isConnected, type: WebSocketConnectionTypeEnum, subscriptionList: string[] }`
@@ -243,7 +249,7 @@ WebSocket:
 - `OpenInterest` — `{ symbol, openInterest, timestamp }`
 - `FeeRate` — `{ symbol, makerRate, takerRate }`
 - `Income` — `{ symbol, incomeType, income, asset, timestamp, info: Record<string, unknown>, quantity? }`
-- `ClosedPnl` — `{ symbol, orderId, side: OrderSideEnum, quantity, entryPrice, exitPrice, closedPnl, timestamp }`
+- `ClosedPnl` — `{ symbol, orderId, side: OrderSideEnum, quantity, entryPrice, exitPrice, closedPnl, timestamp }`. `closedPnl` — чистый итог после торговых комиссий (открытия и закрытия), БЕЗ фандинга на обеих биржах: тождество «валовой − closedPnl = комиссии» держится и у Binance, и у Bybit; фандинг — отдельный поток (`fetchIncome`, `incomeType: 'funding'`)
 - `ModifyBatchOrderArgs` — `{ symbol, orderId, side: OrderSideEnum, clientOrderId?, price?, amount?, triggerPrice? }`. `side` обязателен (требуется для Binance PUT batch); `clientOrderId` → Bybit `orderLinkId` / Binance `origClientOrderId`.
 - `CancelOrderItemResult` — `{ orderId, isSuccess, errorCode: number | null, errorText: string | null }`
 - `CancelBatchOrdersResult = CancelOrderItemResult[]`

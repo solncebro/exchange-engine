@@ -382,6 +382,10 @@ fetchBalances(): Promise<AccountBalances>
 
 **Возврат:** `AccountBalances` — объект с агрегированными полями аккаунта и `balanceByAsset` (`Map<string, Balance>`).
 
+Агрегированные поля (`totalWalletBalance`, `totalAvailableBalance`, `totalMarginBalance`, `totalInitialMargin`) — только долларовая оценка счёта. Остаток и занятая маржа монеты (`Balance.free/locked/total`) выражены в единицах САМОЙ монеты — складывать их между разными монетами нельзя (иначе один биткойн на счету весит как один доллар). Для свода служит `Balance.usdValue` — долларовая оценка остатка по курсу биржи, единственная величина, допустимая для сложения по монетам.
+
+`AccountBalances.availableBalanceSource` называет, откуда взяты свободные средства: `'exchange'` — готовое поле биржи; `'derived'` — выведено из остатка счёта и занятой маржи (когда биржа не отдала готовое число); `'unknown'` — посчитать было нечем, число тогда `0` и фактом не является. Показывать `'unknown'`-значение как остаток счёта нельзя.
+
 ```typescript
 const balances = await futures.fetchBalances();
 const usdt = balances.balanceByAsset.get('USDT');
@@ -425,6 +429,8 @@ fetchIncome(options?: FetchIncomeArgs): Promise<Income[]>
 
 С `incomeType: 'funding'` возвращаются только фандинг-платежи окна. Binance фильтрует на стороне биржи (`incomeType=FUNDING_FEE`). Bybit пробрасывает окно времени в журнал транзакций и фильтрует локально (типы `FUNDING`/`SETTLEMENT`); `limit` клампится к 50 (максимум журнала), а если сырой ответ упёрся в лимит страницы — метод бросает ошибку, чтобы не вернуть неполную сумму.
 
+Сумма фандинга у Bybit берётся из поля `funding` строки журнала: денежный поток (`cashFlow`) у начисления фандинга нулевой (живой счёт 02.09.2026). Знак одинаков на обеих биржах — отрицательное значит списано.
+
 **Возврат:** `Income[]` — массив записей.
 
 | Биржа | Futures | Spot |
@@ -450,6 +456,8 @@ fetchClosedPnl(symbol?: string, options?: FetchPageWithLimitArgs): Promise<Close
 **Возврат:** `ClosedPnl[]` — массив закрытых PnL.
 
 `limit` на обеих биржах значит одно и то же: **сколько строк ИТОГА вернуть**. Это не мелочь: у Bybit есть готовая ручка закрытых позиций, а у Binance такой ручки нет вовсе — итоги собираются из сырых исполнений счёта, и раньше `limit` уезжал прямо туда, превращаясь в «столько исполнений». Рыночное закрытие неликвида биржа дробит на сотни исполнений, поэтому потребитель получал итог меньше половины сделки и записывал его как факт биржи.
+
+`closedPnl` на обеих биржах — итог ЧИСТЫЙ после торговых комиссий (открытия и закрытия), но БЕЗ фандинга: фандинг — отдельный поток начислений (`fetchIncome`, `incomeType: 'funding'`), потребитель складывает их сам. У Binance итог собирается из исполнений; у Bybit — из полей записи закрытия (`cumEntryValue − cumExitValue − openFee − closeFee`), потому что биржевое поле `closedPnl` там уже включает фандинг за жизнь позиции (проверено 02.09.2026 на 7 закрытиях подряд). Тождество «валовой − closedPnl = комиссии» держится на обеих биржах.
 
 **Просите окно по времени, а не число строк.** С заданным `startTime` Binance-клиент забирает исполнения постранично (страница — потолок биржи в 1000; следующие адресуются номером сделки, потому что биржа запрещает сочетать его с окном) и отдаёт полный итог. Без `startTime` берётся одна страница максимального размера — этого может не хватить на дроблёное закрытие.
 
@@ -1577,10 +1585,11 @@ interface Balance {
   availableToWithdraw?: number;
   totalOrderInitialMargin?: number;
   totalPositionInitialMargin?: number;
+  usdValue?: number;
 }
 ```
 
-Опциональные поля заполняются Bybit Unified Account (`normalizeBybitBalances`).
+Опциональные поля заполняются Bybit Unified Account (`normalizeBybitBalances`). `free`/`locked`/`total` — в единицах САМОЙ монеты (доллары для USDT, биткойны для BTC, ...); складывать их между разными монетами нельзя. `usdValue` — долларовая оценка остатка по курсу биржи, единственная величина, допустимая для свода по счёту (заполняется, только когда биржа прислала курс).
 
 #### `AccountBalances`
 
@@ -1592,8 +1601,11 @@ interface AccountBalances {
   accountType?: string;
   totalMarginBalance?: number;
   totalInitialMargin?: number;
+  availableBalanceSource?: 'exchange' | 'derived' | 'unknown';
 }
 ```
+
+`availableBalanceSource` — см. пояснение выше, в `fetchBalances()`.
 
 #### `FundingRateHistory`
 
@@ -1788,6 +1800,8 @@ interface ClosedPnl {
   timestamp: number;
 }
 ```
+
+`closedPnl` — чистый после торговых комиссий, без фандинга (см. `fetchClosedPnl()`).
 
 #### `WebSocketConnectionInfo`
 

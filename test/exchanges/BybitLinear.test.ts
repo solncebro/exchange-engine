@@ -15,6 +15,7 @@ import {
   BYBIT_RAW_OPEN_INTEREST,
   BYBIT_RAW_FEE_RATE_LIST,
   BYBIT_RAW_CLOSED_PNL_LIST,
+  BYBIT_RAW_CLOSED_PNL_FLOCKUSDT,
   BYBIT_RAW_TRANSACTION_LOG_LIST,
   BYBIT_RAW_AMEND_BATCH_RESPONSE,
 } from '../fixtures/bybitRaw';
@@ -1027,6 +1028,23 @@ describe('BybitLinear', () => {
       expect(result[0].income).toBeCloseTo(-0.34382205, 8);
     });
 
+    // FLOCKUSDT 02.09.2026: строка SETTLEMENT несёт cashFlow=0, начисление лежит в funding.
+    it('returns the funding of a settlement row from its funding field, not its zero cash flow', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({
+        data: { result: { list: [
+          { symbol: 'FLOCKUSDT', type: 'TRADE', qty: '2729', cashFlow: '5.04865', fee: '0.11239114', funding: '0', currency: 'USDT', transactionTime: '1788364800470', tradeId: 't1', orderId: 'o1' },
+          { symbol: 'FLOCKUSDT', type: 'SETTLEMENT', qty: '55994', cashFlow: '0', fee: '0', funding: '-2.3156522', currency: 'USDT', transactionTime: '1788364800000', tradeId: '', orderId: '' },
+          { symbol: 'FLOCKUSDT', type: 'SETTLEMENT', qty: '55994', cashFlow: '0', fee: '0', funding: '-1.13346936', currency: 'USDT', transactionTime: '1788350400000', tradeId: '', orderId: '' },
+        ] } },
+      });
+
+      const result = await client.fetchIncome({ symbol: 'FLOCKUSDT', incomeType: 'funding', startTime: 1788337740000, endTime: 1788364900000 });
+
+      expect(result).toHaveLength(2);
+      expect(result.reduce((sum, row) => sum + row.income, 0)).toBeCloseTo(-3.44912156, 8);
+    });
+
     it('asks for the largest page the exchange allows when the caller named no limit', async () => {
       const { client, mockInstance } = createClient();
       mockInstance.get.mockResolvedValue({ data: { result: { list: [] } } });
@@ -1087,9 +1105,22 @@ describe('BybitLinear', () => {
       expect(result[0].orderId).toBe('order-1');
       expect(result[0].side).toBe(OrderSideEnum.Buy);
       expect(result[0].quantity).toBe(0.1);
-      expect(result[0].entryPrice).toBe(64000);
-      expect(result[0].exitPrice).toBe(65000);
-      expect(result[0].closedPnl).toBe(100);
+      expect(result[0].entryPrice).toBe(65000);
+      expect(result[0].exitPrice).toBe(64000);
+      expect(result[0].closedPnl).toBeCloseTo(99, 9);
+    });
+
+    // FLOCKUSDT 02.09.2026: биржевое поле closedPnl (98.3460386) уже вычло фандинг 3.44912156.
+    it('reports the result net of commissions but WITHOUT the funding the exchange folded into its own field', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({
+        data: { result: { list: [BYBIT_RAW_CLOSED_PNL_FLOCKUSDT] } },
+      });
+
+      const result = await client.fetchClosedPnl('FLOCKUSDT');
+
+      expect(result).toHaveLength(1);
+      expect(result[0].closedPnl).toBeCloseTo(101.79516016, 6);
     });
   });
 

@@ -58,13 +58,12 @@ import {
   BYBIT_PRIVATE_WEBSOCKET_URL,
   BYBIT_DEMO_PRIVATE_WEBSOCKET_URL,
   BYBIT_TRANSACTION_LOG_MAX_LIMIT,
+  BYBIT_FUNDING_INCOME_TYPE_SET,
 } from '../constants/bybit';
 import { BYBIT_ORDER_STATUS, BYBIT_WORKING_TYPE_TRIGGER_BY } from '../constants/mappings';
 import { chunkList as chunkListUtil } from '../utils/chunkList';
 import { BaseExchangeClient } from './BaseExchangeClient';
 import type { BybitBaseClientArgs } from './BybitBaseClient.types';
-
-const BYBIT_FUNDING_INCOME_TYPE_SET = new Set(['FUNDING', 'SETTLEMENT']);
 
 /** Записи, несущие реализованный итог сделки: поток денег по ним и есть этот итог. */
 const BYBIT_TRADE_INCOME_TYPE_SET = new Set(['TRADE', 'SETTLEMENT']);

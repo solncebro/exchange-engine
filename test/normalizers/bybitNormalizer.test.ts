@@ -30,6 +30,7 @@ import {
   BYBIT_RAW_POSITION,
   BYBIT_RAW_ORDER_RESPONSE,
   BYBIT_RAW_WALLET_BALANCE,
+  BYBIT_RAW_WALLET_BALANCE_NO_TOTALS,
   BYBIT_RAW_ORDER_BOOK,
   BYBIT_RAW_ORDER_BOOK_STREAM,
   BYBIT_RAW_PUBLIC_TRADE_LIST,
@@ -40,6 +41,8 @@ import {
   BYBIT_RAW_FUNDING_RATE_HISTORY_LIST,
   BYBIT_RAW_CLOSED_PNL_LIST,
   BYBIT_RAW_TRANSACTION_LOG_LIST,
+  BYBIT_RAW_CLOSED_PNL_FLOCKUSDT,
+  BYBIT_RAW_TRANSACTION_LOG_SETTLEMENT,
 } from '../fixtures/bybitRaw';
 
 describe('normalizeBybitTradeSymbols', () => {
@@ -853,6 +856,25 @@ describe('buildBybitOrderFromCreateResponse', () => {
 });
 
 describe('normalizeBybitBalances', () => {
+  // Живой счёт 29.08.2026: биржа не дала НИ ОДНОГО сводного числа кроме кошелька, и запасной расчёт
+  // сложил остатки семи монет как доллары — 3915.09 против настоящих 3914.57 в кошельке. Свободных
+  // средств больше, чем есть на счёте, быть не может ни при каком устройстве счёта.
+  it('never reports more free money than the wallet holds when the exchange gives no totals', () => {
+    const result = normalizeBybitBalances(BYBIT_RAW_WALLET_BALANCE_NO_TOTALS);
+
+    expect(result.totalWalletBalance).toBeCloseTo(3914.56568348, 8);
+    expect(result.totalAvailableBalance).toBeLessThanOrEqual(result.totalWalletBalance);
+  });
+
+  // Ни позиций, ни заявок — занято ровно ноль, а свободно ровно столько, сколько в кошельке.
+  it('derives zero margin and full free money for an account holding nothing', () => {
+    const result = normalizeBybitBalances(BYBIT_RAW_WALLET_BALANCE_NO_TOTALS);
+
+    expect(result.totalInitialMargin).toBeCloseTo(0, 8);
+    expect(result.totalAvailableBalance).toBeCloseTo(3914.56568348, 8);
+    expect(result.availableBalanceSource).toBe('derived');
+  });
+
   it('returns AccountBalances with balanceByAsset Map', () => {
     const result = normalizeBybitBalances(BYBIT_RAW_WALLET_BALANCE);
 
@@ -1294,9 +1316,9 @@ describe('normalizeBybitClosedPnlList', () => {
     const result = normalizeBybitClosedPnlList(BYBIT_RAW_CLOSED_PNL_LIST);
 
     expect(result[0].quantity).toBe(0.1);
-    expect(result[0].entryPrice).toBe(64000);
-    expect(result[0].exitPrice).toBe(65000);
-    expect(result[0].closedPnl).toBe(100);
+    expect(result[0].entryPrice).toBe(65000);
+    expect(result[0].exitPrice).toBe(64000);
+    expect(result[0].closedPnl).toBeCloseTo(99, 9);
     expect(result[0].timestamp).toBe(1700000000000);
   });
 
@@ -1311,6 +1333,30 @@ describe('normalizeBybitClosedPnlList', () => {
 
     expect(result).toHaveLength(0);
   });
+
+  // FLOCKUSDT 02.09.2026, живой счёт: биржевое поле closedPnl уже за вычетом фандинга 3.44912156.
+  it('subtracts both commissions from the gross and ignores the exchange field that also subtracts funding', () => {
+    const [row] = normalizeBybitClosedPnlList([BYBIT_RAW_CLOSED_PNL_FLOCKUSDT]);
+
+    expect(row.closedPnl).toBeCloseTo(2200.00426 - 2094.99023 - 0.91438047 - 2.30448937, 8);
+    expect(Math.abs(row.closedPnl - 98.3460386)).toBeGreaterThan(3);
+  });
+
+  it('keeps the identity consumers rely on: gross by average prices minus result equals the whole commission', () => {
+    const [row] = normalizeBybitClosedPnlList([BYBIT_RAW_CLOSED_PNL_FLOCKUSDT]);
+    const gross = (row.entryPrice - row.exitPrice) * row.quantity;
+
+    expect(gross - row.closedPnl).toBeCloseTo(0.91438047 + 2.30448937, 3);
+  });
+
+  it('closes a long the other way round: a sell-side gross is exit minus entry', () => {
+    const [row] = normalizeBybitClosedPnlList([
+      { ...BYBIT_RAW_CLOSED_PNL_FLOCKUSDT, side: 'Sell', cumEntryValue: '1000', cumExitValue: '1100', openFee: '0.5', closeFee: '0.5', closedPnl: '97' },
+    ]);
+
+    expect(row.side).toBe(OrderSideEnum.Sell);
+    expect(row.closedPnl).toBeCloseTo(99, 9);
+  });
 });
 
 describe('normalizeBybitIncomeList', () => {
@@ -1321,7 +1367,7 @@ describe('normalizeBybitIncomeList', () => {
     expect(result[0].symbol).toBe('BTCUSDT');
   });
 
-  it('parses cashFlow as income number', () => {
+  it('reads the cash flow of a trade and the funding field of a settlement as the income', () => {
     const result = normalizeBybitIncomeList(BYBIT_RAW_TRANSACTION_LOG_LIST);
 
     expect(result[0].income).toBe(-6500);
@@ -1346,6 +1392,21 @@ describe('normalizeBybitIncomeList', () => {
     const result = normalizeBybitIncomeList([]);
 
     expect(result).toHaveLength(0);
+  });
+
+  it('reads a settlement row from the funding field, not from its zero cash flow', () => {
+    const [row] = normalizeBybitIncomeList([BYBIT_RAW_TRANSACTION_LOG_SETTLEMENT]);
+
+    expect(row.income).toBeCloseTo(-2.3156522, 8);
+    expect(row.incomeType).toBe('SETTLEMENT');
+  });
+
+  it('still reads a trade row from its cash flow even when the funding field is present', () => {
+    const [row] = normalizeBybitIncomeList([
+      { symbol: 'ICNTUSDT', type: 'TRADE', qty: '10', cashFlow: '-134.42656869', fee: '0.34382205', funding: '0', currency: 'USDT', transactionTime: '1700000000000', tradeId: 't1', orderId: 'o1' },
+    ]);
+
+    expect(row.income).toBeCloseTo(-134.42656869, 8);
   });
 });
 

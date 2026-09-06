@@ -28,6 +28,7 @@ import {
   BINANCE_RAW_ORDER_RESPONSE,
   BINANCE_RAW_ACCOUNT,
   BINANCE_RAW_FUTURES_ACCOUNT,
+  BINANCE_RAW_FUTURES_ACCOUNT_WITH_POSITION,
   BINANCE_RAW_FUNDING_RATE_HISTORY_LIST,
   BINANCE_RAW_FUNDING_INFO_LIST,
   BINANCE_RAW_FUTURE_SYMBOL,
@@ -749,6 +750,17 @@ describe('normalizeBinanceBalances', () => {
 });
 
 describe('normalizeBinanceFuturesBalances', () => {
+  // Занятая маржа приходит от биржи отдельным числом, и брать надо ЕГО. Разность кошелька со
+  // свободными средствами тут врёт: свободные уже уменьшены на нереализованный убыток, поэтому
+  // 1200 − 850 дало бы 350 вместо настоящих 300 занятых.
+  it('reads the margin the exchange reports instead of deriving it from the free balance', () => {
+    const result = normalizeBinanceFuturesBalances(BINANCE_RAW_FUTURES_ACCOUNT_WITH_POSITION);
+
+    expect(result.totalInitialMargin).toBe(300);
+    expect(result.totalMarginBalance).toBe(1150);
+    expect(result.availableBalanceSource).toBe('exchange');
+  });
+
   it('returns AccountBalances with balanceByAsset Map', () => {
     const result = normalizeBinanceFuturesBalances(BINANCE_RAW_FUTURES_ACCOUNT);
 

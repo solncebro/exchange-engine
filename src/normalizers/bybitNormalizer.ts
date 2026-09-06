@@ -7,6 +7,7 @@ import type {
   Position,
   Order,
   Balance,
+  BalanceByAsset,
   AccountBalances,
   OrderBook,
   OrderBookRawLevel,
@@ -25,6 +26,7 @@ import type {
 } from '../types/common';
 import { TradeSymbolTypeEnum, PositionSideEnum, MarginModeEnum, TimeInForceEnum, OrderSideEnum, OrderTypeEnum } from '../types/common';
 import { BYBIT_POSITION_SIDE, BYBIT_ORDER_STATUS, BYBIT_ORDER_SIDE, BYBIT_ORDER_TYPE, BYBIT_TIME_IN_FORCE } from '../constants/mappings';
+import { BYBIT_FUNDING_INCOME_TYPE_SET } from '../constants/bybit';
 import { parseOrderBookLevel } from './normalizerUtils';
 import { buildPlacedOrderOutcome, buildRejectedOrderOutcome } from './batchOrderOutcome';
 import type { CreateOrderItemResult, CreateOrderWebSocketArgs } from '../types/exchange';
@@ -188,6 +190,9 @@ interface BybitCoinRaw {
   coin: string;
   availableToWithdraw?: string;
   walletBalance?: string;
+  /** Долларовая оценка остатка монеты по курсу биржи. Именно из неё биржа складывает
+   *  totalWalletBalance — проверено сложением на живом счёте 29.08.2026. */
+  usdValue?: string;
   totalOrderIM?: string;
   totalPositionIM?: string;
   free?: string;
@@ -251,6 +256,14 @@ export interface BybitClosedPnlRaw {
   qty: string;
   avgEntryPrice: string;
   avgExitPrice: string;
+  /** Накопленная стоимость входа и выхода — точные суммы исполнений, по ним считается валовой итог. */
+  cumEntryValue: string;
+  cumExitValue: string;
+  /** Комиссии открытия и закрытия позиции, положительное число = списано. */
+  openFee: string;
+  closeFee: string;
+  /** Биржевой итог: за вычетом обеих комиссий И фандинга за жизнь позиции — наружу не отдаётся,
+   *  см. normalizeBybitClosedPnlList. */
   closedPnl: string;
   createdTime: string;
 }
@@ -259,11 +272,11 @@ export interface BybitTransactionLogRaw {
   symbol: string;
   type: string;
   qty: string;
-  /** Реализованный итог сделки БЕЗ комиссии. */
+  /** Реализованный итог сделки БЕЗ комиссии; у строки начисления фандинга — ноль. */
   cashFlow: string;
   /** Торговая комиссия: положительное число = списано. */
   fee?: string;
-  /** Ставка финансирования: положительное = получено. */
+  /** Начисление фандинга: отрицательное = списано, положительное = получено (тот же знак, что у Binance). Заполнено только у строк FUNDING/SETTLEMENT. */
   funding?: string;
   currency: string;
   transactionTime: string;
@@ -681,6 +694,7 @@ export function normalizeBybitBalances(raw: BybitWalletBalanceRaw): AccountBalan
       const availableToWithdraw = coin.availableToWithdraw !== undefined && coin.availableToWithdraw !== ''
         ? parseFloat(coin.availableToWithdraw)
         : undefined;
+      const usdValue = coin.usdValue !== undefined && coin.usdValue !== '' ? parseFloat(coin.usdValue) : undefined;
 
       const existing = balanceByAsset.get(coin.coin);
 
@@ -697,6 +711,10 @@ export function normalizeBybitBalances(raw: BybitWalletBalanceRaw): AccountBalan
 
         if (availableToWithdraw !== undefined) {
           balance.availableToWithdraw = (existing.availableToWithdraw ?? 0) + availableToWithdraw;
+        }
+
+        if (usdValue !== undefined || existing.usdValue !== undefined) {
+          balance.usdValue = (existing.usdValue ?? 0) + (usdValue ?? 0);
         }
 
         balanceByAsset.set(coin.coin, balance);
@@ -718,6 +736,10 @@ export function normalizeBybitBalances(raw: BybitWalletBalanceRaw): AccountBalan
         balance.availableToWithdraw = availableToWithdraw;
       }
 
+      if (usdValue !== undefined) {
+        balance.usdValue = usdValue;
+      }
+
       balanceByAsset.set(coin.coin, balance);
     }
   }
@@ -728,36 +750,47 @@ export function normalizeBybitBalances(raw: BybitWalletBalanceRaw): AccountBalan
   const rawTotalMargin = primaryAccount?.totalMarginBalance ?? '';
   const rawTotalInitialMargin = primaryAccount?.totalInitialMargin ?? '';
 
+  const walletUsd = sumBalanceUsdValue(balanceByAsset);
+  const marginUsd = sumMarginUsdValue(balanceByAsset);
+
   let totalWalletBalance = parseFloat(rawTotalWallet);
 
   if (isNaN(totalWalletBalance)) {
-    totalWalletBalance = 0;
-
-    for (const balance of balanceByAsset.values()) {
-      totalWalletBalance += balance.total;
-    }
+    // Свод строится ТОЛЬКО из долларовых оценок. Складывать остатки монет (balance.total) нельзя:
+    // так 0.0514 FRAX прибавляется к 3914.91 USDT как полдоллара, а один биткойн — как один доллар.
+    totalWalletBalance = walletUsd ?? 0;
   }
 
-  let totalAvailableBalance = parseFloat(rawTotalAvailable);
+  const exchangeAvailable = parseFloat(rawTotalAvailable);
+  const marginBalance = parseFloat(rawTotalMargin);
+  const initialMargin = parseFloat(rawTotalInitialMargin);
 
-  if (isNaN(totalAvailableBalance)) {
-    const marginBalance = parseFloat(rawTotalMargin);
-    const initialMargin = parseFloat(rawTotalInitialMargin);
+  let totalAvailableBalance: number;
+  let availableBalanceSource: NonNullable<AccountBalances['availableBalanceSource']>;
 
-    if (!isNaN(marginBalance) && !isNaN(initialMargin)) {
-      totalAvailableBalance = marginBalance - initialMargin;
-    } else if (!isNaN(initialMargin)) {
-      totalAvailableBalance = totalWalletBalance - initialMargin;
-    } else {
-      totalAvailableBalance = 0;
-
-      for (const balance of balanceByAsset.values()) {
-        totalAvailableBalance += balance.free;
-      }
-    }
+  if (!isNaN(exchangeAvailable)) {
+    totalAvailableBalance = exchangeAvailable;
+    availableBalanceSource = 'exchange';
+  } else if (!isNaN(marginBalance) && !isNaN(initialMargin)) {
+    totalAvailableBalance = marginBalance - initialMargin;
+    availableBalanceSource = 'derived';
+  } else if (!isNaN(initialMargin)) {
+    totalAvailableBalance = totalWalletBalance - initialMargin;
+    availableBalanceSource = 'derived';
+  } else if (marginUsd !== null) {
+    // Живой счёт 29.08.2026 приходит именно так: ни свободных средств, ни маржинального баланса, ни
+    // начальной маржи — только кошелёк и монеты. Свободное выводится вычитанием занятой маржи, и по
+    // построению не может превысить кошелёк.
+    totalAvailableBalance = totalWalletBalance - marginUsd;
+    availableBalanceSource = 'derived';
+  } else {
+    // Курса монет нет — посчитать нечем. Ноль в безопасную сторону (по этому числу оператор считает
+    // размер входа) и честная пометка: выдавать догадку за остаток счёта нельзя.
+    totalAvailableBalance = 0;
+    availableBalanceSource = 'unknown';
   }
 
-  const result: AccountBalances = { totalWalletBalance, totalAvailableBalance, balanceByAsset };
+  const result: AccountBalances = { totalWalletBalance, totalAvailableBalance, balanceByAsset, availableBalanceSource };
 
   if (primaryAccount?.accountType !== undefined) {
     result.accountType = primaryAccount.accountType;
@@ -773,9 +806,54 @@ export function normalizeBybitBalances(raw: BybitWalletBalanceRaw): AccountBalan
 
   if (!isNaN(totalInitialMargin)) {
     result.totalInitialMargin = totalInitialMargin;
+  } else if (marginUsd !== null) {
+    result.totalInitialMargin = marginUsd;
   }
 
   return result;
+}
+
+/** Долларовая оценка всего счёта. null — если хоть у одной монеты с ненулевым остатком её нет:
+ *  неполная сумма выглядела бы как настоящая. */
+function sumBalanceUsdValue(balanceByAsset: BalanceByAsset): number | null {
+  let sum = 0;
+
+  for (const balance of balanceByAsset.values()) {
+    if (balance.usdValue !== undefined) {
+      sum += balance.usdValue;
+
+      continue;
+    }
+
+    if (balance.total !== 0) {
+      return null;
+    }
+  }
+
+  return sum;
+}
+
+/** Занятая маржа счёта В ДОЛЛАРАХ: маржа монеты приходит в её собственных единицах, поэтому
+ *  переводится курсом самой монеты (её долларовая оценка на её остаток). null — если у монеты с
+ *  НЕНУЛЕВОЙ маржой курса нет. */
+function sumMarginUsdValue(balanceByAsset: BalanceByAsset): number | null {
+  let sum = 0;
+
+  for (const balance of balanceByAsset.values()) {
+    const margin = (balance.totalOrderInitialMargin ?? 0) + (balance.totalPositionInitialMargin ?? 0);
+
+    if (margin === 0) continue;
+
+    const walletBalance = balance.walletBalance ?? 0;
+
+    if (balance.usdValue === undefined || walletBalance === 0) {
+      return null;
+    }
+
+    sum += margin * (balance.usdValue / walletBalance);
+  }
+
+  return sum;
 }
 
 export function normalizeBybitOrderBook(raw: BybitOrderBookRaw, symbol: string): OrderBook {
@@ -950,17 +1028,45 @@ export function normalizeBybitFundingRateHistoryList(rawList: BybitFundingRateHi
   }));
 }
 
+/**
+ * Валовой итог записи закрытия — по накопленным стоимостям входа и выхода (точные суммы
+ * исполнений, без округления средних цен). Покупка закрывает шорт: заработано то, на сколько
+ * выход дешевле входа; продажа закрывает лонг — наоборот.
+ */
+function bybitGrossPnl(raw: BybitClosedPnlRaw, side: OrderSideEnum): number {
+  const entryValue = parseFloat(raw.cumEntryValue);
+  const exitValue = parseFloat(raw.cumExitValue);
+
+  return side === OrderSideEnum.Buy ? entryValue - exitValue : exitValue - entryValue;
+}
+
+/**
+ * Итог закрытия — ЧИСТЫЙ после торговых комиссий, но БЕЗ фандинга: тот же смысл, что у
+ * Binance, где итог собран из исполнений, а фандинг идёт отдельным потоком начислений.
+ * Биржевое поле `closedPnl` для этого не годится — Bybit вычитает из него ещё и фандинг,
+ * начисленный за жизнь позиции. Проверено на живом счёте 02.09.2026 по 7 закрытиям подряд:
+ * `валовой − openFee − closeFee − closedPnl` совпало с суммой начислений фандинга между
+ * закрытиями до шестого знака (FLOCKUSDT: 105.01403 − 0.91438047 − 2.30448937 − 3.44912156 =
+ * 98.3460386; там, где фандинга не было, остаток ровно ноль). Потребитель, сложивший такой
+ * итог с отдельно прочитанным фандингом, задвоил бы его, поэтому итог считается здесь из
+ * полей самой записи: валовой минус обе комиссии. Тождество «валовой − closedPnl = комиссии»
+ * держится на обеих биржах.
+ */
 export function normalizeBybitClosedPnlList(rawList: BybitClosedPnlRaw[]): ClosedPnl[] {
-  return rawList.map((raw) => ({
-    symbol: raw.symbol,
-    orderId: raw.orderId,
-    side: BYBIT_ORDER_SIDE[raw.side] ?? OrderSideEnum.Buy,
-    quantity: parseFloat(raw.qty),
-    entryPrice: parseFloat(raw.avgEntryPrice),
-    exitPrice: parseFloat(raw.avgExitPrice),
-    closedPnl: parseFloat(raw.closedPnl),
-    timestamp: parseFloat(raw.createdTime),
-  }));
+  return rawList.map((raw) => {
+    const side = BYBIT_ORDER_SIDE[raw.side] ?? OrderSideEnum.Buy;
+
+    return {
+      symbol: raw.symbol,
+      orderId: raw.orderId,
+      side,
+      quantity: parseFloat(raw.qty),
+      entryPrice: parseFloat(raw.avgEntryPrice),
+      exitPrice: parseFloat(raw.avgExitPrice),
+      closedPnl: bybitGrossPnl(raw, side) - parseFloat(raw.openFee) - parseFloat(raw.closeFee),
+      timestamp: parseFloat(raw.createdTime),
+    };
+  });
 }
 
 /**
@@ -982,11 +1088,21 @@ export function buildBybitCommissionIncomeList(rawList: BybitTransactionLogRaw[]
     }));
 }
 
+/**
+ * Сумма записи журнала. У начисления фандинга (`FUNDING`/`SETTLEMENT`) денежный поток
+ * нулевой, а само начисление лежит в поле `funding` (живой счёт 02.09.2026, FLOCKUSDT:
+ * `cashFlow=0`, `funding=-2.3156522` — списано); брать `cashFlow` значило бы всегда отдавать
+ * ноль и выдавать его за факт с биржи. Знак у обеих бирж один: отрицательное = списано.
+ */
+function bybitIncomeAmount(raw: BybitTransactionLogRaw): number {
+  return BYBIT_FUNDING_INCOME_TYPE_SET.has(raw.type) ? parseFloat(raw.funding ?? '0') : parseFloat(raw.cashFlow);
+}
+
 export function normalizeBybitIncomeList(rawList: BybitTransactionLogRaw[]): Income[] {
   return rawList.map((raw) => ({
     symbol: raw.symbol,
     incomeType: raw.type,
-    income: parseFloat(raw.cashFlow),
+    income: bybitIncomeAmount(raw),
     asset: raw.currency,
     timestamp: parseFloat(raw.transactionTime),
     info: { tradeId: raw.tradeId, orderId: raw.orderId },

@@ -123,6 +123,7 @@ Binance (test/fixtures/binanceRaw.ts):
 - `BINANCE_RAW_MARK_PRICE_LIST`, `BINANCE_RAW_OPEN_INTEREST`
 - `BINANCE_RAW_COMMISSION_RATE`, `BINANCE_RAW_INCOME_LIST`
 - `BINANCE_RAW_MODIFY_BATCH_RESPONSE_MIXED` — смесь success + error per-order для тестов `modifyBatchOrders` (используется в `BinanceFutures.modifyBatchOrders.test.ts`)
+- `BINANCE_RAW_FUTURES_ACCOUNT_WITH_POSITION` — счёт с открытой позицией и всеми сводными полями (`totalInitialMargin`, `totalMarginBalance`, ...); держит случай, где занятая маржа не равна разности кошелька со свободными (свободные уже уменьшены на нереализованный итог)
 
 Bybit (test/fixtures/bybitRaw.ts):
 - `BYBIT_RAW_INSTRUMENT_LIST`, `BYBIT_RAW_TICKER_LIST`, `BYBIT_RAW_KLINE_LIST`
@@ -136,6 +137,8 @@ Bybit (test/fixtures/bybitRaw.ts):
 - `BYBIT_WS_RAW_CREATE_BATCH_RESPONSE` — WS-ответ `order.create-batch`
 - `BYBIT_WS_RAW_AMEND_BATCH_RESPONSE` — WS-ответ `order.amend-batch`
 - `BYBIT_WS_RAW_CANCEL_BATCH_RESPONSE` — WS-ответ `order.cancel-batch`
+- `BYBIT_RAW_WALLET_BALANCE_NO_TOTALS` — живой счёт без сводных полей биржи (свободные/маржинальный баланс/начальная маржа пусты) и с пылью в 6 монетах помимо USDT — держит регресс «остатки разных монет сложены как одно число»
+- `BYBIT_RAW_CLOSED_PNL_FLOCKUSDT`, `BYBIT_RAW_TRANSACTION_LOG_SETTLEMENT` — живая пара «закрытие + начисление фандинга» FLOCKUSDT 02.09.2026: держат тождество «валовой − closedPnl = комиссии» и чтение суммы фандинга из поля `funding`
 
 Типизированы через raw-интерфейсы из нормализаторов:
 ```typescript
@@ -198,6 +201,24 @@ it('every field in a real snapshot is either modeled or explicitly ignored', () 
 - `test/normalizers/bybitResponseCompleteness.test.ts` — снапшоты `normalizeBybitOrder`, `normalizeBybitPosition`, `normalizeBybitBalances` (coin-level), `normalizeBybitOrderBook`/`normalizeBybitOrderBookUpdate` (проверяет и envelope-`ts` приоритет над `data.ts`)
 
 `test/normalizers/binanceAggTrade.test.ts` — обычный unit-тест `normalizeBinanceAggTradeFromStream` (maker/taker маппинг в `side`/`isBuyerMaker`, `quoteQuantity`), без MODELED_KEYS-паттерна.
+
+## Инварианты, общие для обеих бирж (test/normalizers/accountBalanceInvariants.test.ts)
+
+Паттерн для правил, которые обязаны держаться на результате нормализации НЕЗАВИСИМО от биржи и конкретных входных данных — не «поле присутствует», а «значение не противоречит себе»:
+
+```typescript
+const CASE_LIST: Array<{ name: string; balances: AccountBalances }> = [
+  { name: 'bybit, сводные поля пришли', balances: normalizeBybitBalances(BYBIT_RAW_WALLET_BALANCE) },
+  { name: 'binance, счёт с позицией', balances: normalizeBinanceFuturesBalances(BINANCE_RAW_FUTURES_ACCOUNT_WITH_POSITION) },
+  // ...
+];
+
+it.each(CASE_LIST)('never reports more free money than the account holds ($name)', ({ balances }) => {
+  expect(balances.totalAvailableBalance).toBeLessThanOrEqual(balances.totalWalletBalance);
+});
+```
+
+`test/normalizers/accountBalanceInvariants.test.ts` держит три инварианта `AccountBalances` на фикстурах обеих бирж (в т.ч. `BYBIT_RAW_WALLET_BALANCE_NO_TOTALS` — счёт без сводных полей биржи): свободных средств не бывает больше кошелька, занятая маржа не бывает отрицательной, `availableBalanceSource` назван всегда (`'exchange'`/`'derived'`/`'unknown'`).
 
 ## Тестирование retry (BaseHttpClient.test.ts)
 
