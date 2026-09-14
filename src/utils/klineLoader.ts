@@ -1,4 +1,5 @@
 import type { ExchangeLogger, Kline } from '../types/common';
+import { sleep } from './sleep';
 
 export const KLINE_CHUNK_SIZE = 200;
 
@@ -69,7 +70,7 @@ export async function loadKlinesInChunks(args: LoadKlinesInChunksArgs): Promise<
 
     if (pauseBetweenChunksMs > 0 && i + chunkSize < symbolList.length) {
       logger.info(`Pause for ${pauseBetweenChunksMs}ms`);
-      await new Promise((resolve) => setTimeout(resolve, pauseBetweenChunksMs));
+      await sleep(pauseBetweenChunksMs);
     }
   }
 

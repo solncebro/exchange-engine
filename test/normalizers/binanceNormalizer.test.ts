@@ -21,6 +21,7 @@ import {
 import { TradeSymbolTypeEnum, PositionSideEnum, MarginModeEnum } from '../../src/types/common';
 import {
   BINANCE_RAW_EXCHANGE_INFO,
+  BINANCE_RAW_EXCHANGE_INFO_SETTLE_VARIANTS,
   BINANCE_RAW_TICKER_LIST,
   BINANCE_RAW_KLINE_LIST,
   BINANCE_RAW_WEBSOCKET_KLINE,
@@ -61,6 +62,13 @@ describe('normalizeBinanceTradeSymbols', () => {
     expect(btc.type).toBe(TradeSymbolTypeEnum.Swap);
     expect(btc.isLinear).toBe(true);
     expect(btc.settle).toBe('USDT');
+  });
+
+  it('takes the settle currency from marginAsset, not from a guess about perpetuals', () => {
+    const result = normalizeBinanceTradeSymbols(BINANCE_RAW_EXCHANGE_INFO_SETTLE_VARIANTS);
+
+    expect(result.get('BTCUSDC')!.settle).toBe('USDC');
+    expect(result.get('ETHUSDT_250627')!.settle).toBe('USDT');
   });
 
   it('marks spot symbol correctly', () => {
@@ -258,40 +266,50 @@ describe('normalizeBinanceTickers', () => {
   it('parses lastPrice as number', () => {
     const result = normalizeBinanceTickers(BINANCE_RAW_TICKER_LIST);
 
-    expect(result.get('BTCUSDT')!.lastPrice).toBe(65432.1);
+    expect(result.get('BTCUSDT')!.lastPrice).toBe(78516.3);
   });
 
   it('parses openPrice as number', () => {
     const result = normalizeBinanceTickers(BINANCE_RAW_TICKER_LIST);
 
-    expect(result.get('BTCUSDT')!.openPrice).toBe(63900);
+    expect(result.get('BTCUSDT')!.openPrice).toBe(78468);
   });
 
   it('parses highPrice and lowPrice', () => {
     const result = normalizeBinanceTickers(BINANCE_RAW_TICKER_LIST);
 
-    expect(result.get('BTCUSDT')!.highPrice).toBe(66000);
-    expect(result.get('BTCUSDT')!.lowPrice).toBe(63500);
+    expect(result.get('BTCUSDT')!.highPrice).toBe(79663.5);
+    expect(result.get('BTCUSDT')!.lowPrice).toBe(78315.5);
   });
 
   it('parses priceChangePercent as number', () => {
     const result = normalizeBinanceTickers(BINANCE_RAW_TICKER_LIST);
 
-    expect(result.get('BTCUSDT')!.priceChangePercent).toBe(2.35);
-    expect(result.get('ETHUSDT')!.priceChangePercent).toBe(-1.2);
+    expect(result.get('BTCUSDT')!.priceChangePercent).toBe(0.062);
+    expect(result.get('ETHUSDT')!.priceChangePercent).toBe(-0.1);
   });
 
   it('parses volume and quoteVolume', () => {
     const result = normalizeBinanceTickers(BINANCE_RAW_TICKER_LIST);
 
-    expect(result.get('BTCUSDT')!.volume).toBe(12345.67);
-    expect(result.get('BTCUSDT')!.quoteVolume).toBe(805000000);
+    expect(result.get('BTCUSDT')!.volume).toBe(1371508.3717);
+    expect(result.get('BTCUSDT')!.quoteVolume).toBe(108187493027.15);
   });
 
-  it('preserves timestamp', () => {
+  it('takes timestamp from closeTime — the 24h window right edge, the only clock the answer carries', () => {
     const result = normalizeBinanceTickers(BINANCE_RAW_TICKER_LIST);
 
-    expect(result.get('BTCUSDT')!.timestamp).toBe(1700000000000);
+    expect(result.get('BTCUSDT')!.timestamp).toBe(1788979852109);
+    expect(result.get('ETHUSDT')!.timestamp).toBe(1788979917852);
+  });
+
+  it('never leaves the timestamp unparseable as a date', () => {
+    const result = normalizeBinanceTickers(BINANCE_RAW_TICKER_LIST);
+
+    for (const ticker of result.values()) {
+      expect(Number.isFinite(ticker.timestamp)).toBe(true);
+      expect(Number.isNaN(new Date(ticker.timestamp).getTime())).toBe(false);
+    }
   });
 });
 
@@ -1050,6 +1068,29 @@ describe('normalizeBinanceIncomeList', () => {
     const result = normalizeBinanceIncomeList([]);
 
     expect(result).toHaveLength(0);
+  });
+
+  it('maps REALIZED_PNL and FUNDING_FEE to their kind', () => {
+    const result = normalizeBinanceIncomeList(BINANCE_RAW_INCOME_LIST);
+
+    expect(result[0].kind).toBe('realizedPnl');
+    expect(result[1].kind).toBe('funding');
+  });
+
+  it('maps COMMISSION to the commission kind', () => {
+    const [row] = normalizeBinanceIncomeList([
+      { symbol: 'BTCUSDT', incomeType: 'COMMISSION', income: '-1.23', asset: 'USDT', time: 1700000002000, info: '', tranId: 123458, tradeId: '791' },
+    ]);
+
+    expect(row.kind).toBe('commission');
+  });
+
+  it('maps an unknown exchange income type to the other kind', () => {
+    const [row] = normalizeBinanceIncomeList([
+      { symbol: 'BTCUSDT', incomeType: 'TRANSFER', income: '100', asset: 'USDT', time: 1700000003000, info: '', tranId: 123459, tradeId: '792' },
+    ]);
+
+    expect(row.kind).toBe('other');
   });
 });
 

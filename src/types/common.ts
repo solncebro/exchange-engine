@@ -1,6 +1,7 @@
 export enum ExchangeNameEnum {
   Binance = 'binance',
   Bybit = 'bybit',
+  Okx = 'okx',
 }
 
 export enum OrderSideEnum {
@@ -91,11 +92,30 @@ export interface PublicStreamConnectionPacking {
 export interface ExchangeConfig {
   apiKey: string;
   secret: string;
+  passphrase?: string;
   recvWindow?: number;
   isDemoMode?: boolean;
   httpsAgent?: unknown;
   publicStreamConnectionPacking?: PublicStreamConnectionPacking;
   lazyOrderbookParse?: boolean;
+}
+
+/**
+ * Что известно о расходе лимита запросов на АДРЕС и о запрете биржи. Считает это биржа по адресу
+ * целиком, поэтому число общее для всех приложений на сервере, и по нему нельзя судить, кто налил;
+ * зато по нему видно, есть ли ещё запас — этого хватает, чтобы не начинать тяжёлое чтение.
+ *
+ * `null` везде значит «не знаем»: у бирж без такого счётчика (Bybit, OKX) он таким и остаётся.
+ */
+export interface ExchangeRateLimitState {
+  /** Израсходованный вес за текущую минуту по последнему ответу биржи. */
+  usedWeight: number | null;
+  /** Потолок веса на минуту. */
+  weightLimit: number | null;
+  /** Когда это было замечено: наблюдение стареет, и старое ни о чём не говорит. */
+  observedAtMs: number | null;
+  /** До какого момента биржа закрыла доступ адресу; `null` — дверь открыта. */
+  bannedUntilMs: number | null;
 }
 
 export interface ExchangeLogger {
@@ -119,15 +139,26 @@ export interface Ticker {
   lowPrice: number;
   priceChangePercent: number;
   volume: number;
+  /**
+   * Оборот за сутки в котируемой валюте. У Binance и Bybit это ФАКТ, посчитанный биржей по каждой
+   * сделке. **У бессрочного контракта OKX это ОЦЕНКА** «объём в монетах × ПОСЛЕДНЯЯ цена»: оборота
+   * в котируемой валюте OKX для контрактов не отдаёт вовсе. У монеты, выросшей за сутки втрое,
+   * такая оценка завышена примерно вдвое — отбор с порогом «оборот больше N» на OKX пропустит
+   * неликвид ровно на разгоне. У спота OKX поле — факт биржи.
+   */
   quoteVolume: number;
   timestamp: number;
+  /** OKX не отдаёт цену маркировки в ответе тикеров — на OKX поле пусто всегда, см. `fetchMarkPrice`. */
   markPrice?: number;
+  /** OKX не отдаёт индексную цену в ответе тикеров — на OKX поле пусто всегда, см. `fetchMarkPrice`. */
   indexPrice?: number;
   bid1Price?: number;
   bid1Size?: number;
   ask1Price?: number;
   ask1Size?: number;
+  /** OKX не отдаёт ставку фандинга в ответе тикеров — на OKX поле пусто всегда, см. `fetchMarkPrice`. */
   fundingRate?: number;
+  /** OKX не отдаёт время следующего фандинга в ответе тикеров — на OKX поле пусто всегда, см. `fetchMarkPrice`. */
   nextFundingTime?: number;
 }
 
@@ -188,6 +219,20 @@ export type PriceLimitRisk =
       source: 'bybitRiskParameters';
       priceLimitRatioX: string;
       priceLimitRatioY: string;
+    }
+  /**
+   * OKX отдаёт границу цены ПРОЦЕНТАМИ в том же ответе списка инструментов. Наружу все три
+   * величины идут в процентах: биржевое `0.03` — это 3, а не 0.03 (доли в библиотеке не
+   * используются нигде).
+   */
+  | {
+      source: 'okxPriceLimitPct';
+      /** Начальная граница, первые десять минут после листинга («0.05 represents 5%»). */
+      initialPriceLimitPercent: string;
+      /** Плавающая граница обычной торговли («0.03 represents 3%»). */
+      floatPriceLimitPercent: string;
+      /** Потолок отклонения цены заявки от индекса («0.15 represents 15%»). */
+      maxPriceLimitPercent: string;
     };
 
 export interface TradingFunding {
@@ -466,9 +511,18 @@ export interface FeeRate {
   takerRate: number;
 }
 
+/**
+ * Вид дохода, приведённый к общему смыслу. Сырое название своё у каждой биржи (`REALIZED_PNL`,
+ * `TRADE`, `SETTLEMENT`…), и разбирать его у потребителя значило бы держать биржевые знания вне
+ * биржевого слоя. `other` — всё, что к трём торговым потокам не относится (переводы, начисления).
+ */
+export type IncomeKind = 'realizedPnl' | 'commission' | 'funding' | 'other';
+
 export interface Income {
   symbol: string;
   incomeType: string;
+  /** Тот же вид, но общими словами: по нему потребитель раскладывает ОДИН ответ на три потока. */
+  kind: IncomeKind;
   income: number;
   asset: string;
   timestamp: number;
@@ -484,9 +538,23 @@ export interface Income {
  * `incomeType: 'funding'`); потребитель складывает их сам. У Binance итог собирается из
  * исполнений, у Bybit — из полей записи закрытия, потому что биржевое поле там уже включает
  * фандинг (02.09.2026).
+ *
+ * ⚠️ OKX отличается СМЫСЛОМ строки. У Binance и Bybit строка — это ОДНО закрытие, строки разных
+ * окон не пересекаются, и посуточное суммирование даёт верный итог за период. У OKX строка одна
+ * на ВСЮ ЖИЗНЬ позиции и обновляется при каждом частичном закрытии («Position's cumulative closed
+ * volume», «Accumulated fee», «It is the latest type if there are several types for the same
+ * position», страницы адресуются `uTime` — временем ОБНОВЛЕНИЯ). Одна и та же позиция попадёт в
+ * ответ и за понедельник (итог 10), и за вторник (итог уже 25 — накопительно), поэтому складывать
+ * итоги OKX по окнам НЕЛЬЗЯ: получится 35 вместо 25. Строка OKX может относиться и к ещё открытой
+ * позиции (частичное закрытие), то есть итог там не окончателен.
  */
 export interface ClosedPnl {
   symbol: string;
+  /**
+   * Binance — номер ЗАКРЫВАЮЩЕЙ заявки, Bybit — тоже номер заявки. **OKX — номер ПОЗИЦИИ**
+   * (`posId`): у истории позиций номера заявки нет вовсе. Сшивать итоги закрытия с историей
+   * заявок по этому полю на OKX не получится.
+   */
   orderId: string;
   side: OrderSideEnum;
   quantity: number;

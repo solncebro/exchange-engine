@@ -2,6 +2,7 @@ import axios from 'axios';
 import type { AxiosError as AxiosErrorType } from 'axios';
 import { BinanceBaseHttpClient } from '../../src/http/BinanceBaseHttpClient';
 import type { BinanceEndpoints, BinanceHttpClientArgs } from '../../src/http/BinanceBaseHttpClient';
+import { resetBinanceRequestGateRegistry } from '../../src/http/binanceRequestGate';
 import { createMockLogger } from '../fixtures/mockLogger';
 import { createMockAxiosInstance } from '../fixtures/mockAxios';
 
@@ -52,6 +53,9 @@ describe('BinanceBaseHttpClient', () => {
 
   beforeEach(() => {
     jest.spyOn(Date, 'now').mockReturnValue(1700000000000);
+    // Память о лимитах — общая на адрес и живёт весь процесс: без сброса запрет из одного теста
+    // держал бы запросы всех следующих.
+    resetBinanceRequestGateRegistry();
 
     mockInstance = createMockAxiosInstance();
     mockedAxios.create.mockReturnValue(mockInstance as any);
@@ -439,8 +443,37 @@ describe('BinanceBaseHttpClient', () => {
 
       await expect(rateClient.fetchKlines('BTCUSDT', '1m')).rejects.toBeDefined();
 
-      expect(rateLogger.error).toHaveBeenCalledWith(expect.stringContaining('IP banned'));
+      expect(rateLogger.error).toHaveBeenCalledWith(expect.stringContaining('refused the address'));
       expect(mockInstance.get).toHaveBeenCalledTimes(1); // 418 must not be retried
+    });
+
+    /**
+     * До 07.09.2026 паузу знали только чтения, и пока биржа держала адрес закрытым, постановка и
+     * отмена заявок продолжали стучаться — именно этим запрет и продлевается.
+     */
+    it('holds a WRITE for the ban as well, not just reads', async () => {
+      (Date.now as unknown as jest.SpyInstance).mockRestore();
+      jest.useFakeTimers();
+
+      const bannedUntilMs = Date.now() + 120_000;
+      mockInstance.get.mockRejectedValueOnce({
+        isAxiosError: true,
+        message: 'banned',
+        response: { status: 418, headers: {}, data: { code: -1003, msg: `IP banned until ${bannedUntilMs}.` } },
+      });
+      await expect(rateClient.fetchKlines('BTCUSDT', '1m')).rejects.toBeDefined();
+
+      mockInstance.post.mockResolvedValue({ data: { orderId: 1 }, status: 200, headers: {} });
+      const orderPromise = rateClient.exposeSignedPost('/test/order', { symbol: 'BTCUSDT' });
+
+      await jest.advanceTimersByTimeAsync(1000);
+      expect(mockInstance.post).not.toHaveBeenCalled();
+
+      await jest.advanceTimersByTimeAsync(120_000);
+      await orderPromise;
+      expect(mockInstance.post).toHaveBeenCalledTimes(1);
+
+      jest.useRealTimers();
     });
   });
 });

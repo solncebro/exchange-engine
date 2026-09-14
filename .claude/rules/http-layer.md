@@ -1,5 +1,12 @@
 # HTTP Layer
 
+Файл разросся за 30k знаков и разделён по теме (07.09.2026) — оба читать как один документ:
+
+| Файл | О чём |
+|---|---|
+| `http-layer.md` (этот файл) | иерархия классов, `BaseHttpClient` (retry, rate-limit extension points), `BybitHttpClient`, `OkxHttpClient`, общие паттерны, type extraction |
+| [`http-layer-binance.md`](http-layer-binance.md) | `BinanceBaseHttpClient`/`BinanceFuturesHttpClient`/`BinanceSpotHttpClient`: подпись, пересдача при протухшей отметке, rate-limit awareness (REQUEST_WEIGHT/HTTP 418/429) |
+
 ## Иерархия классов
 
 ```
@@ -7,7 +14,8 @@ BaseHttpClient (abstract)
 ├── BinanceBaseHttpClient (abstract)
 │   ├── BinanceFuturesHttpClient
 │   └── BinanceSpotHttpClient
-└── BybitHttpClient
+├── BybitHttpClient
+└── OkxHttpClient
 ```
 
 ## BaseHttpClient (src/http/BaseHttpClient.ts)
@@ -23,12 +31,13 @@ BaseHttpClient (abstract)
 - `delete<T>(url, params?, headers?): Promise<T>`
 
 ### Private хелперы:
-- `executeRequest<T>(label, fn): Promise<T>` — общая обёртка для non-GET методов (logging + error handling). Все методы кроме `get` делегируют в `executeRequest`.
+- `executeRequest<T>(label, fn): Promise<T>` — общая обёртка для non-GET методов (logging + error handling). Все методы кроме `get` делегируют в `executeRequest`. **С 07.09.2026 тоже проходит через `beforeRequest()`/`onResponse()`** — раньше паузу по rate-limit знали только чтения, и пока биржа держала адрес закрытым, постановка/отмена заявок продолжали стучаться, чем сам запрет и продлевали (см. «Rate-limit awareness» ниже)
 - `enrichError(error: AxiosError): Error` — трансформирует AxiosError в читаемый Error перед re-throw. Используется в `executeRequest`. Логика:
   1. Binance no-op ошибки (`-4046`, `-4059`) — возвращает оригинальный error без изменений
-  2. Ответ с `code` + `msg` (Binance API error) — `Error("[code] msg")`
+  2. Тело со СВОИМ кодом биржи — `ExchangeError("[code] msg")` с этим кодом (`buildStructuredError`): `code`+`msg` у Binance и OKX, `retCode`+`retMsg` у Bybit. Текст сообщения тот же, что и прежде, а `ExchangeError` наследует `Error` — для тех, кто читает `message`, не изменилось ничего. Код с провода, пришедший строкой, приводится к числу общим `toWireErrorCode` (`src/utils/wireErrorCode.ts`; `toOkxErrorCode` — его переименовывающий вывоз): вызывающие сравнивают код с числовой константой, и строка `'50102'` такому сравнению не отвечает. **Зачем:** отказ, пришедший с кодом 200 в теле, разбирался по полю `code`, а тот же отказ с HTTP-статусом — только разбором текста; у OKX предел частоты 50011 документирован в обоих видах
   3. HTTP-ответ без структурированной ошибки — `Error("HTTP {status}: {message}")`
   4. Fallback (нет response) — оригинальный error
+- `protected get errorExchangeLabel(): string` — обозначение биржи для `ExchangeError` из `enrichError`. База отдаёт пустую строку; называют его КОНКРЕТНЫЕ клиенты: `BinanceFuturesHttpClient` / `BinanceSpotHttpClient` (`'binance'`), `BybitHttpClient` (`'bybit'`), `OkxHttpClient` (`'OKX'`)
 
 ### Специальная обработка no-op ошибок Binance:
 - `BaseHttpClient.handleError()` не логирует как error ответы Binance с кодами `-4046` и `-4059`
@@ -37,9 +46,9 @@ BaseHttpClient (abstract)
 
 ### Rate-limit extension points (`beforeRequest` / `onResponse`)
 - `protected async beforeRequest(): Promise<void>` — no-op хук, вызывается в `get()` **перед** каждой попыткой (включая retry)
-- `protected onResponse(status: number | undefined, headers: unknown): void` — no-op хук, вызывается в `get()` после ответа: и на успехе (`response.status/headers`), и на ошибке (`axiosError.response?.status/headers`)
-- Оба хука вызываются только из `get()` — единственного метода с retry; `post`/`put`/`delete` (через `executeRequest`) их не вызывают
-- `BaseHttpClient` не переопределяет ни один из хуков (пустое тело); `BinanceBaseHttpClient` переопределяет оба для проактивного троттлинга (см. ниже). Bybit и прочие наследники `BaseHttpClient` не переопределяют — поведение не меняется
+- `protected onResponse(status: number | undefined, headers: unknown, body?: unknown): void` — no-op хук (07.09.2026 добавлен третий параметр — `body`), вызывается после ответа: и на успехе (`response.status/headers/data`), и на ошибке (`axiosError.response?.status/headers/data`). Тело нужно наравне с заголовками: настоящий срок бана Binance называет в тексте ошибки `-1003`, не только в заголовке
+- **Оба хука с 07.09.2026 вызываются и из `get()`, и из `executeRequest()`** — то есть из ВСЕХ HTTP-глаголов, не только из чтения. Раньше их вызывал только `get()`, и `post`/`put`/`delete` не ждали и не сообщали о запрете вовсе
+- `BaseHttpClient` не переопределяет ни один из хуков (пустое тело); `BinanceBaseHttpClient` переопределяет оба для проактивного троттлинга (`http-layer-binance.md`, раздел «Rate-limit awareness»). Bybit и прочие наследники `BaseHttpClient` не переопределяют — поведение не меняется
 
 ### BybitHttpClient ошибки:
 - Выбрасывает `ExchangeError` (из `src/errors/ExchangeError.ts`) с полями `code` и `exchange` для структурированной обработки ошибок.
@@ -59,116 +68,7 @@ BaseHttpClient (abstract)
 - **Exponential backoff**: 1s → 2s → 4s
 - **429 с Retry-After**: используется значение заголовка (в секундах → ms)
 
-Rate limiting в `BaseHttpClient` — **только реактивный** (нет proactive throttling). `BinanceBaseHttpClient` добавляет поверх проактивный троттлинг по REQUEST_WEIGHT через `beforeRequest`/`onResponse` (см. ниже) — Bybit и прочие наследники `BaseHttpClient` этим не затронуты.
-
-## BinanceBaseHttpClient (src/http/BinanceBaseHttpClient.ts)
-
-Добавляет Binance-специфичное:
-
-### Signing-обёртки:
-- `signedGet<T>(path, params?)` — подпись строится фабрикой внутри `get()`: `signRequest(params).signedParams` вызывается заново на каждой попытке (retry `get()` и пересдача при протухшей отметке, см. ниже), заголовки — статический `authHeaders()`
-- `signedPost<T>(path, params?)` — то же для POST, через `signedSend` (подпись строится один раз непосредственно перед отправкой — `postWithParams` без внутреннего retry)
-- `signedPut<T>(path, params?)` — то же для PUT (через `putWithParams` + `validateResponse`); используется в `modifyOrder`/`modifyBatchOrders`
-- `signedDelete<T>(path, params?)` — то же для DELETE
-- `authHeaders()` → `{ 'X-MBX-APIKEY': apiKey }`
-
-### Валидация ответов:
-- `validateResponse(data)` — бросает `ExchangeError` при `code < 0` в ответе Binance API
-
-### Private хелперы:
-- `signRequest(params)` → `{ signedParams, headers }` — единая точка подписи (`timestamp = Date.now()` берётся в момент вызова), используется всеми signed-методами
-- `signedSend<T>(params, send)` — подписывает `params` один раз и сразу передаёт в `send(signedParams, headers)`; используется `signedPost`/`signedPut`/`signedDelete`
-- `signedRequest<T>(send: () => Promise<T>)` — общая точка для всех signed-методов (включая `signedGet`, где `send` сам оборачивает лениво пересобираемую подпись): выполняет `send()`, валидирует ответ через `validateResponse`, и при отказе биржи по протухшей отметке времени (см. «Пересдача при протухшей отметке» ниже) пересобирает запрос через повторный вызов `send()` — до `STALE_TIMESTAMP_ATTEMPT_LIMIT` (2) попыток
-- `buildOptionalSymbolParams(symbol?)` → `Record<string, ...>` — protected, строит params с optional symbol (используется в `getOpenOrders` и наследниках)
-
-### Binance signing (src/auth/binanceAuth.ts):
-1. Добавить `timestamp = Date.now()` и `recvWindow = BINANCE_RECV_WINDOW_MS` (5000) к params
-2. Собрать query string через `serializeQueryParams` (`src/utils/serializeQueryParams.ts`) — `URLSearchParams` поверх `Object.entries`, сохраняет порядок вставки
-3. `signature = HMAC-SHA256(queryString, secret)` → hex
-4. Добавить `signature` к params
-
-**Wire-parity (критично):** `BaseHttpClient` настраивает axios `paramsSerializer.serialize = serializeQueryParams` — та же функция, что и при подписи. Это гарантирует, что строка, реально отправляемая axios, байт-в-байт совпадает с подписанной (иначе спецсимволы `,`/`:` в payload, например JSON batch-ордеров, ломают подпись → Binance `-1022`). Тот же сериализатор применяется к Bybit GET (`BybitHttpClient.authenticatedGet`), где Bybit REST recvWindow = `BYBIT_RECV_WINDOW` (7000).
-
-### Подпись строится непосредственно перед отправкой (0.22.0)
-
-И Binance, и Bybit подписывают запрос заново на каждую фактическую отправку, а не один раз заранее — иначе отметка времени, поставленная до ожидания по rate-limit/паузы перед повтором, приезжает на биржу уже протухшей (биржа меряет возраст на приёме).
-
-- **Binance**: `signedGet` передаёт в `get()` фабрику параметров (`() => this.signRequest(params).signedParams`) — она вызывается на каждой попытке внутри `get()`. `signedPost`/`signedPut`/`signedDelete` подписывают один раз внутри `signedSend`, но сам `signedSend` обёрнут в `signedRequest` — при отказе по протухшей отметке `signedRequest` вызывает `send` заново, и та же замыкающая функция пересобирает подпись со свежим `timestamp`
-- **Bybit**: `authenticatedGet` передаёт в `get()` фабрику заголовков (`() => this.buildAuthHeaders(serializeQueryParams(params))`) — подпись в заголовке (`X-BAPI-SIGN`/`X-BAPI-TIMESTAMP`) пересобирается на каждой попытке `get()`. Query-параметры не несут отметку времени у Bybit (она только в заголовках), поэтому им фабрика не нужна
-
-### Пересдача при протухшей отметке времени (-1021, src/http/binanceTimestampError.ts)
-
-Только Binance (Bybit-эквивалента нет — не требуется, т.к. отдельного HTTP 400 «stale timestamp» кода в текущем флоу не встречалось).
-
-- `BINANCE_STALE_TIMESTAMP_CODE = -1021` — код Binance «Timestamp for this request is outside of the recvWindow»
-- `isBinanceStaleTimestampError(error)` → `boolean` — распознаёт код и в `ExchangeError.code`, и в тексте обогащённого `Error` (`enrichError` в `BaseHttpClient` форматирует его как `[-1021] ...`)
-- `signedRequest` в `BinanceBaseHttpClient` — единственное место, где это используется: при поимке ошибки, если `isBinanceStaleTimestampError(error)` истинно и попыток ещё не исчерпано (`STALE_TIMESTAMP_ATTEMPT_LIMIT = 2` — то есть одна пересдача), запрос собирается и подписывается заново с текущим `Date.now()`. HTTP 400 не входит в `isRetryable()` `BaseHttpClient`, поэтому обычный retry-механизм `get()` эту ошибку не трогает — пересдача идёт отдельным, более узким путём
-- Применяется ко всем четырём signed-обёрткам: `signedGet`/`signedPost`/`signedPut`/`signedDelete` — включая постановку заявки (`createOrder` → `signedPost`), где повтор безопасен именно потому, что отвергнутый запрос до книги биржи не дошёл
-
-### Rate-limit awareness (REQUEST_WEIGHT / HTTP 418, src/http/binanceRateLimit.ts)
-
-Binance банит IP по совокупному весу запросов (`REQUEST_WEIGHT`, 2400/мин) и отвечает HTTP 418 при уже случившемся бане. `BinanceBaseHttpClient` переопределяет `beforeRequest`/`onResponse`, подключая проактивный троттлинг поверх реактивного retry `BaseHttpClient` — покрывает все чтения через `get()` (дозагрузка klines, опрос тикеров, переподписка kline-watchdog).
-
-- `weightCooldownUntilMs` — приватное поле instance, unix ms до которого следующий `get()` должен ждать
-- `beforeRequest()` — если `weightCooldownUntilMs > Date.now()`, ждёт разницу через `setTimeout` перед запросом
-- `onResponse(status, headers)` — парсит заголовок `x-mbx-used-weight-1m` (`parseUsedWeight1m`) и `retry-after` (`parseRetryAfterMs`), передаёт в чистую функцию `resolveRateLimitCooldownMs({ status, usedWeight, retryAfterMs })`:
-  - `status === 418` (IP уже забанен) → cooldown = `min(retryAfterMs ?? BINANCE_BAN_DEFAULT_COOLDOWN_MS, BINANCE_BAN_MAX_COOLDOWN_MS)` (30s по умолчанию, максимум 60s), логируется `logger.error('Binance HTTP 418 — IP banned; backing off reads for ...ms')`
-  - `usedWeight >= BINANCE_REQUEST_WEIGHT_LIMIT_PER_MIN * BINANCE_WEIGHT_THROTTLE_RATIO` (2400 × 0.8 = 1920) → cooldown = `BINANCE_WEIGHT_NEAR_CAP_COOLDOWN_MS` (2000ms), логируется `logger.warn('Binance REQUEST_WEIGHT near cap ...')`
-  - иначе → `0` (без троттлинга)
-  - если cooldown > 0 → `weightCooldownUntilMs = Date.now() + cooldownMs`
-- Константы: `BINANCE_REQUEST_WEIGHT_LIMIT_PER_MIN = 2400`, `BINANCE_WEIGHT_THROTTLE_RATIO = 0.8`, `BINANCE_WEIGHT_NEAR_CAP_COOLDOWN_MS = 2000`, `BINANCE_BAN_DEFAULT_COOLDOWN_MS = 30000`, `BINANCE_BAN_MAX_COOLDOWN_MS = 60000`
-- HTTP 418 не входит в `isRetryable()` (`BaseHttpClient`) — не ретраится автоматически; back-off применяется только к следующему `get()`-вызову через `beforeRequest`, а не к текущему запросу
-- Логика вынесена в чистые функции без побочных эффектов (`parseUsedWeight1m`, `parseRetryAfterMs`, `resolveRateLimitCooldownMs`) — тестируются изолированно от HTTP-клиента (`test/http/binanceRateLimit.test.ts`)
-
-### Общие эндпоинты (реализованы в base):
-- `fetchExchangeInfo()` → `BinanceExchangeInfoRaw` — GET `endpoints.exchangeInfo`
-- `fetchTickers()` → `BinanceTicker24hrRaw[]` — GET `endpoints.ticker24hr`
-- `fetchOrderBook(symbol, limit?)` → `BinanceOrderBookRaw` — GET `endpoints.depth`
-- `fetchKlines(symbol, interval, options?)` → GET `endpoints.klines`
-- `fetchTrades(symbol, limit?)` → `BinancePublicTradeRaw[]` — GET `endpoints.trades`
-- `fetchAccount()` → `BinanceAccountRaw` — signedGet `endpoints.account`
-- `createOrder(params)` → `BinanceOrderResponseRaw` — signedPost `endpoints.order`
-- `cancelOrder(symbol, orderId)` → `BinanceOrderResponseRaw` — signedDelete `endpoints.order`
-- `getOrder(symbol, orderId)` → `BinanceOrderResponseRaw` — signedGet `endpoints.order`
-- `getOpenOrders(symbol?)` → `BinanceOrderResponseRaw[]` — signedGet `endpoints.openOrders`
-- `getAllOrders(symbol, options?)` → `BinanceOrderResponseRaw[]` — signedGet `endpoints.allOrders`
-- `createListenKey()` / `keepAliveListenKey()` / `deleteListenKey()` — для user data stream
-
-### BinanceEndpoints интерфейс:
-```
-exchangeInfo, ticker24hr, depth, klines, trades,
-order, openOrders, allOrders, account, listenKey
-```
-
-Реализация в подклассах — разные префиксы путей:
-- Futures: `/fapi/v1/*` и `/fapi/v3/account`
-- Spot: `/api/v3/*`
-
-## BinanceFuturesHttpClient
-
-Дополнительные методы (фьючерсные):
-- `fetchFuturesAccount()` → `BinanceFuturesAccountRaw` — signedGet `endpoints.account`
-- `fetchFundingInfo(symbol?)` → `BinanceFundingInfoRaw[]` — GET `/fapi/v1/fundingInfo` (public)
-- `fetchPositionMode()` → signedGet `/fapi/v1/positionSide/dual`
-- `fetchMarkPrice(symbol?)` → `BinanceMarkPriceRaw | BinanceMarkPriceRaw[]` — GET `/fapi/v1/premiumIndex`
-- `fetchFundingRateHistory(symbol, options?)` → `BinanceFundingRateHistoryRaw[]` — GET `/fapi/v1/fundingRate`
-- `fetchPositionRisk(symbol?)` → `BinancePositionRiskRaw[]` — signedGet `/fapi/v3/positionRisk`
-- `fetchOpenInterest(symbol)` → `BinanceOpenInterestRaw` — GET `/fapi/v1/openInterest`
-- `setLeverage(symbol, leverage)` → signedPost `/fapi/v1/leverage`
-- `setMarginType(symbol, marginType)` → signedPost `/fapi/v1/marginType`
-- `setPositionMode(dualSidePosition)` → signedPost `/fapi/v1/positionSide/dual`
-- `modifyOrder(params)` → `BinanceOrderResponseRaw` — PUT с ручным signing через `buildBinanceSignedParams`
-- `cancelAllOrders(symbol)` → signedDelete `/fapi/v1/allOpenOrders`
-- `createBatchOrders(orderList)` → `BinanceOrderResponseRaw[]` — signedPost `/fapi/v1/batchOrders`. Max 5 ордеров на запрос (chunking — на уровне `BinanceFutures.createBatchOrders`)
-- `cancelBatchOrders(symbol, orderIdList)` → signedDelete `/fapi/v1/batchOrders`. Max 10 ордеров (chunking — на уровне `BinanceFutures.cancelBatchOrders`). Параметр `orderIdList` сериализуется через `serializeBinanceOrderIdList` (`src/utils/binanceOrderId.ts`) — массив **чисел** без кавычек (`[123,456]`), НЕ `JSON.stringify` строкового массива: строковый вариант (`["123"]`) Binance отвергает кодом `-1130` («Data sent for parameter 'orderidlist' is not valid»), и весь запрос падает исключением из `validateResponse`. Нечисловой идентификатор бросает ошибку в сериализаторе (защита от `JSON.stringify([NaN]) === '[null]'`)
-- `modifyBatchOrders(orderList)` → `Array<Record<string, unknown>>` (смесь успехов и ошибок per-order; элементы с `code < 0` — ошибки) — PUT `/fapi/v1/batchOrders` с ручным signing через `buildBinanceSignedParams` (аналогично `modifyOrder`). Max 5 ордеров (chunking — на уровне `BinanceFutures.modifyBatchOrders`)
-- `fetchCommissionRate(symbol?)` → `BinanceCommissionRateRaw` — signedGet `/fapi/v1/commissionRate`
-- `fetchIncome(options?: FetchIncomeArgs)` → `BinanceIncomeRaw[]` — signedGet `/fapi/v1/income`. При `options.incomeType === 'funding'` добавляет параметр `incomeType=FUNDING_FEE` (пробрасывается на биржу для серверной фильтрации)
-- `modifyPositionMargin(symbol, amount, type)` → signedPost `/fapi/v1/positionMargin`
-
-## BinanceSpotHttpClient
-
-Только переопределяет `endpoints` (все методы из base). Нет дополнительных методов.
+Rate limiting в `BaseHttpClient` — **только реактивный** (нет proactive throttling). `BinanceBaseHttpClient` добавляет поверх проактивный троттлинг по REQUEST_WEIGHT через `beforeRequest`/`onResponse` (`http-layer-binance.md`, раздел «Rate-limit awareness») — Bybit и прочие наследники `BaseHttpClient` этим не затронуты.
 
 ## BybitHttpClient (src/http/BybitHttpClient.ts)
 
@@ -212,7 +112,8 @@ order, openOrders, allOrders, account, listenKey
 - `getPositionList(category, options?)` → `BybitListResponse<BybitPositionRaw>` — GET `/v5/position/list`
 - `getClosedPnl(category, options?)` → `BybitListResponse<BybitClosedPnlRaw>` — GET `/v5/position/closed-pnl`
 - `fetchFeeRate(category, options?)` → `BybitListResponse<BybitFeeRateRaw>` — GET `/v5/account/fee-rate`
-- `fetchTransactionLog(options?: FetchTransactionLogArgs)` → `BybitListResponse<BybitTransactionLogRaw>` — GET `/v5/account/transaction-log`. `FetchTransactionLogArgs extends CategoryFilterArgs` добавляет `startTime?`/`endTime?`, пробрасываемые как есть в params
+- `fetchTransactionLog(options?: FetchTransactionLogArgs)` → `BybitListResponse<BybitTransactionLogRaw>` — GET `/v5/account/transaction-log`, ОДНА страница. `FetchTransactionLogArgs extends CategoryFilterArgs` добавляет `startTime?`/`endTime?`/`cursor?` (10.09.2026), пробрасываемые как есть в params
+- `fetchAllTransactionLog(options?: FetchTransactionLogArgs)` → `BybitTransactionLogRaw[]` — журнал операций за окно ЦЕЛИКОМ: страницы дочитываются по `nextPageCursor` (конец — отсутствие поля или пустая строка), потолок `BYBIT_TRANSACTION_LOG_MAX_PAGE_COUNT` (200, `src/constants/bybit.ts`). В отличие от списка инструментов при потолке НЕ возвращает частичный результат, а бросает «reached the page count limit»: по усечённому журналу посчитают фандинг и не узнают, что половины начислений в нём не было. Единственный потребитель — `BybitBaseClient.fetchIncome`
 - `setLeverage(args)` → POST `/v5/position/set-leverage`
 - `switchIsolated(args)` → POST `/v5/position/switch-isolated`
 - `fetchWalletBalance(accountType)` → `BybitResponse<BybitWalletBalanceRaw>` — GET `/v5/account/wallet-balance`
@@ -220,7 +121,91 @@ order, openOrders, allOrders, account, listenKey
 - `setMarginMode(mode)` → POST `/v5/account/set-margin-mode`
 - `setPositionMode(category, mode, coin?)` → POST `/v5/position/switch-mode`
 - `setTradingStop(params)` → POST `/v5/position/trading-stop`
-- `fetchAllInstrumentsInfo(category)` → `BybitInstrumentInfoRaw[]` — пагинация через cursor, возвращает полный список инструментов
+- `fetchAllInstrumentsInfo(category)` → `BybitInstrumentInfoRaw[]` — пагинация через cursor, возвращает полный список инструментов. Число страниц ограничено `BYBIT_INSTRUMENTS_MAX_PAGE_COUNT` (20, `src/constants/bybit.ts`): страница — 1000 записей, всех инструментов на порядок меньше, поэтому потолок ничего не отсекает — он останавливает сбойный курсор, который биржа отдаёт бесконечно. При достижении потолка — `logger.warn(... reached the page count limit ...; returning a partial result)`, как у OKX (`OKX_MAX_PAGE_COUNT`) и Binance (`USER_TRADE_MAX_PAGE_COUNT`)
+- `buildCategoryParams(category, options?)` собирает необязательные параметры общим `buildOptionalParams` (`src/utils/httpParams.ts`) вместо девяти написанных вручную проверок. Помощник кладёт только заданные значения и СОХРАНЯЕТ порядок объявления — по той же строке строится подпись Bybit. Числа НЕ приводит к строкам: приведение — необязательный преобразователь помощника, и его подставляет только OKX
+
+## OkxHttpClient (src/http/OkxHttpClient.ts)
+
+Независимый от Binance и Bybit — наследует `BaseHttpClient` напрямую. Один клиент на оба рынка: инструмент задаётся параметром `instType` (`'SWAP' | 'SPOT'`).
+
+### Кодовая фраза
+Конструктор бросает `ExchangeError('OKX API requires a passphrase (ExchangeConfig.passphrase)', 'OKX_PASSPHRASE_REQUIRED', 'OKX')` при пустой строке. Это и есть точка, где `new Exchange(ExchangeNameEnum.Okx, ...)` отказывает без кодовой фразы.
+
+### OKX signing (src/auth/okxAuth.ts):
+1. Строка для подписи: `${timestamp}${method}${requestPath}${body}` — путь берётся ВМЕСТЕ с параметрами запроса (`buildRequestPath` сериализует их тем же `serializeQueryParams`, что и axios: подписанная и отправленная строки байт-в-байт совпадают).
+2. `sign = HMAC-SHA256(...)` → **base64** (не hex, как у соседей).
+3. Заголовки: `OK-ACCESS-KEY`, `OK-ACCESS-SIGN`, `OK-ACCESS-TIMESTAMP` (ISO 8601 от `Date.now()`), `OK-ACCESS-PASSPHRASE`.
+4. В демо-режиме ко ВСЕМ запросам (в том числе публичным) добавляется `x-simulated-trading: 1` — адрес REST у OKX один и тот же.
+
+Подпись собирается **в момент отправки**: `signedGet` передаёт в `get()` фабрику заголовков, поэтому на каждой повторной попытке отметка времени свежая.
+
+### Валидация ответов
+- `validateResponse(response)` — сначала СТОРОЖ ФОРМАТА (`isOkxApiResponseShape`): тело обязано быть объектом с текстовым полем `code`, иначе `ExchangeError('OKX_UNEXPECTED_RESPONSE_FORMAT')`. Без него тело с кодом 200, но не в формате OKX (страница защиты перед биржей, посредник со своим текстом) роняло клиент внутренней ошибкой языка «Cannot read properties of undefined (reading 'trim')», а повтор по превышению частоты, ловящий только `ExchangeError` с кодом 50011, мимо неё пролетал. Соседи защищены так же: Bybit смотрит `retCode !== undefined`, Binance — `'code' in response`. Дальше `code !== '0'` → `ExchangeError` с числовым кодом (`toOkxErrorCode`).
+- `validateOrderResponse(response)` — исход ОТДЕЛЬНОЙ заявки лежит в поэлементном `sCode`/`sMsg`, и он проверяется ВСЕГДА, а не только при неуспешном конверте: биржа отвечает `code: '0'` и кладёт в запись отказ (`sCode: '51008'`) с пустым номером заявки. Пустой ответ → `OKX_EMPTY_ORDER_RESPONSE`.
+- `validateBatchResponse(response)` — пропускает коды из `OKX_BATCH_ACCEPTED_CODE_LIST` (`'0'`, `'1'`, `'2'`): при частичном и даже полном отказе поэлементные исходы лежат внутри, и отдать их вызывающему важнее, чем бросить исключение. **Но если записей нет вовсе, а код не успешный**, пакет отвергнут ДО поштучной обработки, и единственная причина лежит в `msg` конверта — тогда бросается `ExchangeError` с этим текстом; иначе текст биржи не доходил до вызывающего никогда.
+- `logExpectedErrorCode` — коды из `OKX_EXPECTED_ERROR_CODE_LIST` (51603, 51400, 51503) пишутся уровнем info: их разбирает вызывающий, это не аварии.
+
+### Повтор при пределе частоты и пересдача при протухшей отметке
+- `getValidated` — при `ExchangeError` с кодом `OKX_RATE_LIMIT_ERROR_CODE` (50011) ждёт `OKX_RATE_LIMIT_RETRY_DELAY_MS` (1000 мс) и повторяет запрос ОДИН раз.
+- `signedRequest(send)` — обёртка всех подписанных запросов: при отказе, распознанном `isOkxStaleTimestampError` (`src/http/okxTimestampError.ts`, код 50102), запрос собирается и подписывается заново; попыток `OKX_STALE_TIMESTAMP_ATTEMPT_LIMIT` (2), то есть одна пересдача.
+- `signedPost` дополнительно превращает `code === '50102'` в исключение ДАЖЕ при HTTP 200: OKX отвечает на протухшую отметку успешным HTTP-кодом, и без этого пересдача не сработала бы.
+
+### Постраничное дочитывание
+- `fetchAllPendingOrders(args)` — страницы по `OKX_ORDER_PAGE_LIMIT` (100), следующая адресуется последним `ordId`; потолок `OKX_MAX_PAGE_COUNT` (50) с предупреждением о неполном результате.
+- `fetchAllPendingAlgoOrders(args)` — то же по `algoId`. Без дочитывания список защитных заявок молча обрывался бы на сотне. Вызывается клиентом по одному разу на КАЖДЫЙ вид условной заявки — вход `orders-algo-pending` принимает перечисление через запятую только для пары `conditional,oco`.
+- `fetchIndexTickers({ instId?, quoteCcy? })` → `GET /api/v5/market/index-tickers` (публичная, «Either quoteCcy or instId is required»). Индексная цена приходит ТОЛЬКО отсюда: ответ цены маркировки её не несёт. Обозначение индекса — контракт без хвоста `-SWAP`.
+- `fetchInstruments`, `fetchBills` и прочее постранично НЕ дочитываются (у журнала начислений полная страница даёт отказ на уровне клиента — см. `exchange-layer-okx.md`).
+
+### Приватные хелперы
+- `buildRequestPath(path, params)` — путь с сериализованной строкой запроса (нужен для подписи).
+- `buildOkxOptionalParams(entryList)` — тот же общий `buildOptionalParams` (`src/utils/httpParams.ts`), что и у Bybit, но с преобразователем `toOkxParamValue`: OKX ждёт параметры строками. Преобразователь — необязательный второй аргумент помощника (`HttpParamValueTransform`), без него значения идут как есть (Bybit оставляет числа числами).
+- `buildTimeRangeParams(options)` — `after` / `before` / `limit`.
+- `publicGet` / `signedGet` / `signedPost` — три способа отправки.
+
+### Эндпоинты
+
+Публичные (`publicGet`):
+- `fetchInstruments(instType)` → `/api/v5/public/instruments`
+- `fetchTickers(instType)` → `/api/v5/market/tickers`
+- `fetchCandles(args)` / `fetchHistoryCandles(args)` → `/api/v5/market/candles` и `/api/v5/market/history-candles`
+- `fetchOrderBook(instId, depth?)` → `/api/v5/market/books`
+- `fetchTrades(instId, limit?)` → `/api/v5/market/trades`
+- `fetchMarkPrice(instType, instId?)` → `/api/v5/public/mark-price`
+- `fetchOpenInterest(instType, instId)` → `/api/v5/public/open-interest`
+- `fetchFundingRate(instId)` → `/api/v5/public/funding-rate`
+- `fetchFundingRateHistory(args)` → `/api/v5/public/funding-rate-history`
+
+Счёт и позиции (`signedGet` / `signedPost`):
+- `fetchBalance()` → `/api/v5/account/balance`
+- `fetchPositions(args)` → `/api/v5/account/positions`
+- `fetchPositionsHistory(args)` / `fetchAllPositionsHistory(args)` → `/api/v5/account/positions-history` (постранично, курсор — `uTime` закрытия)
+- `fetchAccountConfig()` → `/api/v5/account/config`
+- `setPositionMode(posMode)` → `/api/v5/account/set-position-mode`
+- `setLeverage(args)` → `/api/v5/account/set-leverage`
+- `fetchTradeFee(args)` → `/api/v5/account/trade-fee`
+- `fetchBills(args)` → `/api/v5/account/bills` либо `/api/v5/account/bills-archive` (по признаку `isArchive`)
+
+Обычная книга заявок:
+- `placeOrder(params)` → `/api/v5/trade/order`
+- `placeBatchOrders(paramsList)` → `/api/v5/trade/batch-orders`
+- `cancelOrder(params)` → `/api/v5/trade/cancel-order`
+- `cancelBatchOrders(paramsList)` → `/api/v5/trade/cancel-batch-orders`
+- `amendOrder(params)` / `amendBatchOrders(paramsList)` → `/api/v5/trade/amend-order` и `/api/v5/trade/amend-batch-orders`
+- `fetchOrder(args)` → `/api/v5/trade/order`
+- `fetchPendingOrders(args)` / `fetchAllPendingOrders(args)` → `/api/v5/trade/orders-pending`
+- `fetchOrderHistory(args)` / `fetchAllOrderHistory(args)` → `/api/v5/trade/orders-history` либо `-archive` (постранично, курсор — `ordId`)
+
+Условная (algo) служба:
+- `placeAlgoOrder(params)` → `/api/v5/trade/order-algo`
+- `cancelAlgoOrders(paramsList)` → `/api/v5/trade/cancel-algos`
+- `amendAlgoOrder(params)` → `/api/v5/trade/amend-algos`
+- `fetchAlgoOrder(args)` → `/api/v5/trade/order-algo`
+- `fetchPendingAlgoOrders(args)` / `fetchAllPendingAlgoOrders(args)` → `/api/v5/trade/orders-algo-pending`
+- `fetchAlgoOrderHistory(args)` / `fetchAllAlgoOrderHistory(args)` → `/api/v5/trade/orders-algo-history` (постранично, курсор — `algoId`; окна по времени этот вход не принимает)
+
+Все пять постраничных чтений (`fetchAllPendingOrders`, `fetchAllPendingAlgoOrders`, `fetchAllOrderHistory`, `fetchAllAlgoOrderHistory`, `fetchAllPositionsHistory`) идут через один приватный `fetchAllPages<T>(args: FetchOkxAllPagesArgs<T>)`: страница читается через `fetchPage(after)`, курсор берётся из последней записи (`resolveCursor`), чтение прекращается на короткой странице, по достижении `maxRecordCount` (если задан) либо на `OKX_MAX_PAGE_COUNT` — в последнем случае с предупреждением в журнал.
+
+Пакетные ручки принимают тело-МАССИВ (`HttpPostBody` в `BaseHttpClient.types.ts` допускает и объект, и массив) — у OKX пачка передаётся именно так.
 
 ## Паттерн для optional symbol
 
@@ -253,4 +238,7 @@ async fetchSomething(symbol: string, options?: FetchPageWithLimitArgs): Promise<
 - `BaseHttpClient.types.ts` — BaseHttpClientArgs
 - `BinanceBaseHttpClient.types.ts` — BinanceEndpoints, BinanceHttpClientArgs, BinanceErrorResponse, BinanceListenKeyResponse
 - `BybitHttpClient.types.ts` — BybitHttpClientArgs, BybitApiResponse, BybitListResponse, BybitResponse, BybitOrderBookRaw (дублируется из normalizer), FetchBybitKlineArgs, SetBybitLeverageArgs, SwitchBybitIsolatedArgs, SymbolFilterArgs, SymbolLimitFilterArgs (`orderFilter?: string` — 0.16.0, для `fetchOpenConditionalOrders`), PeriodFilterArgs, CategoryFilterArgs, FetchTransactionLogArgs (`extends CategoryFilterArgs`, добавляет `startTime?`/`endTime?` — 0.18.2, для `fetchTransactionLog`), BybitAmendBatchOrderRaw, BybitAmendBatchOrderExtInfo, BybitAmendBatchOrdersResponse (структура аналогична `BybitCancelBatchOrdersResponse`: `result.list[]` — основные данные с `orderId`/`orderLinkId`, `retExtInfo.list[]` — per-order success/error через `{ code, msg }`)
-- `binanceRateLimit.ts` (не `.types.ts`, но чистый модуль без класса) — константы + чистые функции `parseUsedWeight1m`, `parseRetryAfterMs`, `resolveRateLimitCooldownMs` для проактивного троттлинга Binance (см. «Rate-limit awareness» выше)
+- `OkxHttpClient.types.ts` — OkxHttpClientArgs, OkxApiResponse<T> (`{ code, msg, data }`), OkxInstrumentType (`'SWAP' | 'SPOT'`), OkxTimeRangeArgs (`after`/`before`/`limit`) и наследующие его Fetch*Args, SetOkxLeverageArgs, FetchOkxTradeFeeArgs, FetchOkxBillsArgs, FetchOkxOrderArgs, FetchOkxPendingOrdersArgs, FetchOkxOrderHistoryArgs, CancelOkxOrderParams, CancelOkxAlgoOrderParams, FetchOkxAlgoOrderArgs, FetchOkxPendingAlgoOrdersArgs, FetchOkxAlgoOrderHistoryArgs
+- `okxTimestampError.ts` — `isOkxStaleTimestampError(error)` (код 50102 в `ExchangeError` или в тексте обогащённой ошибки)
+- `binanceRateLimit.ts` (не `.types.ts`, но чистый модуль без класса) — константы + чистые функции `parseUsedWeight1m`, `parseRetryAfterMs`, `parseBinanceBanUntilMs`, `observeRateLimitResponse` для проактивного троттлинга Binance (см. «Rate-limit awareness» выше)
+- `binanceRequestGate.ts` — класс `BinanceRequestGate` (память лимитов и очередь ожидания, общая на адрес) + реестр `getBinanceRequestGate(baseUrl)`/`resetBinanceRequestGateRegistry()`

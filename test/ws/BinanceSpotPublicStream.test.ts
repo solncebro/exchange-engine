@@ -1,4 +1,4 @@
-import type { BinanceTicker24hrRaw, BinanceWebSocketKlineRaw } from '../../src/normalizers/binanceNormalizer';
+import type { BinanceMiniTickerWebSocketRaw, BinanceWebSocketKlineRaw } from '../../src/normalizers/binanceNormalizer';
 import { BinanceSpotPublicStream } from '../../src/ws/BinanceSpotPublicStream';
 import { createMockLogger } from '../fixtures/mockLogger';
 
@@ -22,16 +22,16 @@ jest.mock('@solncebro/websocket-engine', () => {
   };
 });
 
-const MOCK_TICKER_RAW: BinanceTicker24hrRaw = {
-  symbol: 'BTCUSDT',
-  lastPrice: '50000',
-  openPrice: '48000',
-  highPrice: '51000',
-  lowPrice: '49000',
-  priceChangePercent: '2.5',
-  volume: '1000',
-  quoteVolume: '50000000',
-  time: 1700000000000,
+const MOCK_MINI_TICKER_RAW: BinanceMiniTickerWebSocketRaw = {
+  e: '24hrMiniTicker',
+  E: 1700000000000,
+  s: 'BTCUSDT',
+  c: '78462.73000000',
+  o: '78384.26000000',
+  h: '79760.00000000',
+  l: '78060.03000000',
+  v: '13831.04130000',
+  q: '1091946639.77967220',
 };
 
 const MOCK_KLINE_RAW: BinanceWebSocketKlineRaw = {
@@ -146,16 +146,20 @@ describe('BinanceSpotPublicStream', () => {
   });
 
   describe('handleMessage', () => {
-    it('handles e: 24hrMiniTicker array messages', () => {
+    it('handles the bare array frame the /ws endpoint really sends', () => {
       const stream = new BinanceSpotPublicStream({ webSocketUrl: url, logger: mockLogger, onNotify: undefined, label: 'BinanceSpotPublicStream' });
       const handler = jest.fn();
       stream.subscribeAllTickers(handler, []);
 
-      capturedOnMessage!({ e: '24hrMiniTicker', data: [MOCK_TICKER_RAW] });
+      capturedOnMessage!([MOCK_MINI_TICKER_RAW]);
 
       expect(handler).toHaveBeenCalledTimes(1);
-      const tickerMap = handler.mock.calls[0][0];
-      expect(tickerMap).toBeInstanceOf(Map);
+
+      const tickerBySymbol = handler.mock.calls[0][0];
+
+      expect(tickerBySymbol).toBeInstanceOf(Map);
+      expect(tickerBySymbol.get('BTCUSDT').lastPrice).toBeCloseTo(78462.73);
+      expect(tickerBySymbol.get('BTCUSDT').timestamp).toBe(1700000000000);
     });
 
     it('handles stream: !miniTicker@arr messages', () => {
@@ -163,9 +167,21 @@ describe('BinanceSpotPublicStream', () => {
       const handler = jest.fn();
       stream.subscribeAllTickers(handler, []);
 
-      capturedOnMessage!({ stream: '!miniTicker@arr', data: [MOCK_TICKER_RAW] });
+      capturedOnMessage!({ stream: '!miniTicker@arr', data: [MOCK_MINI_TICKER_RAW] });
 
       expect(handler).toHaveBeenCalledTimes(1);
+    });
+
+    it('handles the bare kline frame the /ws endpoint really sends', () => {
+      const stream = new BinanceSpotPublicStream({ webSocketUrl: url, logger: mockLogger, onNotify: undefined, label: 'BinanceSpotPublicStream' });
+      const handler = jest.fn();
+      stream.subscribeKlines('BTCUSDT', '1m', handler);
+
+      capturedOnMessage!({ e: 'kline', E: 1700000000000, s: 'BTCUSDT', k: { ...MOCK_KLINE_RAW, i: '1m' } });
+
+      expect(handler).toHaveBeenCalledTimes(1);
+      expect(handler.mock.calls[0][0]).toBe('BTCUSDT');
+      expect(handler.mock.calls[0][1].closePrice).toBe(50500);
     });
 
     it('handles kline messages from stream', () => {
@@ -198,7 +214,7 @@ describe('BinanceSpotPublicStream', () => {
       });
       stream.subscribeAllTickers(handler, []);
 
-      capturedOnMessage!({ stream: '!miniTicker@arr', data: [MOCK_TICKER_RAW] });
+      capturedOnMessage!({ stream: '!miniTicker@arr', data: [MOCK_MINI_TICKER_RAW] });
 
       expect(mockLogger.error).toHaveBeenCalledWith(expect.stringContaining('boom'));
     });

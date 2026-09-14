@@ -1,11 +1,13 @@
 import {
   BINANCE_BAN_DEFAULT_COOLDOWN_MS,
-  BINANCE_BAN_MAX_COOLDOWN_MS,
   BINANCE_WEIGHT_NEAR_CAP_COOLDOWN_MS,
+  observeRateLimitResponse,
+  parseBinanceBanUntilMs,
   parseRetryAfterMs,
   parseUsedWeight1m,
-  resolveRateLimitCooldownMs,
 } from '../../src/http/binanceRateLimit';
+
+const NOW_MS = 1_757_000_000_000;
 
 describe('parseUsedWeight1m', () => {
   it('reads the x-mbx-used-weight-1m header as a number', () => {
@@ -32,26 +34,95 @@ describe('parseRetryAfterMs', () => {
   });
 });
 
-describe('resolveRateLimitCooldownMs', () => {
-  it('returns no cooldown for a healthy response well under the weight cap', () => {
-    expect(resolveRateLimitCooldownMs({ status: 200, usedWeight: 100, retryAfterMs: undefined })).toBe(0);
+describe('parseBinanceBanUntilMs', () => {
+  it('reads the deadline the exchange names in the -1003 message', () => {
+    const body = {
+      code: -1003,
+      msg: 'Way too many requests; current limit is 2400 request weight per 1 MINUTE. Please use WebSocket Streams for live updates to avoid polling the API. IP banned until 1757000480000. Please use WebSocket Streams for live updates.',
+    };
+
+    expect(parseBinanceBanUntilMs(body)).toBe(1757000480000);
+  });
+
+  it('returns undefined for any other error body', () => {
+    expect(parseBinanceBanUntilMs({ code: -2013, msg: 'Order does not exist' })).toBeUndefined();
+    expect(parseBinanceBanUntilMs({})).toBeUndefined();
+    expect(parseBinanceBanUntilMs(undefined)).toBeUndefined();
+  });
+});
+
+describe('observeRateLimitResponse', () => {
+  it('sees no stop at all on a healthy response well under the weight cap', () => {
+    const observation = observeRateLimitResponse({
+      status: 200,
+      headers: { 'x-mbx-used-weight-1m': '100' },
+      body: [],
+      nowMs: NOW_MS,
+    });
+
+    expect(observation).toEqual({ usedWeight: 100, banUntilMs: undefined, throttleUntilMs: undefined });
   });
 
   it('throttles when used weight reaches 80% of the 2400/min cap (>= 1920)', () => {
-    expect(resolveRateLimitCooldownMs({ status: 200, usedWeight: 1920, retryAfterMs: undefined })).toBe(BINANCE_WEIGHT_NEAR_CAP_COOLDOWN_MS);
-    expect(resolveRateLimitCooldownMs({ status: 200, usedWeight: 1919, retryAfterMs: undefined })).toBe(0);
+    const nearCap = observeRateLimitResponse({ status: 200, headers: { 'x-mbx-used-weight-1m': '1920' }, body: [], nowMs: NOW_MS });
+    const belowCap = observeRateLimitResponse({ status: 200, headers: { 'x-mbx-used-weight-1m': '1919' }, body: [], nowMs: NOW_MS });
+
+    expect(nearCap.throttleUntilMs).toBe(NOW_MS + BINANCE_WEIGHT_NEAR_CAP_COOLDOWN_MS);
+    expect(belowCap.throttleUntilMs).toBeUndefined();
   });
 
-  it('backs off on HTTP 418 using Retry-After (bounded by the max cooldown)', () => {
-    expect(resolveRateLimitCooldownMs({ status: 418, usedWeight: undefined, retryAfterMs: 45000 })).toBe(45000);
+  it('holds every request until the deadline the 418 body names — not for a minute', () => {
+    const bannedUntilMs = NOW_MS + 8 * 60 * 1000;
+    const observation = observeRateLimitResponse({
+      status: 418,
+      headers: {},
+      body: { code: -1003, msg: `Way too many requests; IP banned until ${bannedUntilMs}.` },
+      nowMs: NOW_MS,
+    });
+
+    expect(observation.banUntilMs).toBe(bannedUntilMs);
   });
 
-  it('caps an enormous 418 ban backoff so the client is not blocked for days', () => {
-    const threeDaysMs = 3 * 24 * 60 * 60 * 1000;
-    expect(resolveRateLimitCooldownMs({ status: 418, usedWeight: undefined, retryAfterMs: threeDaysMs })).toBe(BINANCE_BAN_MAX_COOLDOWN_MS);
+  it('takes the LATER of the two deadlines the exchange names', () => {
+    const bodyDeadlineMs = NOW_MS + 8 * 60 * 1000;
+    const later = observeRateLimitResponse({
+      status: 418,
+      headers: { 'retry-after': '60' },
+      body: { code: -1003, msg: `IP banned until ${bodyDeadlineMs}.` },
+      nowMs: NOW_MS,
+    });
+    const headerWins = observeRateLimitResponse({
+      status: 418,
+      headers: { 'retry-after': '900' },
+      body: { code: -1003, msg: `IP banned until ${NOW_MS + 60_000}.` },
+      nowMs: NOW_MS,
+    });
+
+    expect(later.banUntilMs).toBe(bodyDeadlineMs);
+    expect(headerWins.banUntilMs).toBe(NOW_MS + 900_000);
   });
 
-  it('uses a default backoff on 418 when Retry-After is missing', () => {
-    expect(resolveRateLimitCooldownMs({ status: 418, usedWeight: undefined, retryAfterMs: undefined })).toBe(BINANCE_BAN_DEFAULT_COOLDOWN_MS);
+  it('treats 429 as a closed door too — it is the warning that comes before the ban', () => {
+    const observation = observeRateLimitResponse({ status: 429, headers: { 'retry-after': '5' }, body: {}, nowMs: NOW_MS });
+
+    expect(observation.banUntilMs).toBe(NOW_MS + 5000);
+  });
+
+  it('falls back to a default wait when the refusal names no deadline at all', () => {
+    const observation = observeRateLimitResponse({ status: 418, headers: {}, body: {}, nowMs: NOW_MS });
+
+    expect(observation.banUntilMs).toBe(NOW_MS + BINANCE_BAN_DEFAULT_COOLDOWN_MS);
+  });
+
+  it('sees the ban in the body even when the status says nothing about it', () => {
+    const bannedUntilMs = NOW_MS + 120_000;
+    const observation = observeRateLimitResponse({
+      status: 400,
+      headers: {},
+      body: { code: -1003, msg: `IP banned until ${bannedUntilMs}.` },
+      nowMs: NOW_MS,
+    });
+
+    expect(observation.banUntilMs).toBe(bannedUntilMs);
   });
 });

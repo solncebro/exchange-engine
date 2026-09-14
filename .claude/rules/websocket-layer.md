@@ -13,29 +13,32 @@ subscribeMarkPrices(handler: MarkPriceHandler, symbolList: string[]): void
 unsubscribeMarkPrices(handler: MarkPriceHandler): void
 subscribeKlines(symbol, interval, handler): void
 unsubscribeKlines(symbol, interval, handler): void
-subscribeOrderbook?(symbol, depth, handler: OrderBookHandler): void  // опциональный, реализован только у Bybit
+subscribeOrderbook?(symbol, depth, handler: OrderBookHandler): void  // опциональный, реализован у Bybit и OKX
 unsubscribeOrderbook?(symbol, depth, handler: OrderBookHandler): void
-subscribePublicTrades?(symbol, handler: PublicTradeHandler): void  // опциональный, реализован у Bybit и Binance Futures (не Binance Spot)
+subscribePublicTrades?(symbol, handler: PublicTradeHandler): void  // опциональный, реализован у Bybit, OKX и Binance Futures (не Binance Spot)
 unsubscribePublicTrades?(symbol, handler: PublicTradeHandler): void
 resubscribeStream?(symbol, interval): void  // опциональный, для принудительной переподписки klines
-resubscribeOrderbook?(symbol, depth): void  // опциональный, реализован только у Bybit
-resubscribePublicTrades?(symbol): void  // опциональный, реализован у Bybit и Binance Futures
-resubscribeMarkPrices?(): void  // опциональный, батчевая light-переподписка всех tickers.{symbol} (Bybit)
-setOrderbookLiveSymbol?(symbol, isLive): void  // опциональный, только Bybit — управление live-набором при lazyOrderbookParse
-subscribeRawOrderbook?(handler: RawOrderbookHandler): void  // опциональный, только Bybit
+resubscribeStreamList?(subscriptionList: ResubscribeKlinesArgs[]): void  // опциональный, пакетная переподписка klines; реализован у Binance Futures, Bybit и OKX
+resubscribeOrderbook?(symbol, depth): void  // опциональный, реализован у Bybit и OKX
+resubscribePublicTrades?(symbol): void  // опциональный, реализован у Bybit, OKX и Binance Futures
+resubscribeMarkPrices?(): void  // опциональный, батчевая light-переподписка (Bybit — все tickers.{symbol}; OKX — все mark-price.{instId})
+setOrderbookLiveSymbol?(symbol, isLive): void  // опциональный, Bybit и OKX — управление live-набором при lazyOrderbookParse
+subscribeRawOrderbook?(handler: RawOrderbookHandler): void  // опциональный, Bybit и OKX
 unsubscribeRawOrderbook?(handler: RawOrderbookHandler): void
 getConnectionInfoList(): WebSocketConnectionInfo[]
 awaitConnectionsReady?(): Promise<void>
 close(): void
 ```
 
-Optional методы `subscribeOrderbook`/`unsubscribeOrderbook` объявлены опциональными, поэтому Binance public streams (spot и futures) без реализации продолжают удовлетворять контракту. `subscribePublicTrades`/`unsubscribePublicTrades` реализованы у `BinanceFuturesPublicStream` (через `@aggTrade`) и у Bybit — только `BinanceSpotPublicStream` их не реализует. На уровне `BaseExchangeClient` отсутствие optional-метода → `subscribeOrderbook`/`subscribePublicTrades` бросает `Orderbook subscription not supported for ${marketLabel} market` / `Public trade subscription not supported for ${marketLabel} market`, соответствующий `unsubscribe*` — no-op.
+Optional методы `subscribeOrderbook`/`unsubscribeOrderbook` объявлены опциональными, поэтому Binance public streams (spot и futures) без реализации продолжают удовлетворять контракту; Bybit и OKX их реализуют. `subscribePublicTrades`/`unsubscribePublicTrades` реализованы у `BinanceFuturesPublicStream` (через `@aggTrade`), у Bybit и у OKX — только `BinanceSpotPublicStream` их не реализует. На уровне `BaseExchangeClient` отсутствие optional-метода → `subscribeOrderbook`/`subscribePublicTrades` бросает `Orderbook subscription not supported for ${marketLabel} market` / `Public trade subscription not supported for ${marketLabel} market`, соответствующий `unsubscribe*` — no-op.
 
 ## Хранение хендлеров
 
 - **Тикеры**: `Set<Handler>` — все хендлеры получают одни и те же данные
 - **Klines**: `Map<"SYMBOL_INTERVAL", Set<Handler>>` — группировка по стриму
 - **Orderbook** (Bybit): `Map<"orderbook.{depth}.{symbol}", Set<OrderBookHandler>>` — ключ совпадает с topic
+- **Orderbook** (OKX): `Map<"{channel}|{instId}", Set<OrderBookHandler>>` — тот же ключ темы, что и в списке тем соединения (`books` / `books5` / `bbo-tbt`)
+- **PublicTrade** (OKX): `Map<symbol, Set<PublicTradeHandler>>`; тема `trades|{instId}` снимается, когда обработчиков не осталось
 - **PublicTrade** (Bybit, custom subscribers): `Map<symbol, Set<PublicTradeHandler>>` — отдельно от `TradeToKlineAggregator`. Topic `publicTrade.{symbol}` снимается только когда у символа нет ни одного custom subscriber'а И не активен 1s kline aggregator (`tradeSubscribedSymbolSet`)
 
 ## WebSocket Connection Registry
@@ -62,6 +65,10 @@ Exchange-классы агрегируют через `getWebSocketConnectionInf
 |------|-----------|
 | [websocket-layer-binance.md](websocket-layer-binance.md) | Binance Futures/Spot Public Stream, Binance User Data Stream, Binance Trade Stream, FuturesConnection |
 | [websocket-layer-bybit.md](websocket-layer-bybit.md) | Bybit Public Stream, TradeToKlineAggregator, Bybit Trade Stream (+ Batch), Bybit Private Stream, BybitConnection |
+| [websocket-layer-okx.md](websocket-layer-okx.md) | OkxSilenceWatchdog, вход, OkxConnection (index) |
+| [websocket-layer-okx-public.md](websocket-layer-okx-public.md) | OKX Public Stream: три набора соединений, бюджет операций подписки, подписка и отписка, темы |
+| [websocket-layer-okx-orderbook.md](websocket-layer-okx-orderbook.md) | Стакан: разрывы порядковых номеров, ленивый разбор, разбор входящих кадров |
+| [websocket-layer-okx-trade.md](websocket-layer-okx-trade.md) | OKX Trade Stream (+ Batch, признак непригодности канала), OKX Private Stream (личный и деловой) |
 
 ## BaseTradeStream<T> (src/ws/BaseTradeStream.ts)
 
@@ -78,7 +85,7 @@ Exchange-классы агрегируют через `getWebSocketConnectionInf
 - `ensureConnectedHook()` — protected helper для подклассов, отправляющих batch-запросы (форсирует lazy connect перед отправкой)
 - `generateReqId()` — protected helper для генерации уникального `requestId` (используется в batch-методах `BybitTradeStream`)
 
-`PendingRequest` теперь kind-tagged: discriminated union по полю `kind: PendingRequestKind`, где `PendingRequestKind` = enum `SingleOrder | CreateBatch | ModifyBatch | CancelBatch`. Поле `resolve: (data: unknown) => void` (раньше `(order: Order) => void`) — подкласс приводит к нужному типу в handler.
+`PendingRequest` теперь kind-tagged: discriminated union по полю `kind: PendingRequestKind`, где `PendingRequestKind` = enum `SingleOrder` | `CreateBatch` | `ModifyBatch` | `CancelBatch` | `ConditionalOrder` | `ConditionalCancel` | `SingleCancel` | `SingleAmend` (последние четыре добавлены для OKX: у него по торговому каналу идут ещё одиночная отмена и одиночная правка). Поле `resolve: (data: unknown) => void` (раньше `(order: Order) => void`) — подкласс приводит к нужному типу в handler.
 
 `label` передаётся через `BaseTradeStreamArgs` (не абстрактное свойство).
 
@@ -109,7 +116,7 @@ Bybit конвертирует через маппинг `BYBIT_KLINE_INTERVAL`:
 ## Type Extraction
 
 Типы вынесены в co-located `.types.ts` файлы:
-- `BaseTradeStream.types.ts` — BaseTradeStreamArgs, PendingRequest (kind-tagged), PendingRequestKind (enum: `SingleOrder` | `CreateBatch` | `ModifyBatch` | `CancelBatch`)
+- `BaseTradeStream.types.ts` — BaseTradeStreamArgs, PendingRequest (kind-tagged), PendingRequestKind (enum: `SingleOrder` | `CreateBatch` | `ModifyBatch` | `CancelBatch` | `ConditionalOrder` | `ConditionalCancel` | `SingleCancel` | `SingleAmend`)
 - `BinanceFuturesPublicStream.types.ts` — BinanceFuturesPublicStreamArgs, BinanceCombinedMessage, FuturesConnection
 - `BinanceSpotPublicStream.types.ts` — BinanceSpotPublicStreamArgs, BinanceSpotWebSocketEnvelope
 - `BinanceUserDataStream.types.ts` — BinanceUserDataStreamArgs
@@ -120,4 +127,10 @@ Bybit конвертирует через маппинг `BYBIT_KLINE_INTERVAL`:
 - `BybitPrivateStream.types.ts` — BybitPrivateMessage, BybitPrivateStreamArgs
 - `BybitTradeStream.types.ts` — BybitTradeMessage, BybitTradeResponseHeader (`{ 'X-Bapi-Limit'?, 'X-Bapi-Limit-Status'?, 'X-Bapi-Limit-Reset-Timestamp'? }`), BybitPendingBatchContext (discriminated union по `kind: 'create' | 'modify' | 'cancel'`, хранит `originalArgsList` / `originalOrderIdList` для трасировки в ответе)
 - `bybitWebSocketUtils.types.ts` — BybitBaseWebSocketMessage, AuthenticateBybitWebSocketArgs (типы, реэкспортируются и из `bybitWebSocketUtils.ts`, и из `bybitWebSocketAuth.ts`)
+- `OkxPublicStream.types.ts` — OkxPublicStreamArgs, OkxConnectionPoolType (`'public' | 'business'`), OkxTopicMutationKind (`'subscribe' | 'unsubscribe'`), OkxConnection
+- `OkxTradeStream.types.ts` — OkxTradeStreamArgs, OkxTradeAnyMessage, OkxTradeResponseMessage, OkxCancelOrderParams, OkxPendingBatchContext (объединение по `kind: 'create' | 'modify' | 'cancel'`)
+- `OkxPrivateStream.types.ts` — OkxPrivateStreamArgs
+- `OkxSilenceWatchdog.types.ts` — OkxSilenceWatchdogArgs
+- `okxWebSocketUtils.types.ts` — OkxWebSocketMessage, OkxSubscriptionArg
+- `okxWebSocketAuth.types.ts` — AuthenticateOkxWebSocketArgs
 - `bybitWebSocketAuth.ts` — `authenticateBybitWebSocket` (HMAC-подпись, ожидание ответа `auth`); вынесен из `bybitWebSocketUtils.ts`, который теперь содержит только heartbeat-хелперы (`BYBIT_HEARTBEAT_CONFIG`, `BYBIT_PING_INTERVAL`, `isBybitPongResponse`). `BybitPrivateStream` и `BybitTradeStream` импортируют функцию из нового файла

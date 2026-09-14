@@ -472,10 +472,46 @@ describe('BybitLinear', () => {
     });
   });
 
-  it('throws "Not implemented" for fetchFundingInfo', async () => {
-    const { client } = createClient();
+  describe('fetchFundingInfo', () => {
+    it('reads one instrument when a symbol is given', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({
+        data: { result: { list: [BYBIT_RAW_INSTRUMENT_LIST[0]] } },
+      });
 
-    await expect(client.fetchFundingInfo()).rejects.toThrow('Not implemented for Bybit');
+      const result = await client.fetchFundingInfo('BTCUSDT');
+
+      expect(mockInstance.get).toHaveBeenCalledTimes(1);
+
+      const [url, options] = mockInstance.get.mock.calls[0];
+
+      expect(url).toBe('/v5/market/instruments-info');
+      expect(options.params.category).toBe('linear');
+      expect(options.params.symbol).toBe('BTCUSDT');
+
+      expect(result).toEqual([
+        { symbol: 'BTCUSDT', fundingIntervalHours: 8, adjustedFundingRateCap: 0.005, adjustedFundingRateFloor: -0.005 },
+      ]);
+    });
+
+    it('walks the whole instrument list when no symbol is given', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({
+        data: { result: { list: BYBIT_RAW_INSTRUMENT_LIST, nextPageCursor: '' } },
+      });
+
+      const result = await client.fetchFundingInfo();
+
+      const [url, options] = mockInstance.get.mock.calls[0];
+
+      expect(url).toBe('/v5/market/instruments-info');
+      expect(options.params.category).toBe('linear');
+      expect(options.params.symbol).toBeUndefined();
+
+      // Инструмент без интервала фандинга (ETHBTC) в ответ не попадает.
+      expect(result.every((entry) => entry.symbol === 'BTCUSDT')).toBe(true);
+      expect(result[0].fundingIntervalHours).toBe(8);
+    });
   });
 
   describe('fetchFundingRateHistory', () => {
@@ -961,6 +997,32 @@ describe('BybitLinear', () => {
       expect(result[1].income).toBe(0.5);
     });
 
+    it('makes a single transaction log request and returns all three income kinds sorted by time, ascending', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({
+        data: { result: { list: [
+          // A trade row later in time: yields a realizedPnl row and a commission row.
+          { symbol: 'ICNTUSDT', type: 'TRADE', qty: '10', cashFlow: '-100', fee: '0.5', funding: '0', currency: 'USDT', transactionTime: '5000', tradeId: 't1', orderId: 'o1' },
+          // A settlement row earlier in time, funding only (its cash flow and fee are zero).
+          { symbol: 'FLOCKUSDT', type: 'SETTLEMENT', qty: '55994', cashFlow: '0', fee: '0', funding: '-2.5', currency: 'USDT', transactionTime: '1000', tradeId: '', orderId: '' },
+        ] } },
+      });
+
+      const result = await client.fetchIncome();
+
+      expect(mockInstance.get).toHaveBeenCalledTimes(1);
+      expect(result).toHaveLength(3);
+      expect(result.map((row) => row.timestamp)).toEqual([1000, 5000, 5000]);
+
+      const fundingRow = result.find((row) => row.kind === 'funding');
+      const realizedPnlRow = result.find((row) => row.kind === 'realizedPnl');
+      const commissionRow = result.find((row) => row.kind === 'commission');
+
+      expect(fundingRow?.income).toBeCloseTo(-2.5, 8);
+      expect(realizedPnlRow?.income).toBeCloseTo(-100, 8);
+      expect(commissionRow?.income).toBeCloseTo(-0.5, 8);
+    });
+
     it('passes the time window and clamps the limit for the transaction log request', async () => {
       const { client, mockInstance } = createClient();
       mockInstance.get.mockResolvedValue({
@@ -1058,12 +1120,23 @@ describe('BybitLinear', () => {
       expect(options.params.limit).toBe(50);
     });
 
-    it('refuses a full page instead of silently answering with a truncated one', async () => {
+    it('reads the following pages by cursor instead of refusing a full first page', async () => {
       const { client, mockInstance } = createClient();
       const fullPageList = Array.from({ length: 50 }, () => BYBIT_RAW_TRANSACTION_LOG_LIST[0]);
-      mockInstance.get.mockResolvedValue({ data: { result: { list: fullPageList } } });
+      mockInstance.get
+        .mockResolvedValueOnce({ data: { result: { list: fullPageList, nextPageCursor: 'page-2' } } })
+        .mockResolvedValueOnce({ data: { result: { list: [BYBIT_RAW_TRANSACTION_LOG_LIST[1]], nextPageCursor: '' } } });
 
-      await expect(client.fetchIncome()).rejects.toThrow();
+      const result = await client.fetchIncome();
+
+      expect(mockInstance.get).toHaveBeenCalledTimes(2);
+      const [, firstOptions] = mockInstance.get.mock.calls[0];
+      const [, secondOptions] = mockInstance.get.mock.calls[1];
+      expect(firstOptions.params.cursor).toBeUndefined();
+      expect(secondOptions.params.cursor).toBe('page-2');
+      expect(secondOptions.params.limit).toBe(50);
+      expect(result).toHaveLength(51);
+      expect(result.at(-1)?.symbol).toBe(BYBIT_RAW_TRANSACTION_LOG_LIST[1].symbol);
     });
 
     it('narrows the answer to the requested symbol', async () => {
@@ -1078,16 +1151,29 @@ describe('BybitLinear', () => {
       expect(result[0].symbol).toBe('ETHUSDT');
     });
 
-    it('throws for the funding filter when the transaction log hits the page limit', async () => {
+    it('sums the funding across every page of a long holding window', async () => {
+      const { client, mockInstance } = createClient();
+      // A ten-hour trade on a busy account: the first page is all other symbols' trades, the
+      // funding settlements only show up on the second page. Before paging this read refused
+      // outright and the trade closed with its funding unknown (REZUSDT, Bybit, 10.09.2026).
+      const tradeRow = { symbol: 'ETHUSDT', type: 'TRADE', qty: '1', cashFlow: '-1', fee: '0.1', funding: '0', currency: 'USDT', transactionTime: '1500', tradeId: 't', orderId: 'o' };
+      const settlementRow = { symbol: 'REZUSDT', type: 'SETTLEMENT', qty: '100', cashFlow: '0', fee: '0', funding: '-1.25', currency: 'USDT', transactionTime: '1600', tradeId: '', orderId: '' };
+      mockInstance.get
+        .mockResolvedValueOnce({ data: { result: { list: Array.from({ length: 50 }, () => tradeRow), nextPageCursor: 'page-2' } } })
+        .mockResolvedValueOnce({ data: { result: { list: [settlementRow, settlementRow] } } });
+
+      const result = await client.fetchIncome({ symbol: 'REZUSDT', startTime: 1000, endTime: 2000, incomeType: 'funding' });
+
+      expect(result).toHaveLength(2);
+      expect(result.reduce((sum, row) => sum + row.income, 0)).toBeCloseTo(-2.5, 8);
+    });
+
+    it('still refuses instead of answering partially when the cursor never ends', async () => {
       const { client, mockInstance } = createClient();
       const fullPageList = Array.from({ length: 50 }, () => BYBIT_RAW_TRANSACTION_LOG_LIST[0]);
-      mockInstance.get.mockResolvedValue({
-        data: { result: { list: fullPageList } },
-      });
+      mockInstance.get.mockResolvedValue({ data: { result: { list: fullPageList, nextPageCursor: 'again' } } });
 
-      await expect(
-        client.fetchIncome({ startTime: 1000, limit: 100, incomeType: 'funding' }),
-      ).rejects.toThrow('full page');
+      await expect(client.fetchIncome({ incomeType: 'funding' })).rejects.toThrow('page count limit');
     });
   });
 
@@ -1367,6 +1453,18 @@ describe('BybitLinear', () => {
           { symbol: 'BTCUSDT', orderId: '2', price: '30100' },
         ],
       });
+    });
+
+    it('rejects the whole batch when the exchange refuses it with a top-level retCode', async () => {
+      const { client, mockInstance } = createClient();
+      client.tradeSymbols.set('BTCUSDT', BTCUSDT_TRADE_SYMBOL);
+      mockInstance.post.mockResolvedValue({
+        data: { retCode: 10001, retMsg: 'params error', result: {}, retExtInfo: {} },
+      });
+
+      await expect(client.modifyBatchOrders([
+        { symbol: 'BTCUSDT', orderId: '1', side: OrderSideEnum.Buy, price: 30000 },
+      ])).rejects.toMatchObject({ code: 10001 });
     });
 
     it('falls back to "Unknown error" when retExtInfo entry is missing', async () => {

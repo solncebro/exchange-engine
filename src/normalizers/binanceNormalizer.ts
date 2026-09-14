@@ -24,7 +24,7 @@ import type {
 } from '../types/common';
 import { TradeSymbolTypeEnum, PositionSideEnum, MarginModeEnum, TimeInForceEnum, OrderSideEnum } from '../types/common';
 import type { OrderRateLimit } from '../types/exchange';
-import { BINANCE_POSITION_SIDE, BINANCE_POSITION_IDX, BINANCE_ORDER_SIDE, BINANCE_ORDER_TYPE, BINANCE_ORDER_STATUS, BINANCE_ALGO_STATUS, BINANCE_TIME_IN_FORCE } from '../constants/mappings';
+import { BINANCE_POSITION_SIDE, BINANCE_POSITION_IDX, BINANCE_ORDER_SIDE, BINANCE_ORDER_TYPE, BINANCE_ORDER_STATUS, BINANCE_ALGO_STATUS, BINANCE_TIME_IN_FORCE, resolveBinanceIncomeKind } from '../constants/mappings';
 import { parseOrderBookLevel } from './normalizerUtils';
 import { isConditionalOrderType } from '../constants/orderTypes';
 
@@ -200,16 +200,35 @@ export interface BinanceExchangeInfoRaw {
   rateLimits?: BinanceRateLimitRaw[];
 }
 
+/**
+ * Ответ суточной сводки Binance: `/fapi/v1/ticker/24hr` и `/api/v3/ticker/24hr`. Поля `time` в нём
+ * НЕТ ни на контрактах, ни на споте — окно суток задано парой `openTime`/`closeTime`, и правый край
+ * этой пары и есть отметка сводки. Сверено живым ответом обеих ручек (боевой и демо) 10.09.2026.
+ * Спот кладёт сверх контрактного набора цену предыдущего закрытия и верх стакана — на контрактах
+ * этих полей нет, поэтому они необязательны.
+ */
 export interface BinanceTicker24hrRaw {
   symbol: string;
+  priceChange: string;
+  priceChangePercent: string;
+  weightedAvgPrice: string;
   lastPrice: string;
+  lastQty: string;
   openPrice: string;
   highPrice: string;
   lowPrice: string;
-  priceChangePercent: string;
   volume: string;
   quoteVolume: string;
-  time: number;
+  openTime: number;
+  closeTime: number;
+  firstId: number;
+  lastId: number;
+  count: number;
+  prevClosePrice?: string;
+  bidPrice?: string;
+  bidQty?: string;
+  askPrice?: string;
+  askQty?: string;
 }
 
 export interface BinanceWebSocketKlineRaw {
@@ -450,7 +469,7 @@ export function normalizeBinanceTradeSymbols(raw: BinanceExchangeInfoRaw): Trade
       symbol: symbol.symbol,
       baseAsset: symbol.baseAsset,
       quoteAsset: symbol.quoteAsset,
-      settle: isPerp ? 'USDT' : '',
+      settle: symbol.marginAsset ?? '',
       isActive: symbol.status === 'TRADING',
       type: tradeSymbolType,
       isLinear: isPerp,
@@ -529,10 +548,58 @@ export function normalizeBinanceTickers(rawList: BinanceTicker24hrRaw[]): Ticker
       priceChangePercent: parseFloat(raw.priceChangePercent),
       volume: parseFloat(raw.volume),
       quoteVolume: parseFloat(raw.quoteVolume),
-      timestamp: raw.time,
+      timestamp: raw.closeTime,
     };
 
     result.set(raw.symbol, ticker);
+  }
+
+  return result;
+}
+
+/**
+ * Кадр потока `!miniTicker@arr` — и на контрактах, и на споте. Имена полей КОРОТКИЕ и с суточной
+ * сводкой не совпадают ни одним: `c` — последняя цена, `o` — цена сутки назад, `E` — время события.
+ * Процента изменения в кадре НЕТ, биржа его тут не считает. Сверено живыми кадрами обоих рынков
+ * 10.09.2026 (`ps` и `st` приходят только на контрактах).
+ */
+export interface BinanceMiniTickerWebSocketRaw {
+  e: '24hrMiniTicker';
+  E: number;
+  s: string;
+  c: string;
+  o: string;
+  h: string;
+  l: string;
+  v: string;
+  q: string;
+  ps?: string;
+  st?: number;
+}
+
+/**
+ * Поток даёт лишь цену суточной давности, поэтому процент изменения считается здесь — ровно так же,
+ * как он считается для OKX. Нулевая цена открытия даёт ноль, а не бесконечность.
+ */
+export function normalizeBinanceMiniTickerList(rawList: BinanceMiniTickerWebSocketRaw[]): TickerBySymbol {
+  const result = new Map<string, Ticker>();
+
+  for (const raw of rawList) {
+    const lastPrice = parseFloat(raw.c);
+    const openPrice = parseFloat(raw.o);
+    const hasComparablePrices = Number.isFinite(lastPrice) && Number.isFinite(openPrice) && openPrice > 0;
+
+    result.set(raw.s, {
+      symbol: raw.s,
+      lastPrice,
+      openPrice,
+      highPrice: parseFloat(raw.h),
+      lowPrice: parseFloat(raw.l),
+      priceChangePercent: hasComparablePrices ? ((lastPrice - openPrice) / openPrice) * 100 : 0,
+      volume: parseFloat(raw.v),
+      quoteVolume: parseFloat(raw.q),
+      timestamp: raw.E,
+    });
   }
 
   return result;
@@ -1153,6 +1220,7 @@ export function normalizeBinanceIncomeList(rawList: BinanceIncomeRaw[]): Income[
   return rawList.map((raw) => ({
     symbol: raw.symbol,
     incomeType: raw.incomeType,
+    kind: resolveBinanceIncomeKind(raw.incomeType),
     income: parseFloat(raw.income),
     asset: raw.asset,
     timestamp: raw.time,

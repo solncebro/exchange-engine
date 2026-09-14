@@ -5,6 +5,10 @@ import {
   BINANCE_FUTURES_ORDER_TYPE_REVERSE,
   BINANCE_ALGO_ORDER_TYPE_REVERSE,
   BINANCE_SPOT_ORDER_TYPE_REVERSE,
+  OKX_ORDER_STATUS,
+  OKX_ALGO_STATUS,
+  OKX_ORDER_TYPE_BY_TIME_IN_FORCE,
+  OKX_ORD_TYPE_TO_TIME_IN_FORCE,
 } from '../../src/constants/mappings';
 import { CONDITIONAL_ORDER_TYPE_SET } from '../../src/constants/orderTypes';
 import { OrderTypeEnum, TimeInForceEnum } from '../../src/types/common';
@@ -79,5 +83,29 @@ describe('BINANCE_SPOT_ORDER_TYPE_REVERSE', () => {
     expect(BINANCE_SPOT_ORDER_TYPE_REVERSE[OrderTypeEnum.StopLimit]).toBe('STOP_LOSS_LIMIT');
     expect(BINANCE_SPOT_ORDER_TYPE_REVERSE[OrderTypeEnum.TakeProfitMarket]).toBe('TAKE_PROFIT');
     expect(BINANCE_SPOT_ORDER_TYPE_REVERSE[OrderTypeEnum.TakeProfitLimit]).toBe('TAKE_PROFIT_LIMIT');
+  });
+});
+
+describe('OKX_ORD_TYPE_TO_TIME_IN_FORCE', () => {
+  it('round-trips through OKX_ORDER_TYPE_BY_TIME_IN_FORCE for every ordType except market and optimal_limit_ioc', () => {
+    Object.entries(OKX_ORD_TYPE_TO_TIME_IN_FORCE).forEach(([ordType, timeInForce]) => {
+      if (ordType === 'market' || ordType === 'optimal_limit_ioc') {
+        return;
+      }
+
+      expect(OKX_ORDER_TYPE_BY_TIME_IN_FORCE[timeInForce]).toBe(ordType);
+    });
+  });
+});
+
+describe('OKX_ORDER_STATUS / OKX_ALGO_STATUS', () => {
+  it('map onto the unified status vocabulary only', () => {
+    Object.values(OKX_ORDER_STATUS).forEach((status) => {
+      expect(UNIFIED_STATUS_LIST).toContain(status);
+    });
+
+    Object.values(OKX_ALGO_STATUS).forEach((status) => {
+      expect(UNIFIED_STATUS_LIST).toContain(status);
+    });
   });
 });

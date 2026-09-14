@@ -2,23 +2,21 @@ import { ReliableWebSocket, WebSocketStatus } from '@solncebro/websocket-engine'
 import type { RawData, WebSocketCloseContext } from '@solncebro/websocket-engine';
 
 import type { BybitPublicTopicType, ExchangeLogger, KlineInterval, MarkPriceHandler, MarkPriceUpdate, OrderBookHandler, OrderBookUpdateType, PublicTradeHandler, RawOrderbookFrame, RawOrderbookHandler, TickerBySymbol, WebSocketConnectionInfo } from '../types/common';
-import { WebSocketConnectionTypeEnum } from '../types/common';
-import type { KlineHandler } from '../types/exchange';
+import type { KlineHandler, ResubscribeKlinesArgs } from '../types/exchange';
 import { normalizeBybitKlineWebSocketMessage, normalizeBybitOrderBookUpdate, normalizeBybitPublicTradeFromStream, normalizeBybitTickers } from '../normalizers/bybitNormalizer';
 import type { BybitOrderBookRaw, BybitPublicTradeDataRaw, BybitTickerRaw, BybitWebSocketKlineRaw } from '../normalizers/bybitNormalizer';
 import { BYBIT_KLINE_INTERVAL } from '../constants/bybit';
-import { BYBIT_WS_CASCADE_RECREATE_TOPIC_COUNT } from './streamCommandRateLimit';
+import { BYBIT_WS_CASCADE_RECREATE_TOPIC_COUNT, WS_FRAME_HEAD_SCAN_LENGTH, WS_RECREATE_DEDUP_WINDOW_MS } from './streamCommandRateLimit';
 import { BYBIT_HEARTBEAT_CONFIG, BYBIT_PING_INTERVAL } from './bybitWebSocketUtils';
 import type { BybitConnection, BybitPublicStreamArgs, BybitWebSocketMessage } from './BybitPublicStream.types';
 import { TradeToKlineAggregator } from './TradeToKlineAggregator';
 import { parseWebSocketMessage } from './parseWebSocketMessage';
+import { buildPublicConnectionCloseLine, buildPublicConnectionInfo } from './publicConnectionDiagnostics';
 
 const MAX_TOPICS_PER_CONNECTION = 200;
 const MAX_TOPICS_PER_SUBSCRIBE = 10;
-const RECREATE_DEDUP_WINDOW_MS = 2000;
 
 const ORDERBOOK_TOPIC_HEAD_REGEX = /"topic"\s*:\s*"(orderbook\.\d+\.([A-Z0-9]+))"/;
-const FRAME_HEAD_SCAN_LENGTH = 200;
 
 // Human-readable suffix used in the connection label when topics are separated by
 // type — matches the Diagnostic composition wording (tickers/klines/orderbook/trades).
@@ -49,6 +47,10 @@ function classifyTopicType(topic: string): BybitPublicTopicType {
   return 'tickers';
 }
 
+function buildKlineTopic(symbol: string, interval: string): string {
+  return `kline.${BYBIT_KLINE_INTERVAL[interval]}.${symbol}`;
+}
+
 function resolveUnifiedInterval(bybitInterval: string): KlineInterval {
   for (const [unified, bybit] of Object.entries(BYBIT_KLINE_INTERVAL)) {
     if (bybit === bybitInterval) {
@@ -74,6 +76,14 @@ class BybitPublicStream {
    * doing so broke the price-limit boundary math downstream (OPGUSDT 2026-07-07).
    */
   private readonly lastIndexPriceBySymbol: Map<string, number> = new Map();
+  /**
+   * Последний ПОЛНЫЙ тикер по символу. Приращение (`type: 'delta'`) несёт только
+   * изменившиеся поля — на живом BTCUSDT это 149 кадров из 175 без цены последней
+   * сделки, — поэтому разбирать его в одиночку нельзя: цена и суточный оборот вышли бы
+   * наружу «не числами». Приращение сливается поверх запомненного снимка, а до первого
+   * снимка наружу не отдаётся вовсе.
+   */
+  private readonly lastTickerBySymbol: Map<string, BybitTickerRaw> = new Map();
   private readonly klineHandlerByKey: Map<string, Set<KlineHandler>> = new Map();
   private readonly orderBookHandlerByTopic: Map<string, Set<OrderBookHandler>> = new Map();
   private readonly publicTradeHandlerBySymbol: Map<string, Set<PublicTradeHandler>> = new Map();
@@ -202,6 +212,7 @@ class BybitPublicStream {
     }
 
     this.tickerSubscribedSymbolSet.clear();
+    this.lastTickerBySymbol.clear();
   }
 
   subscribeKlines(symbol: string, interval: KlineInterval, handler: KlineHandler): void {
@@ -385,8 +396,22 @@ class BybitPublicStream {
   }
 
   resubscribeStream(symbol: string, interval: string): void {
-    const bybitInterval = BYBIT_KLINE_INTERVAL[interval];
-    this.resubscribeTopic(`kline.${bybitInterval}.${symbol}`);
+    this.resubscribeTopic(buildKlineTopic(symbol, interval));
+  }
+
+  // Сторож потока восстанавливает много символов разом. Без этого метода вызывающий перебирал
+  // одиночную переподписку, каждая шла отдельным проходом по всем соединениям своей парой
+  // «снять/подписать», а порог лавины не срабатывал никогда — каждый вызов видел одну тему.
+  resubscribeStreamList(subscriptionList: ResubscribeKlinesArgs[]): void {
+    if (subscriptionList.length === 0) {
+      return;
+    }
+
+    const topicList = subscriptionList.map(
+      (subscription) => buildKlineTopic(subscription.symbol, subscription.interval),
+    );
+
+    this.resubscribeTopicList(topicList);
   }
 
   resubscribeOrderbook(symbol: string, depth: number): void {
@@ -469,17 +494,9 @@ class BybitPublicStream {
   }
 
   getConnectionInfoList(): WebSocketConnectionInfo[] {
-    return this.connectionList.map((connection) => ({
-      label: connection.label,
-      shortLabel: connection.shortLabel,
-      url: connection.url,
-      isConnected: connection.webSocket.getStatus() === WebSocketStatus.CONNECTED,
-      type: WebSocketConnectionTypeEnum.Public,
-      subscriptionList: this.buildSubscriptionList(connection),
-      messageCount: connection.messageCount,
-      lastMessageTimestamp: connection.lastMessageTimestamp > 0 ? connection.lastMessageTimestamp : undefined,
-      reconnectCount: connection.reconnectCount,
-    }));
+    return this.connectionList.map(
+      (connection) => buildPublicConnectionInfo(connection, this.buildSubscriptionList(connection)),
+    );
   }
 
   // Diagnostic: on EVERY connection close, emit a single greppable line snapshotting
@@ -488,20 +505,14 @@ class BybitPublicStream {
   // per-connection (only the closer is '-'). Token format per conn:
   // `#<idx><+|-conn>t<topics>/<ageMs>ms/↻<reconnects>`. Pure logging, no recovery here.
   private handleConnectionClose(connectionIndex: number, closeContext: WebSocketCloseContext): void {
-    const now = Date.now();
-    const snapshotTokenList = this.connectionList.map((connection, index) => {
-      const connectedMark = connection.webSocket.getStatus() === WebSocketStatus.CONNECTED ? '+' : '-';
-      const ageMs = connection.lastMessageTimestamp > 0 ? now - connection.lastMessageTimestamp : -1;
-
-      return `#${index + 1}${connectedMark}t${connection.topicList.length}/${ageMs}ms/↻${connection.reconnectCount}`;
-    });
-
     const closingConnection = this.connectionList[connectionIndex];
     const closingLabel = closingConnection !== undefined ? closingConnection.label : `${this.label} #${connectionIndex + 1}`;
 
-    this.logger.warn(
-      `${closingLabel} closed (code=${closeContext.closeCode ?? 'na'} pong=${closeContext.isPongTimeout} fails=${closeContext.consecutiveFailures}) | ${snapshotTokenList.join(' ')}`,
-    );
+    this.logger.warn(buildPublicConnectionCloseLine({
+      closingLabel,
+      closeContext,
+      connectionList: this.connectionList,
+    }));
   }
 
   close(): void {
@@ -515,6 +526,7 @@ class BybitPublicStream {
     }
 
     this.connectionList.length = 0;
+    this.lastTickerBySymbol.clear();
   }
 
   private scheduleConnect(): void {
@@ -617,7 +629,7 @@ class BybitPublicStream {
     const nowTimestamp = Date.now();
     const recentRecreateAgeMs = nowTimestamp - connection.lastRecreateTimestamp;
 
-    if (connection.lastRecreateTimestamp > 0 && recentRecreateAgeMs < RECREATE_DEDUP_WINDOW_MS) {
+    if (connection.lastRecreateTimestamp > 0 && recentRecreateAgeMs < WS_RECREATE_DEDUP_WINDOW_MS) {
       this.logger.info(`BybitPublicStream: skip recreate ${connection.label} (recent recreate ${recentRecreateAgeMs}ms ago, reason: ${reason})`);
 
       return;
@@ -783,7 +795,7 @@ class BybitPublicStream {
     }
 
     const text = rawData.toString();
-    const head = text.length > FRAME_HEAD_SCAN_LENGTH ? text.slice(0, FRAME_HEAD_SCAN_LENGTH) : text;
+    const head = text.length > WS_FRAME_HEAD_SCAN_LENGTH ? text.slice(0, WS_FRAME_HEAD_SCAN_LENGTH) : text;
     const match = ORDERBOOK_TOPIC_HEAD_REGEX.exec(head);
 
     if (match === null) {
@@ -900,6 +912,21 @@ class BybitPublicStream {
           Array.isArray(message.data) ? message.data : [message.data]
         ) as BybitTickerRaw[];
 
+        // Слияние идёт ВСЕГДА, а не только при наличии обработчиков тикера: иначе
+        // обработчик, подписавшийся позже на уже подписанный символ (его держала цена
+        // маркировки), ждал бы полного тикера до следующего снимка биржи.
+        // Неполным считается ТОЛЬКО кадр, который биржа сама пометила приращением: на
+        // живом потоке пометку несут все до единого (175 из 175 за 25 секунд). Кадр без
+        // пометки принимается за полный, как и раньше, — так правка не трогает ничего,
+        // кроме той самой дыры.
+        const fullTickerList = this.mergeTickerFrameList(
+          rawTickerList,
+          message.type !== 'delta',
+        );
+
+        // Цене маркировки отдаётся СЫРОЙ кадр, а не слитый: у неё своя память индекса и
+        // свой разбор неполных кадров. Слитый кадр нёс бы прежнюю цену маркировки в
+        // каждом приращении по верху стакана, и наружу шло бы событие с устаревшей ценой.
         if (this.markPriceHandlerSet.size > 0) {
           const markPriceList = this.extractMarkPriceUpdates(rawTickerList, message.ts);
 
@@ -910,8 +937,8 @@ class BybitPublicStream {
           }
         }
 
-        if (this.tickerHandlerSet.size > 0) {
-          const tickerBySymbol = normalizeBybitTickers(rawTickerList);
+        if (this.tickerHandlerSet.size > 0 && fullTickerList.length > 0) {
+          const tickerBySymbol = normalizeBybitTickers(fullTickerList);
 
           for (const handler of this.tickerHandlerSet) {
             handler(tickerBySymbol);
@@ -1052,6 +1079,37 @@ class BybitPublicStream {
     }
 
     this.logger.info(`BybitPublicStream: unsubscribed ${topicList.length} topics for ${label}`);
+  }
+
+  /**
+   * Приводит кадр тикера к ПОЛНОМУ виду. Снимок запоминается как есть; приращение
+   * накладывается поверх запомненного снимка и само становится новым снимком.
+   * Приращение по символу, снимка которого ещё не было, наружу не отдаётся: неполный
+   * кадр дал бы «не число» вместо цены, а это хуже, чем не дать обновления вовсе.
+   */
+  private mergeTickerFrameList(rawList: BybitTickerRaw[], isSnapshot: boolean): BybitTickerRaw[] {
+    const result: BybitTickerRaw[] = [];
+
+    for (const raw of rawList) {
+      if (isSnapshot) {
+        this.lastTickerBySymbol.set(raw.symbol, raw);
+        result.push(raw);
+
+        continue;
+      }
+
+      const lastTicker = this.lastTickerBySymbol.get(raw.symbol);
+
+      if (lastTicker === undefined) {
+        continue;
+      }
+
+      const mergedTicker = { ...lastTicker, ...raw };
+      this.lastTickerBySymbol.set(raw.symbol, mergedTicker);
+      result.push(mergedTicker);
+    }
+
+    return result;
   }
 
   private extractMarkPriceUpdates(

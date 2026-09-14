@@ -1,10 +1,14 @@
 # @solncebro/exchange-engine
 
-Universal TypeScript client library for cryptocurrency trading on Binance and Bybit with unified API, WebSocket support, and native type safety.
+Universal TypeScript client library for cryptocurrency trading on Binance, Bybit and OKX with unified API, WebSocket support, and native type safety.
 
 ## Latest Release
 
-Current version: `0.24.0`
+Current version: `0.25.0`
+
+- **OKX support** — a third exchange behind the same `ExchangeClient` interface: `new Exchange('okx', …)` returns USDT/USDC-settled linear perpetuals (`exchange.futures`) and spot (`exchange.spot`). Symbols stay unified (`BTCUSDT`) and sizes stay in coins — the contract↔coin conversion, the instrument-id translation and OKX's separate conditional-order service are handled inside the client. OKX requires `ExchangeConfig.passphrase` (the client refuses to construct without it), and a client order id must be 1–32 letters or digits. See [docs/api-reference.md](./docs/api-reference.md#особенности-okx) for the exchange quirks a consumer has to know (quote volume on perpetuals is an estimate, `triggerDirection` is ignored, margin mode is remembered client-side, no index price in the mark-price stream).
+
+Previously in `0.24.0`:
 
 - **Account balance fixes**: consumer-side summation across coins was adding balances denominated in different units — one BTC on an account was worth one dollar in the "free" total instead of six figures (live incident 2026-08-29, an empty Bybit account showed negative margin in use). `fetchBalances()` now sums only `Balance.usdValue` (the per-coin dollar valuation the exchange itself uses to build `totalWalletBalance`) for any account-level total, and margin in use is converted to dollars at each coin's own rate. Binance Futures margin in use is now read from `/fapi/v3/account`'s own `totalInitialMargin` field instead of derived by subtracting free from wallet balance (that subtraction silently drifts with unrealized PnL on an open position). `AccountBalances.availableBalanceSource` names where the free-balance number came from — `'exchange'`, `'derived'`, or `'unknown'` — so a consumer can tell a fact from a guess.
 - **Bybit accounting fixes**: `fetchIncome` now reads a funding settlement from its `funding` field (the `cashFlow` of such a row is always zero — the old code reported every Bybit funding charge as 0), and `fetchClosedPnl` no longer returns Bybit's own `closedPnl`, which already subtracts the funding paid over the life of the position: the result is rebuilt from the record's own fields (`cumEntryValue − cumExitValue − openFee − closeFee`), so `closedPnl` means the same on both exchanges — net of trading commissions, funding NOT included. Consumers that added funding on top of a Bybit `closedPnl` were double-counting it; recount affected rows.
@@ -25,7 +29,7 @@ Full release notes: [CHANGELOG.md](./CHANGELOG.md)
 
 ## Features
 
-- 🔀 **Single API for multiple exchanges** — same code works with Binance or Bybit
+- 🔀 **Single API for multiple exchanges** — same code works with Binance, Bybit or OKX
 - 🎯 **Type-safe unified types** — all responses normalized to consistent types (Kline, Ticker, Position, etc.)
 - 📊 **REST & WebSocket support** — fetch historical data and subscribe to real-time streams
 - 🔄 **Automatic reconnection** — resilient WebSocket connections with exponential backoff
@@ -46,11 +50,21 @@ yarn add @solncebro/exchange-engine @solncebro/websocket-engine
 import { Exchange } from '@solncebro/exchange-engine';
 import { pinoLogger } from './logger'; // your logger instance
 
-// Create exchange instance (works identically for 'binance' or 'bybit')
+// Create exchange instance (works identically for 'binance', 'bybit' or 'okx')
 const exchange = new Exchange('binance', {
   config: { apiKey: process.env.API_KEY, secret: process.env.API_SECRET },
   logger: pinoLogger,
   onNotify: (msg) => telegramBot.send(msg), // optional notifications
+});
+
+// OKX also needs a passphrase — without it the constructor throws right away
+const okx = new Exchange('okx', {
+  config: {
+    apiKey: process.env.OKX_API_KEY,
+    secret: process.env.OKX_API_SECRET,
+    passphrase: process.env.OKX_PASSPHRASE,
+  },
+  logger: pinoLogger,
 });
 
 // Load trade symbols (markets)
@@ -97,15 +111,17 @@ await exchange.close();
 ### Exchange (Main Entry Point)
 
 ```typescript
-const exchange = new Exchange('binance' | 'bybit', {
-  config: { apiKey: string; secret: string; recvWindow?: number };
+const exchange = new Exchange('binance' | 'bybit' | 'okx', {
+  config: { apiKey: string; secret: string; passphrase?: string; recvWindow?: number };
   logger: ExchangeLogger;
   onNotify?: (message: string) => void | Promise<void>;
 });
 
+// `passphrase` is required for OKX only — Binance and Bybit ignore it
+
 // Access exchange clients
-exchange.futures   // BinanceFutures | BybitLinear
-exchange.spot      // BinanceSpot | BybitSpot
+exchange.futures   // BinanceFutures | BybitLinear | OkxSwap
+exchange.spot      // BinanceSpot | BybitSpot | OkxSpot
 
 // Cleanup
 await exchange.close();
@@ -113,7 +129,8 @@ await exchange.close();
 
 ### ExchangeClient Interface
 
-All four classes (BinanceFutures, BinanceSpot, BybitLinear, BybitSpot) implement this interface:
+All six classes (BinanceFutures, BinanceSpot, BybitLinear, BybitSpot, OkxSwap, OkxSpot) implement this interface.
+Which method is available on which market: see the support matrix in [docs/api-reference.md](./docs/api-reference.md#матрица-поддержки-методов).
 
 #### Market Data (REST)
 
@@ -318,23 +335,37 @@ const exchange = new Exchange('binance', {
 
 - **Binance**: Read, Trade, Withdraw permissions (for different features)
 - **Bybit**: Single API key handles all
+- **OKX**: key + secret + **passphrase**; the passphrase goes into `ExchangeConfig.passphrase`
 
 ### Order Placement
 
 - **Binance**: `createOrderWebSocket()` prefers WebSocket with REST fallback
 - **Bybit**: `createOrderWebSocket()` uses dedicated trade WebSocket stream
+- **OKX**: `createOrderWebSocket()` uses the trade WebSocket when it is connected and healthy, REST otherwise; conditional orders (stop / take-profit / trailing) always go over REST, to OKX's separate algo-order service
 
 ### Position Modes
 
 - **Binance**: Supports Hedge Mode (separate long/short) and One-Way Mode
 - **Bybit**: Always supports both buy and sell sides simultaneously
+- **OKX**: account-level mode read from `/api/v5/account/config` — `long_short_mode` maps to Hedge, `net_mode` to One-Way
+
+### Margin Mode
+
+- **Binance**, **Bybit**: a property of the symbol/account, changed on the exchange
+- **OKX**: sent with every order, so `setMarginMode()` only remembers the choice in the client and applies it to subsequent orders (defaults to cross, and the memory is empty after a restart)
+
+### Order Sizes
+
+- **Binance**, **Bybit**: sizes are in coins on the wire
+- **OKX**: perpetual sizes are in contracts on the wire; the client converts to and from coins, so the public API stays in coins on all three exchanges
 
 ### Funding Rates
 
 - **Binance**: 8 times per day at fixed UTC times
 - **Bybit**: Hourly funding
+- **OKX**: interval is read per instrument from the exchange (the gap between the current and the next settlement), not assumed
 
-These differences are transparent — the same code works for both.
+These differences are transparent — the same code works for all three.
 
 ## Performance Tips
 

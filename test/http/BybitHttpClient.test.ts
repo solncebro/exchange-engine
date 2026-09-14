@@ -580,5 +580,34 @@ describe('BybitHttpClient', () => {
       expect(options.params.category).toBe('linear');
       expect(options.params.limit).toBe(50);
     });
+
+    it('passes the page cursor when provided', async () => {
+      await client.fetchTransactionLog({ category: 'linear', cursor: 'abc' });
+
+      const [, options] = mockInstance.get.mock.calls[0];
+
+      expect(options.params.cursor).toBe('abc');
+    });
+  });
+
+  describe('fetchAllTransactionLog', () => {
+    it('follows nextPageCursor until the exchange stops handing one out', async () => {
+      mockInstance.get
+        .mockResolvedValueOnce({ data: { result: { list: [{ symbol: '1' }], nextPageCursor: 'c1' } } })
+        .mockResolvedValueOnce({ data: { result: { list: [{ symbol: '2' }], nextPageCursor: 'c2' } } })
+        .mockResolvedValueOnce({ data: { result: { list: [{ symbol: '3' }], nextPageCursor: '' } } });
+
+      const result = await client.fetchAllTransactionLog({ category: 'linear', limit: 1, startTime: 5, endTime: 9 });
+
+      expect(result.map((row) => row.symbol)).toEqual(['1', '2', '3']);
+      expect(mockInstance.get.mock.calls.map(([, options]) => options.params.cursor)).toEqual([undefined, 'c1', 'c2']);
+      expect(mockInstance.get.mock.calls.every(([, options]) => options.params.startTime === 5 && options.params.endTime === 9)).toBe(true);
+    });
+
+    it('throws rather than returning a partial log when the page count limit is reached', async () => {
+      mockInstance.get.mockResolvedValue({ data: { result: { list: [{ symbol: 'x' }], nextPageCursor: 'more' } } });
+
+      await expect(client.fetchAllTransactionLog({ category: 'linear' })).rejects.toThrow('page count limit');
+    });
   });
 });

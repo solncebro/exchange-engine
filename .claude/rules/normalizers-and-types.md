@@ -16,186 +16,36 @@ BinanceTicker24hrRaw { symbol, lastPrice: string, priceChangePercent: string, ti
   → normalizeBinanceTickers(rawList) → TickerBySymbol (Map<string, Ticker>)
 ```
 
-## binanceNormalizer.ts — все raw-типы и функции
+## Нормализаторы по биржам
 
-### Raw-интерфейсы (export):
-- `BinanceExchangeInfoRaw` — `{ symbols: BinanceSymbolRaw[] }`
-- `BinanceTicker24hrRaw` — `{ symbol, lastPrice, openPrice, highPrice, lowPrice, priceChangePercent, volume, quoteVolume, time }`
-- `BinanceWebSocketKlineRaw` — `{ t, o, h, l, c, v, T, q, n, V, Q, i?, f?, L?, x, B? }` (короткие ключи, `x: boolean` — isClosed)
-- `BinanceContinuousKlineMessageRaw` — `{ e, E, ps, ct, k: BinanceWebSocketKlineRaw }`
-- `BinancePositionRiskRaw` — `{ symbol, positionSide, positionAmt, entryPrice, markPrice, unRealizedProfit, leverage?, marginType, liquidationPrice, notional, isolatedMargin, [key: string]: unknown }`
-- `BinanceOrderResponseRaw` — `{ orderId, clientOrderId, symbol, side, type, timeInForce, origQty, executedQty, price, avgPrice, stopPrice, cumQuote, status, reduceOnly, time, updateTime }`
-- `BinanceAccountRaw` — `{ balances: BinanceBalanceRaw[] }` (BinanceBalanceRaw — internal: `{ asset, free, locked }`)
-- `BinanceFuturesAccountRaw` — `{ assets: BinanceFuturesAssetRaw[] }` (BinanceFuturesAssetRaw — internal: `{ asset, walletBalance, availableBalance }`)
-- `BinanceFundingRateHistoryRaw` — `{ symbol, fundingRate, fundingTime, markPrice }`
-- `BinanceFundingInfoRaw` — `{ symbol, adjustedFundingRateCap, adjustedFundingRateFloor, fundingIntervalHours }`
-- `BinanceOrderBookRaw` — `{ lastUpdateId, E, T, bids: string[][], asks: string[][] }`
-- `BinancePublicTradeRaw` — `{ id, price, qty, quoteQty, time, isBuyerMaker }`
-- `BinanceMarkPriceRaw` — `{ symbol, markPrice, indexPrice, lastFundingRate, nextFundingTime, time }`
-- `BinanceMarkPriceWebSocketRaw` — событие `markPriceUpdate` c полями `e, E, s, p, ap, i, P, r, T` (символ, цены, время события)
-- `BinanceAggTradeWebSocketRaw` — событие `aggTrade` c полями `e, E, s, a, p, q, f, l, T, m` (агрегированная публичная сделка Binance Futures)
-- `BinanceOpenInterestRaw` — `{ symbol, openInterest, time }`
-- `BinanceCommissionRateRaw` — `{ symbol, makerCommissionRate, takerCommissionRate }`
-- `BinanceIncomeRaw` — `{ symbol, incomeType, income, asset, time, info, tranId, tradeId }`
+Разборы конкретных бирж вынесены в отдельные файлы (30k-лимит):
 
-### Функции нормализации:
-- `normalizeBinanceTradeSymbols(raw)` → `TradeSymbolBySymbol` (Map)
-  - Извлекает фильтры: PRICE_FILTER (tickSize, minPrice, maxPrice), LOT_SIZE (stepSize, minQty, maxQty), MARKET_LOT_SIZE (marketMinQty, marketMaxQty, marketStepSize), MIN_NOTIONAL (notional → minNotional), NOTIONAL (minNotional, maxNotional)
-  - Строит `priceLimitRisk` из PERCENT_PRICE (`source: 'binancePercentPrice'`) или PERCENT_PRICE_BY_SIDE (`source: 'binancePercentPriceBySide'`)
-  - Пробрасывает `pricePrecision`, `quantityPrecision`, `onboardDate → launchTimestamp`, `triggerProtect`, `liquidationFee`, `orderTypes → orderTypeList`, `timeInForce → timeInForceList`
-  - Сохраняет сырой payload в `info`
-  - Определяет тип: PERPETUAL/TRADIFI_PERPETUAL → Swap, пустой/отсутствует contractType → Spot, остальное → Future
-  - `isTradifi`: `contractType === 'TRADIFI_PERPETUAL'` (токенизированные акции/металлы Binance)
-  - `extractFilter<T>()` — generic helper с дискриминированным union по `filterType`, возвращает точный тип фильтра
-- `normalizeBinanceTickers(rawList)` → `TickerBySymbol` (Map)
-- `normalizeBinanceKlines(rawList)` → `Kline[]` — массив массивов → массив объектов, parseFloat для строк
-- `normalizeBinanceKlineWebSocketMessage(raw)` → `Kline` — маппинг коротких ключей, `raw.x → isClosed`
-- `normalizeBinancePosition(raw)` → `Position`
-  - Маппинг через `BINANCE_POSITION_SIDE` (LONG→long, SHORT→short, BOTH→both)
-  - `marginType === 'ISOLATED' ? MarginModeEnum.Isolated : MarginModeEnum.Cross`
-  - NaN liquidationPrice → 0
-  - Отсутствующий/невалидный leverage → 0
-  - Сохраняет raw в `info`
-- `normalizeBinanceOrder(raw)` → `Order`
-  - Маппинг через `BINANCE_ORDER_SIDE`, `BINANCE_ORDER_TYPE` и `BINANCE_ORDER_STATUS` (константы из `src/constants/mappings.ts`); `side` с fallback `?? OrderSideEnum.Buy` (не утекает `undefined` в non-optional поле)
-  - `orderId` number → string
-- `normalizeBinanceBalances(raw)` → `BalanceByAsset` (Map)
-  - Пропускает нулевые балансы (`free + locked === 0`) и невалидные (`NaN` в `free`/`locked` → `continue`)
-- `normalizeBinanceFuturesBalances(raw)` → `AccountBalances`
-  - Отдельная функция для фьючерсного баланса — использует `walletBalance`/`availableBalance` вместо `free`/`locked`
-  - Пропускает записи с `walletBalance === 0`
-  - `free = availableBalance`, `locked = walletBalance - availableBalance`, `total = walletBalance`
-  - `totalAvailableBalance`/`availableBalanceSource`: `raw.availableBalance` в приоритете (`'exchange'`); если его нет — `totalWalletBalance − raw.totalInitialMargin` (`'derived'`); иначе `0` и `'unknown'` — занятая маржа НЕ выводится вычитанием кошелька со свободными (свободные уже уменьшены биржей на нереализованный итог)
-  - `totalInitialMargin` — читается из `raw.totalInitialMargin`, если есть; `totalMarginBalance` — из `raw.totalMarginBalance`
-- `normalizeBinanceFundingRateHistory(rawList)` → `FundingRateHistory[]`
-  - Пустой markPrice → `null`
-- `normalizeBinanceFundingInfo(rawList)` → `FundingInfo[]`
-  - parseFloat для строковых чисел, fundingIntervalHours уже number
-- `normalizeBinanceOrderBook(raw, symbol)` → `OrderBook`
-  - symbol передаётся отдельно (отсутствует в raw), timestamp fallback `T → E → Date.now()`
-  - `updateId = raw.lastUpdateId`, `eventTimestamp = raw.E`
-- `normalizeBinancePublicTrades(rawList, symbol)` → `PublicTrade[]`
-  - symbol передаётся отдельно, `id` number → string, `qty → quantity`, `quoteQty → quoteQuantity`
-- `normalizeBinanceAggTradeFromStream(raw)` → `PublicTrade`
-  - WS-вариант одиночной сделки (`@aggTrade`, Binance Futures Public Stream): `a` (agg trade id) → `id` (string), `p`/`q` → parseFloat, `quoteQuantity = price * quantity`, `T → timestamp`
-  - `isBuyerMaker = raw.m`, `side = raw.m ? Sell : Buy` (Binance `m: true` — покупатель был мейкером, значит инициатор сделки продавец)
-- `normalizeBinanceMarkPriceList(rawList)` → `MarkPrice[]`
-  - parseFloat для строковых полей, `time → timestamp`
-- `normalizeBinanceMarkPriceWebSocketList(rawList)` → `MarkPriceUpdate[]`
-  - `s → symbol`, `p → markPrice`, `i → indexPrice` (пустая строка → `0`), `E → timestamp`
-- `normalizeBinanceOpenInterest(raw)` → `OpenInterest`
-  - parseFloat для openInterest, `time → timestamp`
-- `normalizeBinanceCommissionRate(raw)` → `FeeRate[]`
-  - Возвращает массив из одного элемента, `makerCommissionRate → makerRate`, `takerCommissionRate → takerRate`
-- `normalizeBinanceIncomeList(rawList)` → `Income[]`
-  - `info` собирается из `{ tranId, tradeId, info }`
+| Файл | Содержание |
+|------|-----------|
+| [normalizers-and-types-binance-bybit.md](normalizers-and-types-binance-bybit.md) | binanceNormalizer.ts и bybitNormalizer.ts: все raw-интерфейсы и функции нормализации |
+| [normalizers-and-types-okx.md](normalizers-and-types-okx.md) | okxNormalizer.ts: raw-интерфейсы, функции нормализации, единицы контрактов |
 
-## bybitNormalizer.ts — все raw-типы и функции
+## batchOrderOutcome.ts — общие сборщики исхода одной записи пачки
 
-Тот же паттерн, но с Bybit-специфичными полями и маппингами.
+Живёт отдельно от всех бирж: правило общее.
 
-### Bybit Raw-типы (export):
-
-REST:
-- `BybitInstrumentInfoRaw` — `{ symbol, status, baseCoin, quoteCoin, settleCoin?, contractType?, contractSize?, lotSizeFilter?, priceFilter? }`
-- `BybitTickerRaw` — `{ symbol, lastPrice, prevPrice24h, highPrice24h, lowPrice24h, price24hPcnt, volume24h, turnover24h, markPrice?, indexPrice?, bid1Price?, bid1Size?, ask1Price?, ask1Size?, fundingRate?, nextFundingTime?, time? }`
-- `BybitPositionRaw` — `{ symbol, side, size, avgPrice, markPrice, unrealisedPnl, leverage, tradeMode, liqPrice, positionIdx, [key: string]: unknown }`
-- `BybitOrderResponseRaw` — `{ orderId, orderLinkId, symbol, side, orderType, timeInForce, qty, price, avgPrice, triggerPrice, cumExecQty, cumExecValue, orderStatus, reduceOnly, createdTime, updatedTime }`
-- `BybitWalletBalanceRaw` — `{ list: BybitAccountRaw[] }` (BybitAccountRaw — internal: `{ accountType, coin: BybitCoinRaw[] }`)
-- `BybitOrderBookRaw` — `{ a: string[][], b: string[][], ts, u, s?, seq? }` (a = asks, b = bids; `s` — symbol из WS payload, `seq` — cross-sequence)
-- `BybitPublicTradeRaw` — `{ execId, symbol, price, size, side, time, isBlockTrade }`
-- `BybitOpenInterestRaw` — `{ openInterest, timestamp }` (оба string)
-- `BybitFeeRateRaw` — `{ symbol, makerFeeRate, takerFeeRate }`
-- `BybitFundingRateHistoryRaw` — `{ symbol, fundingRate, fundingRateTimestamp }`
-- `BybitClosedPnlRaw` — `{ symbol, orderId, side, qty, avgEntryPrice, avgExitPrice, cumEntryValue, cumExitValue, openFee, closeFee, closedPnl, createdTime }` (`closedPnl` — биржевой итог, наружу не отдаётся — см. `normalizeBybitClosedPnlList`)
-- `BybitTransactionLogRaw` — `{ symbol, type, qty, cashFlow, currency, transactionTime, tradeId, orderId }`
-
-WebSocket:
-- `BybitWebSocketKlineRaw` — `{ start, end?, interval?, open, high, low, close, volume, turnover, confirm: boolean, timestamp }`
-- `BybitPublicTradeDataRaw` — `{ T: number, s: string, p: string, v: string, S?: string, i?: string, BT?: boolean, L?: string }` (`S` — side, `i` — trade id, `BT` — block trade flag, `L` — price direction tick)
-- `BybitWebSocketMessageRaw<T>` — `{ topic, type, ts, data: T[] }`
-- `BybitKlineMessageRaw` = `BybitWebSocketMessageRaw<BybitWebSocketKlineRaw>`
-- `BybitTradeMessageRaw` = `BybitWebSocketMessageRaw<BybitPublicTradeDataRaw>`
-
-### Функции нормализации:
-- `normalizeBybitTradeSymbols(rawList)` → `TradeSymbolBySymbol` (Map)
-  - `isActive`: `status === 'Trading'` или `status === 'PreLaunch'`
-  - LinearPerpetual/LinearFutures → Swap, пустой contractType → Spot, остальное → Future
-  - `isTradifi`: `symbolType` ∈ {`stock`, `commodity`} — Bybit листит токенизированные акции/ETF и сырьё (нефть, золото, серебро) с обычным `contractType: 'LinearPerpetual'`, единственный маркер — `symbolType`; `innovation` — обычная крипта, не TradFi
-  - `stepSize` берётся из `qtyStep` (linear) или `basePrecision` (spot)
-  - `minNotional` берётся из `minNotionalValue` или `minOrderAmt`
-  - `filter`: пробрасывает `priceFilter.minPrice/maxPrice`, `lotSizeFilter.maxMktOrderQty → marketMaxQty`, `lotSizeFilter.postOnlyMaxOrderQty → postOnlyMaxQty`
-  - `leverageFilter` строится из `raw.leverageFilter` (если есть хоть одно поле)
-  - `priceLimitRisk` строится из `raw.riskParameters` (`source: 'bybitRiskParameters'`, `priceLimitRatioX`, `priceLimitRatioY`)
-  - `funding` строится из `fundingInterval`, `upperFundingRate`, `lowerFundingRate`
-  - `launchTimestamp` — parseFloat от `launchTime` (если непустая строка)
-  - Сохраняет сырой payload в `info`
-- `normalizeBybitTickers(rawList)` → `TickerBySymbol` (Map)
-  - `priceChangePercent` умножается на 100 (Bybit отдаёт долю, не проценты)
-  - `timestamp` fallback на `Date.now()` если отсутствует
-  - Пробрасывает `markPrice`, `indexPrice`, `fundingRate`, `nextFundingTime`, `bid1Price`, `bid1Size`, `ask1Price`, `ask1Size` через parseFloat (опционально, только когда Bybit прислал поле)
-- `normalizeBybitKlines(rawList)` → `Kline[]` — массив строковых массивов → массив объектов, `closeTimestamp = 0`, `numberOfTrades = 0`, `.reverse()` для хронологического порядка (Bybit возвращает newest-first)
-- `normalizeBybitKlineWebSocketMessage(raw)` → `Kline` — маппинг полей, `raw.confirm → isClosed`
-- `normalizeBybitPosition(raw)` → `Position`
-  - Маппинг через `BYBIT_POSITION_SIDE` (Buy→Long, Sell→Short), fallback → Both
-  - `tradeMode === 0 ? Cross : Isolated`
-  - NaN liquidationPrice → 0
-  - Сохраняет raw в `info`
-- `normalizeBybitOrder(raw)` → `Order`
-  - Маппинг через `BYBIT_ORDER_SIDE`, `BYBIT_ORDER_TYPE`, `BYBIT_ORDER_STATUS`, `BYBIT_TIME_IN_FORCE`; `side` с fallback `?? OrderSideEnum.Buy`
-  - `triggerPrice → stopPrice`, `cumExecValue → filledQuoteAmount`
-  - timestamp через `parseFloat(raw.createdTime)`
-- `buildBybitOrderFromCreateResponse(args, orderId)` → `Order`
-  - Строит Order из `CreateOrderWebSocketArgs` + orderId, все filled-поля = 0, status = 'open'
-- `normalizeBybitBalances(raw)` → `AccountBalances`
-  - Итерирует по `raw.list[].coin[]`, агрегирует балансы если один coin встречается в нескольких accounts
-  - `free = walletBalance - totalPositionIM - totalOrderIM`
-  - `locked` = frozenAmount или locked, fallback `walletBalance - free`
-  - Пропускает нулевые балансы (`free + locked === 0`)
-  - На каждый asset заполняет `walletBalance`, `totalOrderInitialMargin`, `totalPositionInitialMargin`, `usdValue` (если прислан); `availableToWithdraw` — если не пусто
-  - Свод счёта строится ТОЛЬКО из `usdValue` монет (`sumBalanceUsdValue`/`sumMarginUsdValue`, private) — остатки в собственных единицах монет складывать нельзя (биткойн иначе весит как доллар). `null` от этих хелперов (хоть у одной ненулевой монеты нет `usdValue`) — сигнал считать неполную сумму нельзя
-  - `totalWalletBalance`/`totalAvailableBalance`/`availableBalanceSource`: биржевое поле в приоритете (`'exchange'`); иначе `marginBalance − initialMargin` или `totalWalletBalance − initialMargin` (`'derived'`); иначе — если есть долларовая оценка занятой маржи по монетам — `totalWalletBalance − marginUsd` (`'derived'`); иначе `0` и `'unknown'`
-  - На уровне `AccountBalances` возвращает `accountType` (primary account), `totalMarginBalance`, `totalInitialMargin` (биржевое поле или `marginUsd`, если биржа не дала), `availableBalanceSource`
-- `normalizeBybitOrderBook(raw, symbol)` → `OrderBook`
-  - symbol передаётся отдельно, `a → askList`, `b → bidList`, `ts → timestamp`, `u → updateId`
-- `normalizeBybitOrderBookUpdate(raw, symbol, updateType, receivedTimestamp, envelopeTimestamp?)` → `OrderBookUpdate`
-  - WS-вариант orderbook (Bybit V5 public stream); сохраняет уровни как сырые пары decimal-строк (`OrderBookRawLevel = [string, string]`) — без `parseFloat`, чтобы избежать потери точности
-  - `bidList`/`askList` строятся через приватный `toOrderBookRawLevelList(rawList)` (`[level[0], level[1]]`)
-  - `updateType` — переданный извне (`'snapshot' | 'delta'`), `receivedTimestamp` — время, когда сообщение получено клиентом
-  - `eventTimestamp = envelopeTimestamp ?? raw.ts` — Bybit V5 кладёт время события в ENVELOPE-поле `ts` сообщения, а не в `data`, поэтому `raw.ts` обычно `undefined`; envelope-значение в приоритете, `raw.ts` — fallback
-- `parseBybitOrderbookRawFrame({ raw, symbol, receivedTimestamp }: ParseBybitOrderbookRawFrameArgs)` → `OrderBookUpdate | undefined`
-  - On-demand парсер сырого WS-кадра (для отложенного парсинга при `lazyOrderbookParse`, см. `exchange-layer.md`): `JSON.parse(raw)` → достаёт envelope (`type`, `ts`, `data`); при невалидном JSON, отсутствующем `data` или `data` как массиве (не поддерживается) — возвращает `undefined`
-  - `updateType` = `'snapshot'` только если `envelope.type === 'snapshot'`, иначе `'delta'`
-  - Делегирует в `normalizeBybitOrderBookUpdate`, передавая `envelope.ts` как `envelopeTimestamp`
-  - Экспортируется из `src/index.ts` (публичный API)
-- `normalizeBybitPublicTradeList(rawList)` → `PublicTrade[]`
-  - `execId → id`, `size → quantity`, `quoteQuantity` вычисляется как `price * size`
-  - `isBuyerMaker = raw.side === 'Sell'`
-  - Пробрасывает `isBlockTrade`; `side` маппится через `BYBIT_ORDER_SIDE` (если side валидный)
-- `normalizeBybitPublicTradeFromStream(rawList)` → `PublicTrade[]`
-  - WS-вариант (`BybitPublicTradeDataRaw[]` с короткими ключами): `i → id` (fallback пустая строка), `s → symbol`, `p → price` (parseFloat), `v → quantity` (parseFloat), `quoteQuantity = price * quantity`, `T → timestamp`, `isBuyerMaker = S === 'Sell'`, `BT → isBlockTrade` (fallback false)
-  - `side` маппится через `BYBIT_ORDER_SIDE[S]`, если значение валидно
-- `normalizeBybitMarkPriceList(rawList)` → `MarkPrice[]`
-  - Использует `BybitTickerRaw` (те же данные что tickers), `fundingRate → lastFundingRate`, timestamp fallback `Date.now()`
-- `normalizeBybitOpenInterest(raw)` → `OpenInterest`
-  - `symbol` возвращается пустым (устанавливается вызывающим), parseFloat для строковых полей
-- `normalizeBybitFeeRateList(rawList)` → `FeeRate[]`
-  - `makerFeeRate → makerRate`, `takerFeeRate → takerRate`
-- `normalizeBybitFundingRateHistoryList(rawList)` → `FundingRateHistory[]`
-  - `fundingRateTimestamp → fundingTime`, `markPrice` всегда `null` (Bybit не возвращает)
-- `normalizeBybitClosedPnlList(rawList)` → `ClosedPnl[]`
-  - `avgEntryPrice → entryPrice`, `avgExitPrice → exitPrice`, side через `BYBIT_ORDER_SIDE` маппинг
-  - `closedPnl` НЕ читается из биржевого поля — оно уже вычитает фандинг за жизнь позиции. Пересчитывается как `bybitGrossPnl(raw, side) − openFee − closeFee`, где `bybitGrossPnl` — `cumEntryValue − cumExitValue` (закрытие шорта покупкой) или наоборот для лонга. Тот же смысл, что у Binance: чистый после торговых комиссий, без фандинга
-- `normalizeBybitIncomeList(rawList)` → `Income[]`
-  - Использует `BybitTransactionLogRaw`, `currency → asset`, `type → incomeType`
-  - `income` — через приватный `bybitIncomeAmount`: для типов из `BYBIT_FUNDING_INCOME_TYPE_SET` (`FUNDING`/`SETTLEMENT`, `src/constants/bybit.ts`) берётся поле `funding` (у этих строк `cashFlow` всегда 0), иначе — `cashFlow`
-  - `info` собирается из `{ tradeId, orderId }`
-  - `quantity = parseFloat(raw.qty)`
+- `buildPlacedOrderOutcome(order)` / `buildRejectedOrderOutcome(errorCode, errorText)` → `CreateOrderItemResult` —
+  заявка считается поставленной ТОЛЬКО когда биржа вернула её номер; пустой номер, слово `undefined`
+  вместо номера, отсутствующая запись — всё это отказ, а не успех (`MISSING_ORDER_ID_ERROR_TEXT`).
+- `buildBatchItemResult<TResult>(orderId, entryStatus, rateLimit?)` → `CancelOrderItemResult` /
+  `ModifyOrderItemResult` (0.25.0) — исход одной записи пачки на ОТМЕНУ или ПРАВКУ по ответу
+  `retExtInfo.list[]`. `code === 0` — успех; поля объявлены обязательными, но приезжают с провода,
+  поэтому проверяются по факту (`typeof`): запись без числового кода — отказ, а не молчаливый успех;
+  текст по умолчанию `'Unknown error'`. Снимок предела частоты прикладывается только если передан
+  (путь через торговый канал; обычные запросы заголовка не несут). Тип входа —
+  `BatchEntryStatusRaw` (`batchOrderOutcome.types.ts`). Один сборщик на три места, где он был
+  выписан слово в слово: `BybitTradeStream` (пачки на отмену и на правку), `BybitBaseClient.cancelBatchOrders`,
+  `BybitBaseClient.modifyBatchOrders`. У OKX своя копия — `buildOkxBatchItemResult` в `okxNormalizer.ts`.
 
 ## Унифицированные типы (src/types/common.ts)
 
 ### Enums:
-- `ExchangeNameEnum` — Binance, Bybit
+- `ExchangeNameEnum` — Binance, Bybit, Okx (0.25.0: третье значение)
 - `OrderSideEnum` — Buy, Sell
 - `OrderTypeEnum` — Market, Limit, StopMarket, StopLimit, TakeProfitMarket, TakeProfitLimit, Stop, TakeProfit, TrailingStop (0.13.0: добавлены `StopLimit`/`TakeProfitLimit`)
 - `MarginModeEnum` — Isolated, Cross
@@ -210,9 +60,11 @@ WebSocket:
 - `MarketTypeEnum` — Futures, Spot
 - `MARKET_TYPE_LIST: MarketTypeEnum[]` — `Object.values(MarketTypeEnum)`
 - `WebSocketConnectionTypeEnum` — Public, Trade, UserData
+- `IncomeKind` — `'realizedPnl' | 'commission' | 'funding' | 'other'` (тип-литерал, не enum); `IncomeTypeFilter` (`types/exchange.ts`) — то же без `'other'`
+- `OrderRateLimitSource` (`types/exchange.ts`) — `'binance-exchange-info' | 'bybit-exchange-header' | 'bybit-documented' | 'okx-documented' | 'fallback'`
 
 ### Конфигурация:
-- `ExchangeConfig` — `{ apiKey, secret, recvWindow?, isDemoMode?, httpsAgent?, publicStreamConnectionPacking?, lazyOrderbookParse? }`
+- `ExchangeConfig` — `{ apiKey, secret, passphrase?, recvWindow?, isDemoMode?, httpsAgent?, publicStreamConnectionPacking?, lazyOrderbookParse? }`. `passphrase` читает ТОЛЬКО OKX, и для него оно обязательно: пустое значение — `ExchangeError('OKX_PASSPHRASE_REQUIRED')` в конструкторе клиента
 
 ### Интерфейсы:
 - `Ticker` — `{ symbol, lastPrice, openPrice, highPrice, lowPrice, priceChangePercent, volume, quoteVolume, timestamp, markPrice?, indexPrice?, bid1Price?, bid1Size?, ask1Price?, ask1Size?, fundingRate?, nextFundingTime? }` (последние 8 полей заполняются Bybit tickers, когда биржа их прислала)
@@ -226,7 +78,7 @@ WebSocket:
   - `'bybitRiskParameters'` — `{ priceLimitRatioX, priceLimitRatioY }`
 - `TradingFunding` — `{ fundingIntervalMinutes?, upperFundingRate?, lowerFundingRate? }`
 - `Position` — `{ symbol, side, direction: 'long' | 'short' | null, contracts, entryPrice, markPrice, unrealizedPnl, leverage, marginMode, liquidationPrice, positionIdx?, info }`
-- `Order` — `{ id, clientOrderId, symbol, side, type, amount, price, avgPrice, stopPrice, filledAmount, filledQuoteAmount, status, timeInForce, reduceOnly, timestamp, updatedTimestamp, rateLimit?: OrderRateLimitSnapshot }`. Поле `rateLimit?` опциональное — заполняется только для одиночных order-операций через WebSocket Trade Stream.
+- `Order` — `{ id, clientOrderId, symbol, side, type, amount, price, avgPrice, stopPrice, filledAmount, filledQuoteAmount, status, timeInForce, reduceOnly, timestamp, updatedTimestamp, rateLimit?: OrderRateLimitSnapshot, isConditional?, triggeredOrderId? }`. Поле `rateLimit?` опциональное — заполняется только для одиночных order-операций через WebSocket Trade Stream. `isConditional?`/`triggeredOrderId?` заполняет OKX: условные заявки живут в отдельной службе биржи, и номер порождённой обычной заявки нужен, чтобы дочитать фактическое исполнение.
 - `OrderRateLimitSnapshot` — `{ limit: number; remaining: number; resetMs: number }`. Per-response runtime snapshot per-UID rate-limit, извлечённый из заголовков ответа на одиночный `createOrder` через WS. Bybit: парсится из `header['X-Bapi-Limit' / 'X-Bapi-Limit-Status' / 'X-Bapi-Limit-Reset-Timestamp']` через `parseBybitHeaderRateLimit`. Binance: из массива `message.rateLimits[]` (поиск entry с `rateLimitType === 'ORDERS' && interval === 'SECOND'`) через `parseBinanceRateLimitArray`, `remaining = limit - count`, `resetMs = Date.now() + intervalNum * 1000`. Отличается от `OrderRateLimit` (см. `getOrderRateLimit()`): тот возвращает статический per-UID лимит из exchange-info, этот — runtime snapshot после конкретной операции.
 - `Balance` — `{ asset, free, locked, total, walletBalance?, availableToWithdraw?, totalOrderInitialMargin?, totalPositionInitialMargin?, usdValue? }` (опциональные поля — Bybit Unified Account). `free`/`locked`/`total` — в единицах САМОЙ монеты, монеты между собой складывать нельзя (иначе биткойн весит как доллар — инцидент 29.08.2026); `usdValue?` — единственная величина, допустимая для свода по счёту
 - `AccountBalances` — `{ totalWalletBalance, totalAvailableBalance, balanceByAsset, accountType?, totalMarginBalance?, totalInitialMargin?, availableBalanceSource? }`. `availableBalanceSource` — `'exchange'` (готовое поле биржи) / `'derived'` (выведено из остатка и занятой маржи) / `'unknown'` (посчитать нечем, число нулевое и фактом не является) — потребитель обязан различать факт и расчёт
@@ -243,13 +95,13 @@ WebSocket:
 - `RawOrderbookHandler` — `(frame: RawOrderbookFrame) => void`
 - `PublicTrade` — `{ id, symbol, price, quantity, quoteQuantity, timestamp, isBuyerMaker, isBlockTrade?, side? }` (`isBlockTrade` и `side` — Bybit)
 - `PublicTradeHandler` — `(symbol: string, tradeList: PublicTrade[]) => void`
-- `MarkPrice` — `{ symbol, markPrice, indexPrice, lastFundingRate, nextFundingTime, timestamp }`
-- `MarkPriceUpdate` — `{ symbol, markPrice, indexPrice, timestamp }` (потоковые обновления mark/index, без funding-полей)
+- `MarkPrice` — `{ symbol, markPrice, indexPrice?, lastFundingRate, nextFundingTime, timestamp }` (`indexPrice` отсутствует, если биржа его не прислала — у OKX ручка цены маркировки индекс не отдаёт; ноль-заглушка недопустима)
+- `MarkPriceUpdate` — `{ symbol, markPrice, indexPrice?, timestamp }` (потоковые обновления mark/index, без funding-полей; `indexPrice` отсутствует, пока индекс ни разу не приходил — у OKX канал цены маркировки индекса не несёт вовсе)
 - `MarkPriceHandler` — `(markPriceList: MarkPriceUpdate[]) => void`
 - `OpenInterest` — `{ symbol, openInterest, timestamp }`
 - `FeeRate` — `{ symbol, makerRate, takerRate }`
-- `Income` — `{ symbol, incomeType, income, asset, timestamp, info: Record<string, unknown>, quantity? }`
-- `ClosedPnl` — `{ symbol, orderId, side: OrderSideEnum, quantity, entryPrice, exitPrice, closedPnl, timestamp }`. `closedPnl` — чистый итог после торговых комиссий (открытия и закрытия), БЕЗ фандинга на обеих биржах: тождество «валовой − closedPnl = комиссии» держится и у Binance, и у Bybit; фандинг — отдельный поток (`fetchIncome`, `incomeType: 'funding'`)
+- `Income` — `{ symbol, incomeType, kind: IncomeKind, income, asset, timestamp, info: Record<string, unknown>, quantity? }`. `incomeType` — строка биржи, приведённая к общему виду; `kind` — разряд записи для потребителя (`'realizedPnl' | 'commission' | 'funding' | 'other'`), по которому можно ветвиться, не разбирая строку
+- `ClosedPnl` — `{ symbol, orderId, side: OrderSideEnum, quantity, entryPrice, exitPrice, closedPnl, timestamp }`. `closedPnl` — чистый итог после торговых комиссий (открытия и закрытия), БЕЗ фандинга на всех трёх биржах: тождество «валовой − closedPnl = комиссии» держится у Binance, Bybit и OKX; фандинг — отдельный поток (`fetchIncome`, `incomeType: 'funding'`)
 - `ModifyBatchOrderArgs` — `{ symbol, orderId, side: OrderSideEnum, clientOrderId?, price?, amount?, triggerPrice? }`. `side` обязателен (требуется для Binance PUT batch); `clientOrderId` → Bybit `orderLinkId` / Binance `origClientOrderId`.
 - `CancelOrderItemResult` — `{ orderId, isSuccess, errorCode: number | null, errorText: string | null }`
 - `CancelBatchOrdersResult = CancelOrderItemResult[]`
@@ -287,4 +139,17 @@ BYBIT_ORDER_SIDE: { Buy → Buy, Sell → Sell }
 BYBIT_ORDER_TYPE: { Market → Market, Limit → Limit }
 BYBIT_ORDER_STATUS: { New → 'open', PartiallyFilled → 'open', Untriggered → 'open', Triggered → 'open', Filled → 'closed', Cancelled → 'canceled', PartiallyFilledCanceled → 'canceled', Rejected → 'rejected', Deactivated → 'canceled' }
 BYBIT_TIME_IN_FORCE: { GTC → Gtc, IOC → Ioc, FOK → Fok, PostOnly → PostOnly }
+OKX_ORDER_SIDE: { buy → Buy, sell → Sell }
+OKX_ORDER_SIDE_REVERSE: { Buy → 'buy', Sell → 'sell' }
+OKX_POSITION_SIDE: { long → Long, short → Short, net → Both }
+OKX_POSITION_IDX: { net → 0, long → 1, short → 2 }
+OKX_ORDER_STATUS: { live → 'open', partially_filled → 'open', filled → 'closed', canceled → 'canceled', mmp_canceled → 'canceled' }
+OKX_ALGO_STATUS: { live → 'open', pause → 'open', partially_effective → 'open', effective → 'open', canceled → 'canceled', order_failed → 'rejected', partially_failed → 'rejected' }
+  (сработавшая условная заявка — ОТКРЫТА, как `TRIGGERED` у Binance и `Triggered` у Bybit: срабатывание ещё не исполнение)
+OKX_ORDER_TYPE_BY_TIME_IN_FORCE: { Gtc → 'limit', PostOnly → 'post_only', Ioc → 'ioc', Fok → 'fok' }  // срок действия у OKX закодирован в типе заявки
+OKX_ORD_TYPE_TO_ORDER_TYPE: { market → Market, limit/post_only/ioc/fok → Limit, optimal_limit_ioc → Market }
+OKX_ORD_TYPE_TO_TIME_IN_FORCE: { limit → Gtc, post_only → PostOnly, ioc → Ioc, fok → Fok, market → Gtc, optimal_limit_ioc → Ioc }
+OKX_TRIGGER_PX_TYPE: { markPrice → 'mark', lastPrice → 'last', indexPrice → 'index' }
+OKX_WORKING_TYPE_TRIGGER_PX_TYPE: { markPrice → 'mark', contractPrice → 'last' }
+OKX_INCOME_BILL_TYPE: { funding → '8', realizedPnl → '2', commission → '2' }
 ```

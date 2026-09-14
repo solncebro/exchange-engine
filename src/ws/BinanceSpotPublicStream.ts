@@ -4,8 +4,8 @@ import type { WebSocketOpenContext } from '@solncebro/websocket-engine';
 import type { ExchangeLogger, KlineInterval, MarkPriceHandler, TickerBySymbol, WebSocketConnectionInfo } from '../types/common';
 import { WebSocketConnectionTypeEnum } from '../types/common';
 import type { KlineHandler } from '../types/exchange';
-import { normalizeBinanceKlineWebSocketMessage, normalizeBinanceTickers } from '../normalizers/binanceNormalizer';
-import type { BinanceTicker24hrRaw, BinanceWebSocketKlineRaw } from '../normalizers/binanceNormalizer';
+import { normalizeBinanceKlineWebSocketMessage, normalizeBinanceMiniTickerList } from '../normalizers/binanceNormalizer';
+import type { BinanceMiniTickerWebSocketRaw, BinanceWebSocketKlineRaw } from '../normalizers/binanceNormalizer';
 import { resolveUnifiedBinanceInterval } from './binanceWebSocketUtils';
 import type { BinanceSpotPublicStreamArgs, BinanceSpotWebSocketEnvelope } from './BinanceSpotPublicStream.types';
 import { parseWebSocketMessage } from './parseWebSocketMessage';
@@ -163,12 +163,22 @@ class BinanceSpotPublicStream {
 
   private handleMessage(message: BinanceSpotWebSocketEnvelope): void {
     try {
-      if (message.e === '24hrMiniTicker' && Array.isArray(message.data)) {
-        const tickerBySymbol = normalizeBinanceTickers(message.data as BinanceTicker24hrRaw[]);
+      if (Array.isArray(message)) {
+        this.handleMiniTickerList(message as unknown as BinanceMiniTickerWebSocketRaw[]);
 
-        for (const handler of this.tickerHandlerSet) {
-          handler(tickerBySymbol);
-        }
+        return;
+      }
+
+      if (message.stream === '!miniTicker@arr' && Array.isArray(message.data)) {
+        this.handleMiniTickerList(message.data as BinanceMiniTickerWebSocketRaw[]);
+
+        return;
+      }
+
+      const bareKlineRaw = message['k'] as BinanceWebSocketKlineRaw | undefined;
+
+      if (message.e === 'kline' && typeof message.s === 'string' && bareKlineRaw?.i !== undefined) {
+        this.handleKlineFromStream(`${message.s.toLowerCase()}@kline_${bareKlineRaw.i}`, message);
 
         return;
       }
@@ -177,21 +187,19 @@ class BinanceSpotPublicStream {
         return;
       }
 
-      if (message.stream === '!miniTicker@arr' && Array.isArray(message.data)) {
-        const tickerBySymbol = normalizeBinanceTickers(message.data as BinanceTicker24hrRaw[]);
-
-        for (const handler of this.tickerHandlerSet) {
-          handler(tickerBySymbol);
-        }
-
-        return;
-      }
-
       if (message.stream.includes('@kline_')) {
         this.handleKlineFromStream(message.stream, message.data);
       }
     } catch (error) {
       this.logger.error(`BinanceSpotPublicStream: error handling message: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  private handleMiniTickerList(rawList: BinanceMiniTickerWebSocketRaw[]): void {
+    const tickerBySymbol = normalizeBinanceMiniTickerList(rawList);
+
+    for (const handler of this.tickerHandlerSet) {
+      handler(tickerBySymbol);
     }
   }
 

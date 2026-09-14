@@ -39,3 +39,15 @@ describe('signed request wire-format parity', () => {
     expect(wireQuery).toContain(',');
   });
 });
+
+describe('OKX signed GET requestPath parity', () => {
+  it('matches the query string axios actually sends for a signed GET', () => {
+    const params = { instType: 'SWAP', instId: 'BTC-USDT-SWAP', after: '1700000000000' };
+    const requestPath = `/api/v5/trade/orders-pending?${serializeQueryParams(params)}`;
+
+    const instance = axios.create({ paramsSerializer: { serialize: serializeQueryParams } });
+    const uri = instance.getUri({ url: '/api/v5/trade/orders-pending', params });
+
+    expect(uri).toBe(requestPath);
+  });
+});

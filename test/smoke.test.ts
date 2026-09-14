@@ -76,8 +76,16 @@ const mockArgs: ExchangeArgs = {
   onNotify: mockOnNotify,
 };
 
+// OKX подписывает каждый запрос кодовой фразой, поэтому без неё клиент отказывается создаваться.
+const mockOkxArgs: ExchangeArgs = {
+  config: { ...mockConfig, passphrase: 'test-passphrase' },
+  logger: mockLogger,
+  onNotify: mockOnNotify,
+};
+
 const binance = new Exchange(ExchangeNameEnum.Binance, mockArgs);
 const bybit   = new Exchange(ExchangeNameEnum.Bybit,   mockArgs);
+const okx     = new Exchange(ExchangeNameEnum.Okx,     mockOkxArgs);
 
 function assertExchangeClient(client: ExchangeClient, label: string): void {
   const requiredMethodList: Array<keyof ExchangeClient> = [
@@ -154,9 +162,15 @@ assertExchangeClient(bybit.futures, 'bybit.futures');
 console.log('Checking bybit.spot ...');
 assertExchangeClient(bybit.spot, 'bybit.spot');
 
+console.log('Checking okx.futures ...');
+assertExchangeClient(okx.futures, 'okx.futures');
+
+console.log('Checking okx.spot ...');
+assertExchangeClient(okx.spot, 'okx.spot');
+
 console.assert(
-  Object.values(ExchangeNameEnum).length === 2,
-  'ExchangeNameEnum must have 2 values',
+  Object.values(ExchangeNameEnum).length === 3,
+  'ExchangeNameEnum must have 3 values',
 );
 
 console.assert(

@@ -42,6 +42,8 @@ export interface CategoryFilterArgs {
 export interface FetchTransactionLogArgs extends CategoryFilterArgs {
   startTime?: number;
   endTime?: number;
+  /** Курсор следующей страницы из `nextPageCursor` предыдущего ответа. */
+  cursor?: string;
 }
 
 export interface FetchBybitKlineArgs {

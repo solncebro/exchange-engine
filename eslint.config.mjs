@@ -6,11 +6,11 @@ export default [
     ignores: ['dist/', 'node_modules/', 'coverage/'],
   },
   {
-    files: ['src/**/*.ts', 'test/**/*.ts'],
+    files: ['src/**/*.ts', 'test/**/*.ts', 'scripts/**/*.ts'],
     languageOptions: {
       parser: tsparser,
       parserOptions: {
-        project: ['./tsconfig.json', './test/tsconfig.json'],
+        project: ['./tsconfig.json', './test/tsconfig.json', './scripts/tsconfig.json'],
       },
     },
     plugins: {
@@ -34,6 +34,12 @@ export default [
       '@typescript-eslint/no-explicit-any': 'off',
       '@typescript-eslint/no-require-imports': 'off',
       '@typescript-eslint/no-non-null-assertion': 'off',
+    },
+  },
+  {
+    files: ['scripts/**/*.ts'],
+    rules: {
+      'no-console': 'off',
     },
   },
 ];

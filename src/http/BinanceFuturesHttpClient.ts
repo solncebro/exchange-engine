@@ -60,6 +60,10 @@ class BinanceFuturesHttpClient extends BinanceBaseHttpClient {
     super(args, BINANCE_REQUEST_TIMEOUT);
   }
 
+  protected override get errorExchangeLabel(): string {
+    return 'binance';
+  }
+
   async fetchFuturesAccount(): Promise<BinanceFuturesAccountRaw> {
     return this.signedGet<BinanceFuturesAccountRaw>(this.endpoints.account);
   }

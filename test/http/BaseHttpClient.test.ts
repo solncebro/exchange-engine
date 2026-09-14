@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { BaseHttpClient } from '../../src/http/BaseHttpClient';
+import { ExchangeError } from '../../src/errors/ExchangeError';
 import { createMockLogger } from '../fixtures/mockLogger';
 
 const actualAxios = jest.requireActual<typeof import('axios')>('axios');
@@ -9,6 +10,10 @@ jest.mock('axios');
 const mockedAxios = axios as jest.Mocked<typeof axios>;
 
 class TestHttpClient extends BaseHttpClient {
+  protected override get errorExchangeLabel(): string {
+    return 'testExchange';
+  }
+
   testGet<T>(url: string, params?: Record<string, string | number | boolean>, headers?: Record<string, string>) {
     return this.get<T>(url, params, headers);
   }
@@ -56,6 +61,18 @@ function createAxiosError(status: number, headers: Record<string, string> = {}) 
   return new AxiosError('Request failed', 'ERR_BAD_REQUEST', undefined, {}, {
     status,
     data: { code: -1, msg: 'error' },
+    statusText: 'Error',
+    headers: axiosHeaders,
+    config: { headers: axiosHeaders },
+  } as any);
+}
+
+function createStructuredAxiosError(status: number, data: Record<string, unknown>) {
+  const axiosHeaders = new AxiosHeaders({});
+
+  return new AxiosError('Request failed', 'ERR_BAD_REQUEST', undefined, {}, {
+    status,
+    data,
     statusText: 'Error',
     headers: axiosHeaders,
     config: { headers: axiosHeaders },
@@ -322,6 +339,46 @@ describe('BaseHttpClient', () => {
         expect.objectContaining({ errorMessage: 'Bad config' }),
         expect.stringContaining('Request error'),
       );
+    });
+  });
+
+  describe('a code named by the exchange survives an HTTP status', () => {
+    it('keeps the numeric code of a body that came with an HTTP status', async () => {
+      mockInstance.post.mockRejectedValue(createStructuredAxiosError(403, { code: -1003, msg: 'Too many requests' }));
+
+      await expect(client.testPost('/test')).rejects.toMatchObject({
+        code: -1003,
+        exchange: 'testExchange',
+        message: '[-1003] Too many requests',
+      });
+    });
+
+    it('reads a textual code as a number, the way every caller compares it', async () => {
+      mockInstance.post.mockRejectedValue(
+        createStructuredAxiosError(429, { code: '50011', msg: 'Too Many Requests' }),
+      );
+
+      const error = await client.testPost('/test').catch((thrown: unknown) => thrown);
+
+      expect(error).toBeInstanceOf(ExchangeError);
+      expect((error as ExchangeError).code).toBe(50011);
+    });
+
+    it('keeps the code that Bybit names retCode', async () => {
+      mockInstance.post.mockRejectedValue(
+        createStructuredAxiosError(500, { retCode: 10016, retMsg: 'server error' }),
+      );
+
+      await expect(client.testPost('/test')).rejects.toMatchObject({ code: 10016, message: '[10016] server error' });
+    });
+
+    it('stays an ordinary error when the body names no code at all', async () => {
+      mockInstance.post.mockRejectedValue(createStructuredAxiosError(500, { detail: 'gateway down' }));
+
+      const error = await client.testPost('/test').catch((thrown: unknown) => thrown);
+
+      expect(error).not.toBeInstanceOf(ExchangeError);
+      expect((error as Error).message).toBe('HTTP 500: Request failed');
     });
   });
 });

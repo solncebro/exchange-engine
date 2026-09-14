@@ -1,4 +1,5 @@
 import { PositionSideEnum, OrderSideEnum, OrderTypeEnum, TimeInForceEnum, WorkingTypeEnum, TriggerByEnum } from '../types/common';
+import type { IncomeKind } from '../types/common';
 import type { IncomeTypeFilter } from '../types/exchange';
 
 export const BINANCE_POSITION_SIDE: Record<string, PositionSideEnum> = {
@@ -181,6 +182,19 @@ export const BINANCE_INCOME_TYPE: Record<IncomeTypeFilter, string> = {
   commission: 'COMMISSION',
 };
 
+/**
+ * Обратный перевод: как назвала биржа — что это значит. Нужен, когда доход спрашивают ОДНИМ
+ * запросом сразу всех видов и раскладывают уже дома (07.09.2026: три отдельных запроса на то же
+ * самое — самый дорогой залп, каким приложение способно подвести адрес под запрет).
+ */
+const INCOME_KIND_BY_BINANCE_TYPE = new Map<string, IncomeKind>(
+  (Object.entries(BINANCE_INCOME_TYPE) as [IncomeTypeFilter, string][]).map(([kind, rawType]) => [rawType, kind]),
+);
+
+export function resolveBinanceIncomeKind(rawType: string): IncomeKind {
+  return INCOME_KIND_BY_BINANCE_TYPE.get(rawType) ?? 'other';
+}
+
 export const BYBIT_WORKING_TYPE_TRIGGER_BY: Record<string, TriggerByEnum> = {
   [WorkingTypeEnum.MarkPrice]: TriggerByEnum.MarkPrice,
   [WorkingTypeEnum.ContractPrice]: TriggerByEnum.LastPrice,
@@ -201,4 +215,96 @@ export const BYBIT_TIME_IN_FORCE: Record<string, TimeInForceEnum> = {
   IOC: TimeInForceEnum.Ioc,
   FOK: TimeInForceEnum.Fok,
   PostOnly: TimeInForceEnum.PostOnly,
+};
+
+export const OKX_ORDER_SIDE: Record<string, OrderSideEnum> = {
+  buy: OrderSideEnum.Buy,
+  sell: OrderSideEnum.Sell,
+};
+
+export const OKX_ORDER_SIDE_REVERSE: Record<OrderSideEnum, string> = {
+  [OrderSideEnum.Buy]: 'buy',
+  [OrderSideEnum.Sell]: 'sell',
+};
+
+export const OKX_POSITION_SIDE: Record<string, PositionSideEnum> = {
+  long: PositionSideEnum.Long,
+  short: PositionSideEnum.Short,
+  net: PositionSideEnum.Both,
+};
+
+export const OKX_POSITION_IDX: Record<string, number> = {
+  net: 0,
+  long: 1,
+  short: 2,
+};
+
+export const OKX_ORDER_STATUS: Record<string, string> = {
+  live: 'open',
+  partially_filled: 'open',
+  filled: 'closed',
+  canceled: 'canceled',
+  mmp_canceled: 'canceled',
+};
+
+/**
+ * Сработавшая условная заявка («effective») — это ОТКРЫТАЯ заявка, а не закрытая: срабатывание
+ * лишь порождает обычную заявку, и та ещё может исполниться частично или получить отказ.
+ * Настоящее исполнение дочитывается из порождённой заявки (`mergeOkxTriggeredOrder`). Тот же
+ * смысл у соседей: Binance переводит `TRIGGERED` в «открыта», Bybit — `Triggered` в «открыта».
+ */
+export const OKX_ALGO_STATUS: Record<string, string> = {
+  live: 'open',
+  pause: 'open',
+  partially_effective: 'open',
+  effective: 'open',
+  canceled: 'canceled',
+  order_failed: 'rejected',
+  partially_failed: 'rejected',
+};
+
+/**
+ * Срок действия заявки у OKX закодирован в типе заявки (`ordType`): одна таблица ведёт из
+ * пары тип+срок на провод, две другие возвращают обратно.
+ */
+export const OKX_ORDER_TYPE_BY_TIME_IN_FORCE: Record<TimeInForceEnum, string> = {
+  [TimeInForceEnum.Gtc]: 'limit',
+  [TimeInForceEnum.PostOnly]: 'post_only',
+  [TimeInForceEnum.Ioc]: 'ioc',
+  [TimeInForceEnum.Fok]: 'fok',
+};
+
+export const OKX_ORD_TYPE_TO_ORDER_TYPE: Record<string, OrderTypeEnum> = {
+  market: OrderTypeEnum.Market,
+  limit: OrderTypeEnum.Limit,
+  post_only: OrderTypeEnum.Limit,
+  ioc: OrderTypeEnum.Limit,
+  fok: OrderTypeEnum.Limit,
+  optimal_limit_ioc: OrderTypeEnum.Market,
+};
+
+export const OKX_ORD_TYPE_TO_TIME_IN_FORCE: Record<string, TimeInForceEnum> = {
+  limit: TimeInForceEnum.Gtc,
+  post_only: TimeInForceEnum.PostOnly,
+  ioc: TimeInForceEnum.Ioc,
+  fok: TimeInForceEnum.Fok,
+  market: TimeInForceEnum.Gtc,
+  optimal_limit_ioc: TimeInForceEnum.Ioc,
+};
+
+export const OKX_TRIGGER_PX_TYPE: Record<TriggerByEnum, string> = {
+  [TriggerByEnum.MarkPrice]: 'mark',
+  [TriggerByEnum.LastPrice]: 'last',
+  [TriggerByEnum.IndexPrice]: 'index',
+};
+
+export const OKX_WORKING_TYPE_TRIGGER_PX_TYPE: Record<WorkingTypeEnum, string> = {
+  [WorkingTypeEnum.MarkPrice]: 'mark',
+  [WorkingTypeEnum.ContractPrice]: 'last',
+};
+
+export const OKX_INCOME_BILL_TYPE: Record<IncomeTypeFilter, string> = {
+  funding: '8',
+  realizedPnl: '2',
+  commission: '2',
 };

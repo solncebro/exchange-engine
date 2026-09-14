@@ -2,7 +2,7 @@ import type { TradeSymbol } from '../types/common';
 
 export const MAX_PRICE_DECIMAL_PLACES = 8;
 
-function countDecimalPlaces(step: string): number {
+export function countDecimalPlaces(step: string): number {
   const normalizedStep = step.toLowerCase();
 
   if (normalizedStep.includes('e')) {

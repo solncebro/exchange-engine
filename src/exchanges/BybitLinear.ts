@@ -11,6 +11,7 @@ import {
 import {
   normalizeBybitPosition,
   normalizeBybitFundingRateHistoryList,
+  normalizeBybitFundingInfoList,
   normalizeBybitMarkPriceList,
   normalizeBybitOpenInterest,
 } from '../normalizers/bybitNormalizer';
@@ -212,8 +213,23 @@ class BybitLinear extends BybitBaseClient {
     return normalizeBybitFundingRateHistoryList(raw.result.list);
   }
 
-  async fetchFundingInfo(): Promise<FundingInfo[]> {
-    throw new Error('Not implemented for Bybit');
+  /**
+   * Отдельной ручки «сведения о фандинге» у Bybit нет — интервал начислений и границы ставки
+   * лежат в списке инструментов. Кеша нет намеренно: границы ставки биржа меняет, и старое
+   * значение здесь опаснее лишнего запроса.
+   */
+  async fetchFundingInfo(symbol?: string): Promise<FundingInfo[]> {
+    if (symbol !== undefined) {
+      this.logger.debug(`[Bybit] Fetching funding info for ${symbol}`);
+      const raw = await this.httpClient.fetchInstrumentsInfo(this.category, { symbol });
+
+      return normalizeBybitFundingInfoList(raw.result.list);
+    }
+
+    this.logger.debug('[Bybit] Fetching funding info for every instrument');
+    const rawList = await this.httpClient.fetchAllInstrumentsInfo(this.category);
+
+    return normalizeBybitFundingInfoList(rawList);
   }
 
   async fetchPositionMode(): Promise<PositionModeEnum | undefined> {

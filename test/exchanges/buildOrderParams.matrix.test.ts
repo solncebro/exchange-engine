@@ -3,8 +3,11 @@ import { BinanceFutures } from '../../src/exchanges/BinanceFutures';
 import { BinanceSpot } from '../../src/exchanges/BinanceSpot';
 import { BybitLinear } from '../../src/exchanges/BybitLinear';
 import { BybitSpot } from '../../src/exchanges/BybitSpot';
+import { OkxSwap } from '../../src/exchanges/OkxSwap';
+import { OkxSpot } from '../../src/exchanges/OkxSpot';
 import { createMockLogger } from '../fixtures/mockLogger';
 import { createMockAxiosInstance } from '../fixtures/mockAxios';
+import { OKX_RAW_INSTRUMENT_SPOT, OKX_RAW_INSTRUMENT_SWAP } from '../fixtures/okxRaw';
 import {
   MarketUnitEnum,
   OrderFilterEnum,
@@ -22,8 +25,15 @@ jest.mock('../../src/ws/BinanceSpotPublicStream');
 jest.mock('../../src/ws/BinanceTradeStream');
 jest.mock('../../src/ws/BybitPublicStream');
 jest.mock('../../src/ws/BybitTradeStream');
+jest.mock('../../src/ws/OkxPublicStream');
+jest.mock('../../src/ws/OkxTradeStream');
+jest.mock('../../src/ws/OkxPrivateStream');
 
 const mockedAxios = axios as jest.Mocked<typeof axios>;
+
+function okxSuccess<T>(dataList: T[]): { data: { code: string; msg: string; data: T[] } } {
+  return { data: { code: '0', msg: '', data: dataList } };
+}
 
 function createBinanceFutures(): BinanceFutures {
   mockedAxios.create.mockReturnValue(createMockAxiosInstance() as any);
@@ -63,6 +73,40 @@ function callBinanceBuild(client: BinanceFutures | BinanceSpot, args: Record<str
 
 function callBybitBuild(client: BybitLinear | BybitSpot, args: Record<string, unknown>): Record<string, unknown> {
   return (client as unknown as { buildBybitOrderParams: (a: unknown) => Record<string, unknown> }).buildBybitOrderParams(args as never);
+}
+
+// Сборщик OKX асинхронный: режим позиции счёта — часть запроса, и он читается с биржи.
+async function createOkxSwap(posMode = 'net_mode'): Promise<OkxSwap> {
+  const mockInstance = createMockAxiosInstance();
+  mockedAxios.create.mockReturnValue(mockInstance as any);
+
+  const client = new OkxSwap({ config: { apiKey: 'k', secret: 's', passphrase: 'p' }, logger: createMockLogger() });
+
+  mockInstance.get.mockResolvedValueOnce(okxSuccess([OKX_RAW_INSTRUMENT_SWAP]));
+  await client.loadTradeSymbols();
+  mockInstance.get.mockResolvedValue(okxSuccess([{ uid: '1', acctLv: '2', posMode }]));
+
+  return client;
+}
+
+async function createOkxSpot(): Promise<OkxSpot> {
+  const mockInstance = createMockAxiosInstance();
+  mockedAxios.create.mockReturnValue(mockInstance as any);
+
+  const client = new OkxSpot({ config: { apiKey: 'k', secret: 's', passphrase: 'p' }, logger: createMockLogger() });
+
+  mockInstance.get.mockResolvedValueOnce(okxSuccess([OKX_RAW_INSTRUMENT_SPOT]));
+  await client.loadTradeSymbols();
+
+  return client;
+}
+
+function callOkxBuild(client: OkxSwap | OkxSpot, args: Record<string, unknown>): Promise<Record<string, unknown>> {
+  return (client as unknown as { buildOkxOrderParams: (a: unknown) => Promise<Record<string, unknown>> }).buildOkxOrderParams(args as never);
+}
+
+function callOkxAlgoBuild(client: OkxSwap | OkxSpot, args: Record<string, unknown>): Promise<Record<string, unknown>> {
+  return (client as unknown as { buildOkxAlgoOrderParams: (a: unknown) => Promise<Record<string, unknown>> }).buildOkxAlgoOrderParams(args as never);
 }
 
 describe('buildBinanceOrderParams — futures', () => {
@@ -574,6 +618,151 @@ describe('buildBybitOrderParams — spot', () => {
   });
 });
 
+describe('buildOkxOrderParams — swap (futures)', () => {
+  it('open long Limit hedge: posSide=long, no reduceOnly', async () => {
+    const client = await createOkxSwap('long_short_mode');
+    const params = await callOkxBuild(client, {
+      symbol: 'BTCUSDT',
+      side: OrderSideEnum.Buy,
+      amount: 0.05,
+      price: 50000,
+      type: OrderTypeEnum.Limit,
+      positionSide: PositionSideEnum.Long,
+    });
+
+    expect(params.instId).toBe('BTC-USDT-SWAP');
+    expect(params.ordType).toBe('limit');
+    expect(params.posSide).toBe('long');
+    expect(params.reduceOnly).toBeUndefined();
+    expect(params.px).toBe('50000');
+  });
+
+  it('close long oneway: reduceOnly=true, no posSide', async () => {
+    const client = await createOkxSwap('net_mode');
+    const params = await callOkxBuild(client, {
+      symbol: 'BTCUSDT',
+      side: OrderSideEnum.Sell,
+      amount: 0.05,
+      type: OrderTypeEnum.Market,
+      reduceOnly: true,
+    });
+
+    expect(params.reduceOnly).toBe(true);
+    expect(params.posSide).toBeUndefined();
+  });
+
+  it('Market order must NOT carry a price field even when one is set', async () => {
+    const client = await createOkxSwap();
+    const params = await callOkxBuild(client, {
+      symbol: 'BTCUSDT',
+      side: OrderSideEnum.Buy,
+      amount: 0.05,
+      price: 50000,
+      type: OrderTypeEnum.Market,
+    });
+
+    expect(params.ordType).toBe('market');
+    expect(params.px).toBeUndefined();
+  });
+
+  it('refuses to build a swap stop order for the plain endpoint', async () => {
+    const client = await createOkxSwap();
+
+    await expect(callOkxBuild(client, {
+      symbol: 'BTCUSDT',
+      side: OrderSideEnum.Sell,
+      amount: 0.05,
+      type: OrderTypeEnum.StopMarket,
+      stopPrice: 60000,
+    })).rejects.toMatchObject({ code: 'CONDITIONAL_ORDER_WRONG_ENDPOINT' });
+  });
+
+  it('states the size in contracts, not in coins', async () => {
+    const client = await createOkxSwap();
+    const params = await callOkxBuild(client, {
+      symbol: 'BTCUSDT',
+      side: OrderSideEnum.Buy,
+      amount: 0.05,
+      type: OrderTypeEnum.Market,
+    });
+
+    expect(params.sz).toBe('5');
+  });
+
+  it('trailing offset is stated in percent and converted to the OKX ratio', async () => {
+    const client = await createOkxSwap();
+    const params = await callOkxAlgoBuild(client, {
+      symbol: 'BTCUSDT',
+      side: OrderSideEnum.Sell,
+      amount: 0.05,
+      type: OrderTypeEnum.TrailingStop,
+      callbackRate: 2,
+    });
+
+    expect(params.ordType).toBe('move_order_stop');
+    expect(params.callbackRatio).toBe('0.02');
+  });
+});
+
+describe('buildOkxOrderParams — spot', () => {
+  it('Spot Buy Limit: cash mode, no posSide, no reduceOnly', async () => {
+    const client = await createOkxSpot();
+    const params = await callOkxBuild(client, {
+      symbol: 'BTCUSDT',
+      side: OrderSideEnum.Buy,
+      amount: 1,
+      price: 50000,
+      type: OrderTypeEnum.Limit,
+      positionSide: PositionSideEnum.Long,
+      reduceOnly: true,
+    });
+
+    expect(params.tdMode).toBe('cash');
+    expect(params.posSide).toBeUndefined();
+    expect(params.reduceOnly).toBeUndefined();
+  });
+
+  it('Spot Market with quoteOrderQty → quote unit', async () => {
+    const client = await createOkxSpot();
+    const params = await callOkxBuild(client, {
+      symbol: 'BTCUSDT',
+      side: OrderSideEnum.Buy,
+      amount: 0,
+      type: OrderTypeEnum.Market,
+      quoteOrderQty: 100,
+    });
+
+    expect(params.sz).toBe('100');
+    expect(params.tgtCcy).toBe('quote_ccy');
+  });
+
+  it('Spot Market sized in coins states the base unit explicitly', async () => {
+    const client = await createOkxSpot();
+    const params = await callOkxBuild(client, {
+      symbol: 'BTCUSDT',
+      side: OrderSideEnum.Buy,
+      amount: 2,
+      type: OrderTypeEnum.Market,
+    });
+
+    expect(params.tgtCcy).toBe('base_ccy');
+  });
+
+  it('Spot StopMarket goes to the algo builder with the last-price trigger', async () => {
+    const client = await createOkxSpot();
+    const params = await callOkxAlgoBuild(client, {
+      symbol: 'BTCUSDT',
+      side: OrderSideEnum.Sell,
+      amount: 1,
+      type: OrderTypeEnum.StopMarket,
+      stopPrice: 60000,
+    });
+
+    expect(params.slTriggerPx).toBe('60000');
+    expect(params.slTriggerPxType).toBe('last');
+  });
+});
+
 describe('buildBinanceOrderParams — timeInForce mapping', () => {
   it('futures PostOnly Limit maps timeInForce to GTX (not the raw enum value)', () => {
     const client = createBinanceFutures();
@@ -651,7 +840,20 @@ describe('amount stated in quote currency belongs to market orders only', () => 
     })).toThrow(/market/i);
   });
 
-  it('both still accept it on a market order', () => {
+  it('OKX spot refuses it on a limit order too', async () => {
+    const client = await createOkxSpot();
+
+    await expect(callOkxBuild(client, {
+      symbol: 'BTCUSDT',
+      side: OrderSideEnum.Buy,
+      amount: 0,
+      price: 100,
+      type: OrderTypeEnum.Limit,
+      quoteOrderQty: 100,
+    })).rejects.toThrow(/market/i);
+  });
+
+  it('all three still accept it on a market order', async () => {
     expect(callBinanceBuild(createBinanceSpot(), {
       symbol: 'BTCUSDT', side: OrderSideEnum.Buy, amount: 0, price: 0, type: OrderTypeEnum.Market, quoteOrderQty: 100,
     }).quoteOrderQty).toBe('100');
@@ -659,5 +861,11 @@ describe('amount stated in quote currency belongs to market orders only', () => 
     expect(callBybitBuild(createBybitSpot(), {
       symbol: 'BTCUSDT', side: OrderSideEnum.Buy, amount: 0, price: 0, type: OrderTypeEnum.Market, quoteOrderQty: 100,
     }).qty).toBe('100');
+
+    const okxParams = await callOkxBuild(await createOkxSpot(), {
+      symbol: 'BTCUSDT', side: OrderSideEnum.Buy, amount: 0, price: 0, type: OrderTypeEnum.Market, quoteOrderQty: 100,
+    });
+
+    expect(okxParams.sz).toBe('100');
   });
 });

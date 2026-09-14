@@ -19,4 +19,8 @@ export class BinanceSpotHttpClient extends BinanceBaseHttpClient {
   constructor(args: BinanceHttpClientArgs) {
     super(args, BINANCE_REQUEST_TIMEOUT);
   }
+
+  protected override get errorExchangeLabel(): string {
+    return 'binance';
+  }
 }

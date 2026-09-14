@@ -3,7 +3,7 @@ import { WebSocketStatus } from '@solncebro/websocket-engine';
 import type { MarkPriceUpdate } from '../../src/types/common';
 import type {
   BinanceMarkPriceWebSocketRaw,
-  BinanceTicker24hrRaw,
+  BinanceMiniTickerWebSocketRaw,
   BinanceWebSocketKlineRaw,
 } from '../../src/normalizers/binanceNormalizer';
 import { BinanceFuturesPublicStream } from '../../src/ws/BinanceFuturesPublicStream';
@@ -42,16 +42,18 @@ jest.mock('@solncebro/websocket-engine', () => {
   };
 });
 
-const MOCK_TICKER_RAW: BinanceTicker24hrRaw = {
-  symbol: 'BTCUSDT',
-  lastPrice: '50000',
-  openPrice: '48000',
-  highPrice: '51000',
-  lowPrice: '49000',
-  priceChangePercent: '2.5',
-  volume: '1000',
-  quoteVolume: '50000000',
-  time: 1700000000000,
+const MOCK_MINI_TICKER_RAW: BinanceMiniTickerWebSocketRaw = {
+  e: '24hrMiniTicker',
+  E: 1700000000000,
+  s: 'BTCUSDT',
+  ps: 'BTCUSDT',
+  c: '78516.30',
+  o: '78468.00',
+  h: '79663.50',
+  l: '78315.50',
+  v: '1371508.3717',
+  q: '108187493027.15',
+  st: 1,
 };
 
 const MOCK_KLINE_RAW: BinanceWebSocketKlineRaw = {
@@ -149,12 +151,15 @@ describe('BinanceFuturesPublicStream', () => {
       stream.subscribeAllTickers(handler, []);
       await flushAsync();
 
-      capturedOnMessage!({ data: [MOCK_TICKER_RAW] });
+      capturedOnMessage!([MOCK_MINI_TICKER_RAW]);
 
       expect(handler).toHaveBeenCalledTimes(1);
-      const tickerMap = handler.mock.calls[0][0];
-      expect(tickerMap).toBeInstanceOf(Map);
-      expect(tickerMap.get('BTCUSDT')).toBeDefined();
+
+      const tickerBySymbol = handler.mock.calls[0][0];
+
+      expect(tickerBySymbol).toBeInstanceOf(Map);
+      expect(tickerBySymbol.get('BTCUSDT').lastPrice).toBeCloseTo(78516.3);
+      expect(tickerBySymbol.get('BTCUSDT').timestamp).toBe(1700000000000);
     });
   });
 
@@ -299,7 +304,7 @@ describe('BinanceFuturesPublicStream', () => {
       stream.subscribeAllTickers(handler, []);
       await flushAsync();
 
-      capturedOnMessage!({ data: [MOCK_TICKER_RAW] });
+      capturedOnMessage!({ stream: '!miniTicker@arr', data: [MOCK_MINI_TICKER_RAW] });
 
       expect(mockLogger.error).toHaveBeenCalledWith(expect.stringContaining('handler boom'));
     });

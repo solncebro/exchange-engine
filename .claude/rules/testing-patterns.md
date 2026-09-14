@@ -114,6 +114,8 @@ import { createMockAxiosInstance, setupMockAxios } from '../fixtures/mockAxios';
 
 Binance (test/fixtures/binanceRaw.ts):
 - `BINANCE_RAW_EXCHANGE_INFO`, `BINANCE_RAW_TICKER_LIST`, `BINANCE_RAW_KLINE_LIST`
+- `BINANCE_RAW_TICKER_FUTURES`, `BINANCE_RAW_TICKER_SPOT` — ЖИВЫЕ снимки суточной сводки обеих ручек (10.09.2026); на них стоит `test/normalizers/binanceTickerCompleteness.test.ts`
+- `BINANCE_RAW_EXCHANGE_INFO_SETTLE_VARIANTS` — бессрочный контракт с расчётом в USDC и срочный контракт: держит чтение валюты расчёта из ответа биржи (`marginAsset`), а не из догадки «бессрочный значит USDT»
 - `BINANCE_RAW_WEBSOCKET_KLINE`, `BINANCE_RAW_POSITION_RISK`, `BINANCE_RAW_ORDER_RESPONSE`
 - `BINANCE_RAW_ACCOUNT`, `BINANCE_RAW_FUTURES_ACCOUNT`
 - `BINANCE_RAW_FUNDING_RATE_HISTORY_LIST`, `BINANCE_RAW_FUNDING_INFO_LIST`
@@ -139,6 +141,13 @@ Bybit (test/fixtures/bybitRaw.ts):
 - `BYBIT_WS_RAW_CANCEL_BATCH_RESPONSE` — WS-ответ `order.cancel-batch`
 - `BYBIT_RAW_WALLET_BALANCE_NO_TOTALS` — живой счёт без сводных полей биржи (свободные/маржинальный баланс/начальная маржа пусты) и с пылью в 6 монетах помимо USDT — держит регресс «остатки разных монет сложены как одно число»
 - `BYBIT_RAW_CLOSED_PNL_FLOCKUSDT`, `BYBIT_RAW_TRANSACTION_LOG_SETTLEMENT` — живая пара «закрытие + начисление фандинга» FLOCKUSDT 02.09.2026: держат тождество «валовой − closedPnl = комиссии» и чтение суммы фандинга из поля `funding`
+
+OKX (test/fixtures/okxRaw.ts):
+- Инструменты: `OKX_RAW_INSTRUMENT_SPOT`, `OKX_RAW_INSTRUMENT_SWAP` (`ctVal: '0.01'`, `lotSz: '1'` — 0.05 монеты = 5 контрактов), `OKX_RAW_INSTRUMENT_USDC_SWAP`, `OKX_RAW_INSTRUMENT_INVERSE` (должен отбрасываться), `OKX_RAW_INSTRUMENT_STOCK_SWAP` (признак TradFi)
+- Рынок: `OKX_RAW_TICKER_LIST`, `OKX_RAW_KLINE_LIST`, `OKX_RAW_ORDER_BOOK`, `OKX_RAW_ORDER_BOOK_STREAM_SNAPSHOT`, `OKX_RAW_ORDER_BOOK_STREAM_UPDATE`, `OKX_RAW_PUBLIC_TRADE_LIST`, `OKX_RAW_MARK_PRICE_LIST`, `OKX_RAW_OPEN_INTEREST`, `OKX_RAW_FUNDING_RATE`, `OKX_RAW_FUNDING_RATE_HISTORY_LIST`, `OKX_RAW_FEE_RATE`
+- Счёт: `OKX_RAW_BALANCE`, `OKX_RAW_BALANCE_FUTURES_MODE`, `OKX_RAW_POSITION_NET_LONG`/`_NET_SHORT`/`_HEDGE_SHORT`, `OKX_RAW_POSITION_HISTORY_LIST`
+- Заявки: `OKX_RAW_ORDER_FILLED`, `OKX_RAW_ORDER_LIVE_POST_ONLY`, `OKX_RAW_ORDER_SPOT_MARKET_QUOTE`, `OKX_RAW_ALGO_ORDER_STOP_MARKET`, `OKX_RAW_ALGO_ORDER_SPOT_MARKET_QUOTE`, `OKX_RAW_ALGO_ORDER_TAKE_PROFIT_LIMIT`, `OKX_RAW_ALGO_ORDER_TRAILING`, `OKX_RAW_ALGO_ORDER_EFFECTIVE`, `OKX_RAW_ALGO_ORDER_FAILED`, `OKX_RAW_ORDER_RESULT_OK`, `OKX_RAW_ORDER_RESULT_REJECTED`
+- Журнал счёта: `OKX_RAW_BILL_TRADE_OPEN`, `OKX_RAW_BILL_TRADE_CLOSE`, `OKX_RAW_BILL_FUNDING_EXPENSE`, `OKX_RAW_BILL_FUNDING_INCOME`, `OKX_RAW_BILL_FUNDING_EXPENSE_BALCHG_ONLY` (сумма фандинга только в `balChg` — запасной путь чтения)
 
 Типизированы через raw-интерфейсы из нормализаторов:
 ```typescript
@@ -169,14 +178,16 @@ describe('ClassName', () => {
 ## Специальные тесты
 
 ### test/smoke.test.ts
-- Отдельный скрипт (`ts-node`, не Jest)
-- Проверяет что все 4 клиента (binance.futures, binance.spot, bybit.futures, bybit.spot) реализуют `ExchangeClient`
-- Проверяет что все нужные методы — функции
+- Отдельный скрипт (`ts-node`, не Jest), работает по СОБРАННОМУ `dist/index`
+- Проверяет что все 6 клиентов (binance.futures, binance.spot, bybit.futures, bybit.spot, okx.futures, okx.spot) реализуют `ExchangeClient`
+- OKX создаётся с отдельным набором аргументов — с кодовой фразой, иначе клиент не построится
+- Проверяет что все нужные методы — функции, и что в `ExchangeNameEnum` три значения
 - Запуск: `yarn test:smoke`
 
 ### test/exports.test.ts
 - Jest тест
-- Проверяет через `require('../src/index')` что все runtime-значения экспортированы
+- Проверяет через `require('../src/index')` что все runtime-значения экспортированы (в т.ч. `parseBybitOrderbookRawFrame` и `parseOkxOrderbookRawFrame`) и что `ExchangeNameEnum` перечисляет ровно три биржи
+- Отдельно проверяет подпуть `require('../src/public')`: три публичных потока и по три нормализатора на биржу выходят наружу, а `Exchange`, HTTP-клиенты и trade/private-потоки в него НЕ попадают
 - Гарантирует стабильность публичного API
 
 ## Тесты полноты ответа биржи (completeness guard)
@@ -199,10 +210,12 @@ it('every field in a real snapshot is either modeled or explicitly ignored', () 
 Тест падает, если в снапшоте появляется ключ, не учтённый ни в одном из двух множеств — сигнал, что нормализатор нужно обновить (либо явно проигнорировать поле). Файлы:
 - `test/normalizers/bybitTickerCompleteness.test.ts` — снапшот `tickers.{symbol}`, покрывает регресс bid1/ask1/mark/index
 - `test/normalizers/bybitResponseCompleteness.test.ts` — снапшоты `normalizeBybitOrder`, `normalizeBybitPosition`, `normalizeBybitBalances` (coin-level), `normalizeBybitOrderBook`/`normalizeBybitOrderBookUpdate` (проверяет и envelope-`ts` приоритет над `data.ts`)
+- `test/normalizers/okxResponseCompleteness.test.ts` — снапшоты ответов OKX (инструмент, тикер, заявка, условная заявка, позиция, монета баланса, запись журнала счёта)
+- `test/normalizers/binanceTickerCompleteness.test.ts` — снапшоты суточной сводки Binance (контракты и спот). Кроме обычного правила «каждое поле снимка учтено» держит ВСТРЕЧНОЕ: каждое поле, которое читает нормализатор, обязано быть в снимке — именно на нём валится выдуманное поле вроде `time`
 
 `test/normalizers/binanceAggTrade.test.ts` — обычный unit-тест `normalizeBinanceAggTradeFromStream` (maker/taker маппинг в `side`/`isBuyerMaker`, `quoteQuantity`), без MODELED_KEYS-паттерна.
 
-## Инварианты, общие для обеих бирж (test/normalizers/accountBalanceInvariants.test.ts)
+## Инварианты, общие для всех бирж (test/normalizers/accountBalanceInvariants.test.ts)
 
 Паттерн для правил, которые обязаны держаться на результате нормализации НЕЗАВИСИМО от биржи и конкретных входных данных — не «поле присутствует», а «значение не противоречит себе»:
 
@@ -218,7 +231,7 @@ it.each(CASE_LIST)('never reports more free money than the account holds ($name)
 });
 ```
 
-`test/normalizers/accountBalanceInvariants.test.ts` держит три инварианта `AccountBalances` на фикстурах обеих бирж (в т.ч. `BYBIT_RAW_WALLET_BALANCE_NO_TOTALS` — счёт без сводных полей биржи): свободных средств не бывает больше кошелька, занятая маржа не бывает отрицательной, `availableBalanceSource` назван всегда (`'exchange'`/`'derived'`/`'unknown'`).
+`test/normalizers/accountBalanceInvariants.test.ts` держит три инварианта `AccountBalances` на фикстурах всех трёх бирж (у OKX — счёт с готовым полем свободных средств и счёт, где их приходится выводить по курсам монет) (в т.ч. `BYBIT_RAW_WALLET_BALANCE_NO_TOTALS` — счёт без сводных полей биржи): свободных средств не бывает больше кошелька, занятая маржа не бывает отрицательной, `availableBalanceSource` назван всегда (`'exchange'`/`'derived'`/`'unknown'`).
 
 ## Тестирование retry (BaseHttpClient.test.ts)
 
@@ -237,7 +250,7 @@ expect(mockInstance.get).toHaveBeenCalledTimes(2);
 jest.useRealTimers();
 ```
 
-`BinanceBaseHttpClient.test.ts` (`describe('rate-limit awareness (REQUEST_WEIGHT / 418)')`) проверяет проактивный троттлинг: warn при приближении к весу (заголовок `x-mbx-used-weight-1m`), отсутствие warn на здоровом весе, лог + отсутствие ретрая на HTTP 418 (`mockInstance.get` вызван 1 раз). Чистые функции троттлинга (`parseUsedWeight1m`, `parseRetryAfterMs`, `resolveRateLimitCooldownMs`) тестируются отдельно и без HTTP-мока в `test/http/binanceRateLimit.test.ts`.
+`BinanceBaseHttpClient.test.ts` (`describe('rate-limit awareness (REQUEST_WEIGHT / 418)')`) проверяет проактивный троттлинг: warn при приближении к весу (заголовок `x-mbx-used-weight-1m`), отсутствие warn на здоровом весе, лог + отсутствие ретрая на HTTP 418 (`mockInstance.get` вызван 1 раз), а с 07.09.2026 — что запись (`post`) тоже держит паузу до снятия бана, а не стучится дальше (`resetBinanceRequestGateRegistry()` в `beforeEach`, память сторожа общая на процесс). Чистые функции разбора ответа (`parseUsedWeight1m`, `parseRetryAfterMs`, `parseBinanceBanUntilMs`, `observeRateLimitResponse`) тестируются отдельно и без HTTP-мока в `test/http/binanceRateLimit.test.ts`; сам сторож с очередью ожидания и реестром по хосту — в `test/http/binanceRequestGate.test.ts`.
 
 ## Assertions для Map
 
@@ -297,30 +310,8 @@ class TestTradeStream extends BaseTradeStream<any> {
 }
 ```
 
-## Тест-файлы Exchange
+## Детальная документация
 
-| Файл | Покрытие |
-|------|----------|
-| BaseExchangeClient.test.ts | createNotifyHandler: проксирование non-critical, process.exit(1) для CRITICAL, async onNotify, error safety |
-
-## Тест-файлы WebSocket
-
-| Файл | Покрытие |
-|------|----------|
-| BaseTradeStream.test.ts | connect, disconnect, isConnected, createOrder, takePendingRequest |
-| BinanceFuturesPublicStream.test.ts | tickers, klines, dynamic subscribe, connection sharding (`maxStreamsPerConnection`), SUBSCRIBE-burst regression, close |
-| BinanceSpotPublicStream.test.ts | tickers, klines, resubscribeAll, handleMessage, close |
-| BybitPublicStream.test.ts | tickers (linear/spot, bid1/ask1), klines, resubscribeAll, lazyOrderbookParse (live/non-live orderbook), close |
-| BinanceUserDataStream.test.ts | connect, onMessage, close, isConnected |
-| BybitPrivateStream.test.ts | connect, auth, handleMessage filtering, close |
-| BinanceTradeStream.handleMessage.test.ts | request-response matching, ExchangeError |
-| BinanceTradeStream.initConnection.test.ts | connection creation, buildOrderRequest signing |
-| BybitTradeStream.handleMessage.test.ts | dual format responses, auth filtering |
-| BybitTradeStream.initConnection.test.ts | connection with auth, buildOrderRequest format |
-| BybitTradeStream.batch.test.ts | три WS batch-метода (`createBatchOrders`/`modifyBatchOrders`/`cancelBatchOrders`), top-level errors, timeout, orphan context cleanup, kind mismatch protection |
-| TradeToKlineAggregator.test.ts | processTrade aggregation, forceEmit, clearSymbol, first-trade skip |
-| parseWebSocketMessage.test.ts | JSON parsing, error handling |
-| bybitWebSocketUtils.test.ts | pong detection (heartbeat only — HMAC-аутентификация вынесена в bybitWebSocketAuth.test.ts) |
-| bybitWebSocketAuth.test.ts | authenticateBybitWebSocket: HMAC-подпись, ожидание `auth`-ответа, ошибки |
-
-Мокирование `authenticateBybitWebSocket` в тестах `BybitPrivateStream`/`BybitTradeStream` теперь идёт по новому пути: `jest.mock('../../src/ws/bybitWebSocketAuth', () => ({ authenticateBybitWebSocket: jest.fn().mockResolvedValue(undefined) }))` (раньше — `jest.mock('../../src/ws/bybitWebSocketUtils', ...)` с `requireActual` + override).
+| Файл | Содержание |
+|------|-----------|
+| [testing-patterns-catalog.md](testing-patterns-catalog.md) | Каталог тест-файлов (Exchange, HTTP, WebSocket, OKX) и живые проверки: `exchange:live-check`, `okx:probe`, граница с trade-engine |

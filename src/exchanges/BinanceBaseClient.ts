@@ -12,6 +12,7 @@ import type {
   UserDataStreamHandlerArgs,
   OrderUpdateEvent,
   PositionUpdateEvent,
+  ExchangeRateLimitState,
 } from '../types/common';
 import { OrderTypeEnum, TimeInForceEnum, OrderSideEnum } from '../types/common';
 import type { PublicStreamLike } from '../types/stream';
@@ -91,6 +92,11 @@ abstract class BinanceBaseClient<T extends BinanceBaseHttpClient> extends BaseEx
     const raw = await this.httpClient.fetchExchangeInfo();
 
     return parseBinanceOrderRateLimit(raw);
+  }
+
+  /** Расход веса и срок запрета — из того, что биржа сама сказала в заголовках последних ответов. */
+  override getRateLimitState(): ExchangeRateLimitState {
+    return this.httpClient.getRateLimitState();
   }
 
   protected async fetchAndNormalizeTickers(): Promise<TickerBySymbol> {

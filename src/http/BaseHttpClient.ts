@@ -2,12 +2,16 @@ import axios, { AxiosInstance, AxiosError, AxiosResponse } from 'axios';
 import { HttpsAgent as KeepAliveHttpsAgent } from 'agentkeepalive';
 
 import type { ExchangeLogger } from '../types/common';
+import { ExchangeError } from '../errors/ExchangeError';
 import { serializeQueryParams } from '../utils/serializeQueryParams';
+import { toWireErrorCode } from '../utils/wireErrorCode';
+import { sleep } from '../utils/sleep';
 import type {
   BaseHttpClientArgs,
   HttpErrorResponseData,
   HttpHeaders,
   HttpHeadersSource,
+  HttpPostBody,
   HttpQueryParams,
   HttpQueryParamsSource,
   HttpRecord,
@@ -69,8 +73,12 @@ function resolveHeaders(source: HttpHeadersSource | undefined): HttpHeaders | un
   return typeof source === 'function' ? source() : source;
 }
 
-function sleep(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+function isHttpErrorCode(value: unknown): value is number | string {
+  return typeof value === 'number' || (typeof value === 'string' && value !== '');
+}
+
+function toStructuredErrorCode(code: number | string): number | string {
+  return typeof code === 'number' ? code : toWireErrorCode(code);
 }
 
 function isBinanceNoopHttpError(data: unknown): data is HttpErrorResponseData {
@@ -137,7 +145,8 @@ abstract class BaseHttpClient {
 
   protected async beforeRequest(): Promise<void> {}
 
-  protected onResponse(_status: number | undefined, _headers: unknown): void {}
+  /** Тело нужно наравне с заголовками: настоящий срок запрета биржа называет в тексте ошибки. */
+  protected onResponse(_status: number | undefined, _headers: unknown, _body?: unknown): void {}
 
   /**
    * Чтение с повторами. Параметры и заголовки могут приезжать функциями — тогда они строятся ЗДЕСЬ,
@@ -162,13 +171,13 @@ abstract class BaseHttpClient {
       try {
         this.logger.debug({ url, params: effectiveParams }, `GET ${url}`);
         const response = await this.axiosInstance.get<T>(url, { params: effectiveParams, headers: effectiveHeaders });
-        this.onResponse(response.status, response.headers);
+        this.onResponse(response.status, response.headers, response.data);
         this.logger.debug({ url, response: response.data as HttpRecord }, `GET ${url} response`);
 
         return response.data;
       } catch (error) {
         const axiosError = error as AxiosError;
-        this.onResponse(axiosError.response?.status, axiosError.response?.headers);
+        this.onResponse(axiosError.response?.status, axiosError.response?.headers, axiosError.response?.data);
         this.handleError(axiosError);
 
         if (!isRetryable(axiosError) || attempt === MAX_RETRIES) {
@@ -186,7 +195,7 @@ abstract class BaseHttpClient {
 
   protected post<T>(
     url: string,
-    data?: HttpRecord,
+    data?: HttpPostBody,
     headers?: HttpHeaders
   ): Promise<T> {
     return this.executeRequest(`POST ${url}`, () => this.axiosInstance.post<T>(url, data, { headers }));
@@ -224,23 +233,51 @@ abstract class BaseHttpClient {
     return this.executeRequest(`DELETE ${url}`, () => this.axiosInstance.delete<T>(url, { params, headers }));
   }
 
+  /**
+   * Запись без повторов: подпись ставится вызывающим и тут же уходит в сеть.
+   *
+   * Ожидание по лимиту соблюдается и здесь (07.09.2026). Раньше его знали только чтения — и пока
+   * биржа держала адрес закрытым, постановка и отмена заявок продолжали стучаться, чем запрет и
+   * продлевали. Ответ тоже разбирается: запрет часто виден именно на записи.
+   */
   private async executeRequest<T>(
     label: string,
     requestFunction: () => Promise<AxiosResponse<T>>,
   ): Promise<T> {
+    await this.beforeRequest();
+
     try {
       this.logger.debug(label);
       const response = await requestFunction();
+      this.onResponse(response.status, response.headers, response.data);
       this.logger.debug({ response: response.data as HttpRecord }, `${label} response`);
 
       return response.data;
     } catch (error) {
-      this.handleError(error as AxiosError);
+      const axiosError = error as AxiosError;
+      this.onResponse(axiosError.response?.status, axiosError.response?.headers, axiosError.response?.data);
+      this.handleError(axiosError);
 
-      throw this.enrichError(error as AxiosError);
+      throw this.enrichError(axiosError);
     }
   }
 
+  /**
+   * Обозначение биржи для ошибок транспорта. Наследник, который его не назвал, отдаёт пустое —
+   * поле `exchange` тогда просто ни на что не указывает, а код ошибки всё равно сохраняется.
+   */
+  protected get errorExchangeLabel(): string {
+    return '';
+  }
+
+  /**
+   * Отказ, у которого биржа назвала СВОЙ код, отдаётся как `ExchangeError` с этим кодом, а не
+   * обычной ошибкой с кодом, зашитым в текст. Иначе код терялся ровно там, где он нужнее всего:
+   * тот же отказ, пришедший с кодом 200 в теле, вызывающий разбирал по полю `code`, а пришедший
+   * с HTTP-статусом (например, предел частоты OKX 50011 отдаётся и как «200», и как «429») —
+   * только разбором текста. `ExchangeError` наследует `Error`, поэтому для тех, кто читает
+   * `message`, ничего не меняется: текст остался прежним.
+   */
   private enrichError(error: AxiosError): Error {
     const responseData = error.response?.data;
 
@@ -251,8 +288,10 @@ abstract class BaseHttpClient {
         return error;
       }
 
-      if (data.code !== undefined && data.msg !== undefined) {
-        return new Error(`[${data.code}] ${data.msg}`);
+      const structuredError = this.buildStructuredError(data);
+
+      if (structuredError !== null) {
+        return structuredError;
       }
     }
 
@@ -261,6 +300,19 @@ abstract class BaseHttpClient {
     }
 
     return error;
+  }
+
+  /** Код и текст биржи из тела ответа: `code`/`msg` у Binance и OKX, `retCode`/`retMsg` у Bybit. */
+  private buildStructuredError(data: Record<string, unknown>): ExchangeError | null {
+    if (isHttpErrorCode(data.code) && data.msg !== undefined) {
+      return new ExchangeError(`[${data.code}] ${data.msg}`, toStructuredErrorCode(data.code), this.errorExchangeLabel);
+    }
+
+    if (isHttpErrorCode(data.retCode) && data.retMsg !== undefined) {
+      return new ExchangeError(`[${data.retCode}] ${data.retMsg}`, toStructuredErrorCode(data.retCode), this.errorExchangeLabel);
+    }
+
+    return null;
   }
 
   private handleError(error: AxiosError): void {

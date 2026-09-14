@@ -2,9 +2,9 @@ import type { WebSocketOpenContext } from '@solncebro/websocket-engine';
 import { ReliableWebSocket } from '@solncebro/websocket-engine';
 
 import { ExchangeError } from '../errors/ExchangeError';
+import { buildBatchItemResult } from '../normalizers/batchOrderOutcome';
 import { buildBybitCreateOutcome } from '../normalizers/bybitNormalizer';
 import type { OrderRateLimitSnapshot } from '../types/common';
-import { OrderSideEnum, OrderTypeEnum, TimeInForceEnum } from '../types/common';
 import type {
   CancelBatchOrdersResult,
   CancelOrderItemResult,
@@ -16,7 +16,6 @@ import type {
 import { BaseTradeStream } from './BaseTradeStream';
 import { PendingRequestKind } from './BaseTradeStream.types';
 import type {
-  BybitBatchOrderExtInfo,
   BybitBatchTradeMessage,
   BybitTradeAnyMessage,
   BybitTradeMessage,
@@ -29,11 +28,45 @@ import {
   BYBIT_PING_INTERVAL,
 } from './bybitWebSocketUtils';
 import { parseWebSocketMessage } from './parseWebSocketMessage';
+import { buildMinimalTradeStreamOrder } from './tradeStreamOrder';
 
 type BybitPendingBatchContext =
   | { kind: 'create'; originalArgsList: CreateOrderWebSocketArgs[] }
   | { kind: 'modify'; originalOrderIdList: string[] }
   | { kind: 'cancel'; originalOrderIdList: string[] };
+
+/** Разбор ответа на пачку: всё, чем три вида пачки отличаются друг от друга. */
+interface BybitBatchOp {
+  label: string;
+  logMessage: string;
+  pendingKind: PendingRequestKind;
+  contextKind: BybitPendingBatchContext['kind'];
+  failureText: string;
+}
+
+const BYBIT_BATCH_OP_BY_NAME: Record<string, BybitBatchOp> = {
+  'order.create-batch': {
+    label: 'create-batch',
+    logMessage: '[Bybit] Create batch response received',
+    pendingKind: PendingRequestKind.CreateBatch,
+    contextKind: 'create',
+    failureText: 'Batch create failed',
+  },
+  'order.amend-batch': {
+    label: 'amend-batch',
+    logMessage: '[Bybit] Amend batch response received',
+    pendingKind: PendingRequestKind.ModifyBatch,
+    contextKind: 'modify',
+    failureText: 'Batch amend failed',
+  },
+  'order.cancel-batch': {
+    label: 'cancel-batch',
+    logMessage: '[Bybit] Cancel batch response received',
+    pendingKind: PendingRequestKind.CancelBatch,
+    contextKind: 'cancel',
+    failureText: 'Batch cancel failed',
+  },
+};
 
 class BybitTradeStream extends BaseTradeStream<BybitTradeAnyMessage> {
   private pendingBatchContextByReqId: Map<string, BybitPendingBatchContext> = new Map();
@@ -186,22 +219,10 @@ class BybitTradeStream extends BaseTradeStream<BybitTradeAnyMessage> {
       return;
     }
 
-    if (message.op === 'order.create-batch' && message.reqId) {
-      this.handleCreateBatchResponse(message as BybitBatchTradeMessage);
+    const batchOp = message.op === undefined ? undefined : BYBIT_BATCH_OP_BY_NAME[message.op];
 
-      return;
-    }
-
-    if (message.op === 'order.amend-batch' && message.reqId) {
-      this.handleAmendBatchResponse(message as BybitBatchTradeMessage);
-
-      return;
-    }
-
-    if (message.op === 'order.cancel-batch' && message.reqId) {
-      this.handleCancelBatchResponse(message as BybitBatchTradeMessage);
-
-      return;
+    if (batchOp !== undefined && message.reqId) {
+      this.handleBatchResponse(message as BybitBatchTradeMessage, batchOp);
     }
   }
 
@@ -230,38 +251,32 @@ class BybitTradeStream extends BaseTradeStream<BybitTradeAnyMessage> {
 
     if ((message.success || message.retCode === 0) && message.data) {
       const data = message.data as BybitTradeOrderData;
-      pending.resolve({
-        id: data.orderId,
-        clientOrderId: data.orderLinkId ?? '',
-        symbol: '',
-        side: OrderSideEnum.Buy,
-        type: OrderTypeEnum.Market,
-        timeInForce: TimeInForceEnum.Gtc,
-        price: 0,
-        avgPrice: 0,
-        stopPrice: 0,
-        amount: 0,
-        filledAmount: 0,
-        filledQuoteAmount: 0,
-        status: 'open',
-        reduceOnly: false,
-        timestamp: Date.now(),
-        updatedTimestamp: Date.now(),
-        rateLimit: parseBybitHeaderRateLimit(message.header),
-      });
+      const order = buildMinimalTradeStreamOrder(data.orderId, data.orderLinkId ?? '');
+      const rateLimit = parseBybitHeaderRateLimit(message.header);
+      // Одиночная постановка — подавляющее большинство обращений. Не запомнив предел здесь,
+      // счёт узнавал бы его только после первой пачки, а до тех пор жил бы на зашитой цифре.
+      this.rememberOrderRateLimit(rateLimit);
+      order.rateLimit = rateLimit;
+
+      pending.resolve(order);
     } else {
       pending.reject(new ExchangeError(message.retMsg ?? 'Order creation failed', message.retCode ?? 'UNKNOWN', 'bybit'));
     }
   }
 
-  private handleCreateBatchResponse(message: BybitBatchTradeMessage): void {
+  /**
+   * Один разбор ответа на все три вида пачки. Раньше их было три, слово в слово, и различались они
+   * только раскладкой исходов — из-за чего запоминание предела частоты и потерялось на четвёртом,
+   * одиночном пути: забыть одно из четырёх мест было слишком легко.
+   */
+  private handleBatchResponse(message: BybitBatchTradeMessage, batchOp: BybitBatchOp): void {
     const reqId = message.reqId;
 
     if (!reqId) {
       return;
     }
 
-    this.logger.info({ rawMessage: message }, '[Bybit] Create batch response received');
+    this.logger.info({ rawMessage: message }, batchOp.logMessage);
 
     const pending = this.takePendingRequest(reqId);
 
@@ -271,10 +286,10 @@ class BybitTradeStream extends BaseTradeStream<BybitTradeAnyMessage> {
       return;
     }
 
-    if (pending.kind !== PendingRequestKind.CreateBatch) {
+    if (pending.kind !== batchOp.pendingKind) {
       this.pendingBatchContextByReqId.delete(reqId);
       pending.reject(new ExchangeError(
-        'Unexpected pending kind for create-batch response',
+        `Unexpected pending kind for ${batchOp.label} response`,
         message.retCode ?? 'UNKNOWN',
         'bybit',
       ));
@@ -285,9 +300,9 @@ class BybitTradeStream extends BaseTradeStream<BybitTradeAnyMessage> {
     const context = this.pendingBatchContextByReqId.get(reqId);
     this.pendingBatchContextByReqId.delete(reqId);
 
-    if (!context || context.kind !== 'create') {
+    if (!context || context.kind !== batchOp.contextKind) {
       pending.reject(new ExchangeError(
-        'Missing batch context for create-batch response',
+        `Missing batch context for ${batchOp.label} response`,
         'CONTEXT_MISSING',
         'bybit',
       ));
@@ -297,7 +312,7 @@ class BybitTradeStream extends BaseTradeStream<BybitTradeAnyMessage> {
 
     if (message.retCode !== 0) {
       pending.reject(new ExchangeError(
-        message.retMsg ?? 'Batch create failed',
+        message.retMsg ?? batchOp.failureText,
         message.retCode ?? 'UNKNOWN',
         'bybit',
       ));
@@ -305,160 +320,43 @@ class BybitTradeStream extends BaseTradeStream<BybitTradeAnyMessage> {
       return;
     }
 
-    const itemList = message.data?.list ?? [];
-    const extInfoList = message.retExtInfo?.list ?? [];
     const rateLimit = parseBybitHeaderRateLimit(message.header);
     this.rememberOrderRateLimit(rateLimit);
-    const resultList: CreateBatchOrdersResult = context.originalArgsList.map((args, index) => {
-      const outcome = buildBybitCreateOutcome(args, itemList[index], extInfoList[index]);
 
-      if (rateLimit !== undefined) {
-        outcome.rateLimit = rateLimit;
-      }
-
-      return outcome;
-    });
-    pending.resolve(resultList);
+    pending.resolve(this.buildBatchResultList(context, message, rateLimit));
   }
 
-  private handleAmendBatchResponse(message: BybitBatchTradeMessage): void {
-    const reqId = message.reqId;
-
-    if (!reqId) {
-      return;
-    }
-
-    this.logger.info({ rawMessage: message }, '[Bybit] Amend batch response received');
-
-    const pending = this.takePendingRequest(reqId);
-
-    if (!pending) {
-      this.pendingBatchContextByReqId.delete(reqId);
-
-      return;
-    }
-
-    if (pending.kind !== PendingRequestKind.ModifyBatch) {
-      this.pendingBatchContextByReqId.delete(reqId);
-      pending.reject(new ExchangeError(
-        'Unexpected pending kind for amend-batch response',
-        message.retCode ?? 'UNKNOWN',
-        'bybit',
-      ));
-
-      return;
-    }
-
-    const context = this.pendingBatchContextByReqId.get(reqId);
-    this.pendingBatchContextByReqId.delete(reqId);
-
-    if (!context || context.kind !== 'modify') {
-      pending.reject(new ExchangeError(
-        'Missing batch context for amend-batch response',
-        'CONTEXT_MISSING',
-        'bybit',
-      ));
-
-      return;
-    }
-
-    if (message.retCode !== 0) {
-      pending.reject(new ExchangeError(
-        message.retMsg ?? 'Batch amend failed',
-        message.retCode ?? 'UNKNOWN',
-        'bybit',
-      ));
-
-      return;
-    }
-
+  private buildBatchResultList(
+    context: BybitPendingBatchContext,
+    message: BybitBatchTradeMessage,
+    rateLimit: OrderRateLimitSnapshot | undefined,
+  ): CreateBatchOrdersResult | ModifyBatchOrdersResult | CancelBatchOrdersResult {
     const extInfoList = message.retExtInfo?.list ?? [];
-    const rateLimit = parseBybitHeaderRateLimit(message.header);
-    this.rememberOrderRateLimit(rateLimit);
-    const resultList: ModifyBatchOrdersResult = context.originalOrderIdList.map((orderId, index) => {
-      return buildItemResult<ModifyOrderItemResult>(orderId, extInfoList[index], rateLimit);
-    });
-    pending.resolve(resultList);
+
+    if (context.kind === 'create') {
+      const itemList = message.data?.list ?? [];
+
+      return context.originalArgsList.map((args, index) => {
+        const outcome = buildBybitCreateOutcome(args, itemList[index], extInfoList[index]);
+
+        if (rateLimit !== undefined) {
+          outcome.rateLimit = rateLimit;
+        }
+
+        return outcome;
+      });
+    }
+
+    if (context.kind === 'modify') {
+      return context.originalOrderIdList.map(
+        (orderId, index) => buildBatchItemResult<ModifyOrderItemResult>(orderId, extInfoList[index], rateLimit),
+      );
+    }
+
+    return context.originalOrderIdList.map(
+      (orderId, index) => buildBatchItemResult<CancelOrderItemResult>(orderId, extInfoList[index], rateLimit),
+    );
   }
-
-  private handleCancelBatchResponse(message: BybitBatchTradeMessage): void {
-    const reqId = message.reqId;
-
-    if (!reqId) {
-      return;
-    }
-
-    this.logger.info({ rawMessage: message }, '[Bybit] Cancel batch response received');
-
-    const pending = this.takePendingRequest(reqId);
-
-    if (!pending) {
-      this.pendingBatchContextByReqId.delete(reqId);
-
-      return;
-    }
-
-    if (pending.kind !== PendingRequestKind.CancelBatch) {
-      this.pendingBatchContextByReqId.delete(reqId);
-      pending.reject(new ExchangeError(
-        'Unexpected pending kind for cancel-batch response',
-        message.retCode ?? 'UNKNOWN',
-        'bybit',
-      ));
-
-      return;
-    }
-
-    const context = this.pendingBatchContextByReqId.get(reqId);
-    this.pendingBatchContextByReqId.delete(reqId);
-
-    if (!context || context.kind !== 'cancel') {
-      pending.reject(new ExchangeError(
-        'Missing batch context for cancel-batch response',
-        'CONTEXT_MISSING',
-        'bybit',
-      ));
-
-      return;
-    }
-
-    if (message.retCode !== 0) {
-      pending.reject(new ExchangeError(
-        message.retMsg ?? 'Batch cancel failed',
-        message.retCode ?? 'UNKNOWN',
-        'bybit',
-      ));
-
-      return;
-    }
-
-    const extInfoList = message.retExtInfo?.list ?? [];
-    const rateLimit = parseBybitHeaderRateLimit(message.header);
-    this.rememberOrderRateLimit(rateLimit);
-    const resultList: CancelBatchOrdersResult = context.originalOrderIdList.map((orderId, index) => {
-      return buildItemResult<CancelOrderItemResult>(orderId, extInfoList[index], rateLimit);
-    });
-    pending.resolve(resultList);
-  }
-}
-
-function buildItemResult<TResult extends { orderId: string; isSuccess: boolean; errorCode: number | null; errorText: string | null }>(
-  orderId: string,
-  extInfo: BybitBatchOrderExtInfo | undefined,
-  rateLimit?: OrderRateLimitSnapshot,
-): TResult {
-  const hasCode = extInfo !== undefined && typeof extInfo.code === 'number';
-  const code = hasCode ? extInfo.code : null;
-  const msg = extInfo !== undefined && typeof extInfo.msg === 'string' ? extInfo.msg : null;
-  const isSuccess = code === 0;
-
-  return {
-    orderId,
-    isSuccess,
-    errorCode: isSuccess ? null : code,
-    errorText: isSuccess ? null : (msg ?? 'Unknown error'),
-    ...(rateLimit !== undefined ? { rateLimit } : {}),
-  } as TResult;
 }
 
 function parseBybitHeaderRateLimit(

@@ -15,9 +15,11 @@ import {
   normalizeBybitOpenInterest,
   normalizeBybitFeeRateList,
   normalizeBybitFundingRateHistoryList,
+  normalizeBybitFundingInfoList,
   normalizeBybitMarkPriceList,
   normalizeBybitClosedPnlList,
   normalizeBybitIncomeList,
+  buildBybitCommissionIncomeList,
 } from '../../src/normalizers/bybitNormalizer';
 import { TradeSymbolTypeEnum, PositionSideEnum, MarginModeEnum, OrderSideEnum, OrderTypeEnum } from '../../src/types/common';
 import {
@@ -1274,6 +1276,50 @@ describe('normalizeBybitFeeRateList', () => {
   });
 });
 
+describe('normalizeBybitFundingInfoList', () => {
+  it('converts the funding interval from minutes to hours', () => {
+    const result = normalizeBybitFundingInfoList(BYBIT_RAW_INSTRUMENT_LIST);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].symbol).toBe('BTCUSDT');
+    expect(result[0].fundingIntervalHours).toBe(8);
+  });
+
+  it('parses the rate cap and floor as numbers', () => {
+    const [first] = normalizeBybitFundingInfoList(BYBIT_RAW_INSTRUMENT_LIST);
+
+    expect(first.adjustedFundingRateCap).toBe(0.005);
+    expect(first.adjustedFundingRateFloor).toBe(-0.005);
+  });
+
+  it('keeps a four-hour interval exact', () => {
+    const result = normalizeBybitFundingInfoList([
+      { ...BYBIT_RAW_INSTRUMENT_LIST[0], symbol: 'XRPUSDT', fundingInterval: 240 },
+    ]);
+
+    expect(result[0].fundingIntervalHours).toBe(4);
+  });
+
+  it('skips entries without a usable funding interval', () => {
+    const result = normalizeBybitFundingInfoList([
+      { ...BYBIT_RAW_INSTRUMENT_LIST[0], symbol: 'NOINTERVALUSDT', fundingInterval: undefined },
+      { ...BYBIT_RAW_INSTRUMENT_LIST[0], symbol: 'ZEROUSDT', fundingInterval: 0 },
+      { ...BYBIT_RAW_INSTRUMENT_LIST[0], symbol: 'NANUSDT', fundingInterval: Number.NaN },
+    ]);
+
+    expect(result).toEqual([]);
+  });
+
+  it('falls back to zero bounds when the exchange omitted them', () => {
+    const result = normalizeBybitFundingInfoList([
+      { ...BYBIT_RAW_INSTRUMENT_LIST[0], upperFundingRate: undefined, lowerFundingRate: '' },
+    ]);
+
+    expect(result[0].adjustedFundingRateCap).toBe(0);
+    expect(result[0].adjustedFundingRateFloor).toBe(0);
+  });
+});
+
 describe('normalizeBybitFundingRateHistoryList', () => {
   it('returns array of FundingRateHistory objects', () => {
     const result = normalizeBybitFundingRateHistoryList(BYBIT_RAW_FUNDING_RATE_HISTORY_LIST);
@@ -1361,21 +1407,22 @@ describe('normalizeBybitClosedPnlList', () => {
 
 describe('normalizeBybitIncomeList', () => {
   it('returns array of Income objects', () => {
-    const result = normalizeBybitIncomeList(BYBIT_RAW_TRANSACTION_LOG_LIST);
+    const result = normalizeBybitIncomeList(BYBIT_RAW_TRANSACTION_LOG_LIST, 'realizedPnl');
 
     expect(result).toHaveLength(2);
     expect(result[0].symbol).toBe('BTCUSDT');
   });
 
-  it('reads the cash flow of a trade and the funding field of a settlement as the income', () => {
-    const result = normalizeBybitIncomeList(BYBIT_RAW_TRANSACTION_LOG_LIST);
+  it('reads the cash flow of a trade with kind realizedPnl and the funding field of a settlement with kind funding', () => {
+    const [tradeRow] = normalizeBybitIncomeList([BYBIT_RAW_TRANSACTION_LOG_LIST[0]], 'realizedPnl');
+    const [fundingRow] = normalizeBybitIncomeList([BYBIT_RAW_TRANSACTION_LOG_LIST[1]], 'funding');
 
-    expect(result[0].income).toBe(-6500);
-    expect(result[1].income).toBe(0.5);
+    expect(tradeRow.income).toBe(-6500);
+    expect(fundingRow.income).toBe(0.5);
   });
 
   it('maps type to incomeType and currency to asset', () => {
-    const result = normalizeBybitIncomeList(BYBIT_RAW_TRANSACTION_LOG_LIST);
+    const result = normalizeBybitIncomeList(BYBIT_RAW_TRANSACTION_LOG_LIST, 'realizedPnl');
 
     expect(result[0].incomeType).toBe('TRADE');
     expect(result[0].asset).toBe('USDT');
@@ -1383,19 +1430,19 @@ describe('normalizeBybitIncomeList', () => {
   });
 
   it('includes tradeId and orderId in info', () => {
-    const result = normalizeBybitIncomeList(BYBIT_RAW_TRANSACTION_LOG_LIST);
+    const result = normalizeBybitIncomeList(BYBIT_RAW_TRANSACTION_LOG_LIST, 'realizedPnl');
 
     expect(result[0].info).toEqual({ tradeId: 'trade-1', orderId: 'order-1' });
   });
 
   it('returns empty array for empty input', () => {
-    const result = normalizeBybitIncomeList([]);
+    const result = normalizeBybitIncomeList([], 'realizedPnl');
 
     expect(result).toHaveLength(0);
   });
 
   it('reads a settlement row from the funding field, not from its zero cash flow', () => {
-    const [row] = normalizeBybitIncomeList([BYBIT_RAW_TRANSACTION_LOG_SETTLEMENT]);
+    const [row] = normalizeBybitIncomeList([BYBIT_RAW_TRANSACTION_LOG_SETTLEMENT], 'funding');
 
     expect(row.income).toBeCloseTo(-2.3156522, 8);
     expect(row.incomeType).toBe('SETTLEMENT');
@@ -1404,9 +1451,26 @@ describe('normalizeBybitIncomeList', () => {
   it('still reads a trade row from its cash flow even when the funding field is present', () => {
     const [row] = normalizeBybitIncomeList([
       { symbol: 'ICNTUSDT', type: 'TRADE', qty: '10', cashFlow: '-134.42656869', fee: '0.34382205', funding: '0', currency: 'USDT', transactionTime: '1700000000000', tradeId: 't1', orderId: 'o1' },
-    ]);
+    ], 'realizedPnl');
 
     expect(row.income).toBeCloseTo(-134.42656869, 8);
+  });
+
+  it('carries the funding kind on a settlement row and the realizedPnl kind on a trade row', () => {
+    const [fundingRow] = normalizeBybitIncomeList([BYBIT_RAW_TRANSACTION_LOG_SETTLEMENT], 'funding');
+    const [tradeRow] = normalizeBybitIncomeList([BYBIT_RAW_TRANSACTION_LOG_LIST[0]], 'realizedPnl');
+
+    expect(fundingRow.kind).toBe('funding');
+    expect(tradeRow.kind).toBe('realizedPnl');
+  });
+
+  it('carries the commission kind on a commission row', () => {
+    const [row] = buildBybitCommissionIncomeList([
+      { symbol: 'BTCUSDT', type: 'TRADE', qty: '0.100', cashFlow: '-6500.00', fee: '4.5', currency: 'USDT', transactionTime: '1700000000000', tradeId: 'trade-1', orderId: 'order-1' },
+    ]);
+
+    expect(row.kind).toBe('commission');
+    expect(row.income).toBe(-4.5);
   });
 });
 

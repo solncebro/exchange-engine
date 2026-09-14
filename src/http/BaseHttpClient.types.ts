@@ -17,6 +17,12 @@ export interface HttpRecord {
   [key: string]: unknown;
 }
 
+/**
+ * Тело POST-запроса — объект или, для пакетных операций (например, OKX batch-orders), массив
+ * объектов: биржа ожидает JSON-массив, а не объект-обёртку.
+ */
+export type HttpPostBody = HttpRecord | HttpRecord[];
+
 export interface HttpQueryParams {
   [key: string]: string | number | boolean;
 }

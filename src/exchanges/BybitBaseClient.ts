@@ -1,5 +1,6 @@
 import type {
   CancelBatchOrdersResult,
+  CancelOrderItemResult,
   CreateBatchOrdersResult,
   CreateOrderWebSocketArgs,
   FetchIncomeArgs,
@@ -7,6 +8,7 @@ import type {
   ModifyBatchOrderArgs,
   ModifyBatchOrdersResult,
   ModifyOrderArgs,
+  ModifyOrderItemResult,
   OrderRateLimit,
 } from '../types/exchange';
 import type {
@@ -30,7 +32,9 @@ import { OrderTypeEnum, OrderSideEnum, PositionSideEnum, OrderFilterEnum, Market
 import { isConditionalOrderType } from '../constants/orderTypes';
 import { ExchangeError } from '../errors/ExchangeError';
 import type { PublicStreamLike } from '../types/stream';
+import { buildBatchItemResult } from '../normalizers/batchOrderOutcome';
 import { BybitHttpClient } from '../http/BybitHttpClient';
+import type { BybitTransactionLogRaw } from '../normalizers/bybitNormalizer';
 import {
   normalizeBybitTradeSymbols,
   normalizeBybitTickers,
@@ -543,18 +547,7 @@ abstract class BybitBaseClient extends BaseExchangeClient {
       const extInfoList = raw.retExtInfo?.list ?? [];
 
       chunkOrderIdList.forEach((orderId, indexInChunk) => {
-        const extInfo = extInfoList[indexInChunk];
-        const hasCode = extInfo !== undefined && typeof extInfo.code === 'number';
-        const code = hasCode ? extInfo.code : null;
-        const msg = extInfo !== undefined && typeof extInfo.msg === 'string' ? extInfo.msg : null;
-        const isSuccess = code === 0;
-
-        aggregatedResultList.push({
-          orderId,
-          isSuccess,
-          errorCode: isSuccess ? null : code,
-          errorText: isSuccess ? null : (msg ?? 'Unknown error'),
-        });
+        aggregatedResultList.push(buildBatchItemResult<CancelOrderItemResult>(orderId, extInfoList[indexInChunk]));
       });
     }
 
@@ -585,18 +578,9 @@ abstract class BybitBaseClient extends BaseExchangeClient {
       const extInfoList = raw.retExtInfo?.list ?? [];
 
       chunk.forEach((requestedOrder, indexInChunk) => {
-        const extInfo = extInfoList[indexInChunk];
-        const hasCode = extInfo !== undefined && typeof extInfo.code === 'number';
-        const code = hasCode ? extInfo.code : null;
-        const msg = extInfo !== undefined && typeof extInfo.msg === 'string' ? extInfo.msg : null;
-        const isSuccess = code === 0;
-
-        aggregatedResultList.push({
-          orderId: requestedOrder.orderId,
-          isSuccess,
-          errorCode: isSuccess ? null : code,
-          errorText: isSuccess ? null : (msg ?? 'Unknown error'),
-        });
+        aggregatedResultList.push(
+          buildBatchItemResult<ModifyOrderItemResult>(requestedOrder.orderId, extInfoList[indexInChunk]),
+        );
       });
     }
 
@@ -630,55 +614,63 @@ abstract class BybitBaseClient extends BaseExchangeClient {
 
   async fetchIncome(options?: FetchIncomeArgs): Promise<Income[]> {
     this.logger.debug('[Bybit] Fetching income');
-    // Умолчание биржи — 20 записей на страницу, и постраничного дочитывания здесь нет.
-    // Поэтому всегда просим максимум, а полную страницу считаем признаком того, что часть
-    // записей осталась за кадром: молча отдать усечённый ответ хуже, чем отказать —
-    // потребитель посчитает по неполным данным и не узнает об этом.
+    // Умолчание биржи — 20 записей на страницу, поэтому просим максимум; `limit` здесь — размер
+    // страницы, а не потолок ответа: страницы дочитываются по курсору до конца окна. До 10.09.2026
+    // дочитывания не было, и полная страница давала отказ — на живом счёте это каждая сделка
+    // длиннее нескольких часов (REZUSDT: десять часов, фандинг «неизвестен»).
     const limit = Math.min(options?.limit ?? BYBIT_TRANSACTION_LOG_MAX_LIMIT, BYBIT_TRANSACTION_LOG_MAX_LIMIT);
-    const raw = await this.httpClient.fetchTransactionLog({
+    const rawList = await this.httpClient.fetchAllTransactionLog({
       category: this.category,
       limit,
       startTime: options?.startTime,
       endTime: options?.endTime,
     });
-    const rawList = raw.result.list;
-
-    if (rawList.length >= limit) {
-      throw new Error(
-        `[Bybit] transaction log returned a full page of ${limit} entries — the answer would be incomplete`,
-      );
-    }
     // Символ этот вход биржи не принимает — отбираем сами; у Binance то же самое делает биржа.
     const symbolFilteredList = options?.symbol === undefined
       ? rawList
       : rawList.filter((entry) => entry.symbol === options.symbol);
 
-    if (options?.incomeType === undefined) {
-      return normalizeBybitIncomeList(symbolFilteredList);
-    }
-
     const windowFilteredList = symbolFilteredList.filter((entry) => {
       const timestamp = parseFloat(entry.transactionTime);
 
-      return (options.startTime === undefined || timestamp >= options.startTime)
-        && (options.endTime === undefined || timestamp <= options.endTime);
+      return (options?.startTime === undefined || timestamp >= options.startTime)
+        && (options?.endTime === undefined || timestamp <= options.endTime);
     });
 
-    if (options.incomeType === 'funding') {
-      return normalizeBybitIncomeList(
-        windowFilteredList.filter((entry) => BYBIT_FUNDING_INCOME_TYPE_SET.has(entry.type)),
-      );
+    if (options?.incomeType === 'funding') {
+      return this.buildBybitFundingIncomeList(windowFilteredList);
     }
 
-    if (options.incomeType === 'realizedPnl') {
-      // Поток денег по записи и есть реализованный итог, комиссия в него не входит —
-      // ровно тот же смысл, что у Binance под словом REALIZED_PNL (проверено живьём).
-      return normalizeBybitIncomeList(
-        windowFilteredList.filter((entry) => BYBIT_TRADE_INCOME_TYPE_SET.has(entry.type) && parseFloat(entry.cashFlow) !== 0),
-      );
+    if (options?.incomeType === 'realizedPnl') {
+      return this.buildBybitRealizedPnlIncomeList(windowFilteredList);
     }
 
-    return buildBybitCommissionIncomeList(windowFilteredList);
+    if (options?.incomeType === 'commission') {
+      return buildBybitCommissionIncomeList(windowFilteredList);
+    }
+
+    // Без фильтра — все три потока разом, помеченные видом (07.09.2026). Журнал операций у Bybit
+    // ОДИН на все виды, и три отдельных запроса читали одну и ту же страницу трижды; теперь хватает
+    // одного. Одна запись `SETTLEMENT` законно даёт две строки — начисление фандинга и денежный
+    // поток сделки, — потому что биржа держит их в разных полях одной строки.
+    return [
+      ...this.buildBybitFundingIncomeList(windowFilteredList),
+      ...this.buildBybitRealizedPnlIncomeList(windowFilteredList),
+      ...buildBybitCommissionIncomeList(windowFilteredList),
+    ].sort((left, right) => left.timestamp - right.timestamp);
+  }
+
+  private buildBybitFundingIncomeList(rawList: BybitTransactionLogRaw[]): Income[] {
+    return normalizeBybitIncomeList(rawList.filter((entry) => BYBIT_FUNDING_INCOME_TYPE_SET.has(entry.type)), 'funding');
+  }
+
+  private buildBybitRealizedPnlIncomeList(rawList: BybitTransactionLogRaw[]): Income[] {
+    // Поток денег по записи и есть реализованный итог, комиссия в него не входит —
+    // ровно тот же смысл, что у Binance под словом REALIZED_PNL (проверено живьём).
+    return normalizeBybitIncomeList(
+      rawList.filter((entry) => BYBIT_TRADE_INCOME_TYPE_SET.has(entry.type) && parseFloat(entry.cashFlow) !== 0),
+      'realizedPnl',
+    );
   }
 
   async fetchClosedPnl(symbol?: string, options?: FetchPageWithLimitArgs): Promise<ClosedPnl[]> {

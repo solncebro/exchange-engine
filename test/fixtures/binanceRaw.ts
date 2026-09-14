@@ -69,9 +69,106 @@ export const BINANCE_RAW_EXCHANGE_INFO: BinanceExchangeInfoRaw = {
   ],
 };
 
+export const BINANCE_RAW_EXCHANGE_INFO_SETTLE_VARIANTS: BinanceExchangeInfoRaw = {
+  symbols: [
+    {
+      symbol: 'BTCUSDC',
+      pair: 'BTCUSDC',
+      status: 'TRADING',
+      baseAsset: 'BTC',
+      quoteAsset: 'USDC',
+      contractType: 'PERPETUAL',
+      marginAsset: 'USDC',
+      deliveryDate: 4133404800000,
+      onboardDate: 1704285000000,
+      filters: [
+        { filterType: 'PRICE_FILTER', tickSize: '0.1', minPrice: '0.1', maxPrice: '500000' },
+        { filterType: 'LOT_SIZE', stepSize: '0.001', minQty: '0.001', maxQty: '800' },
+        { filterType: 'MIN_NOTIONAL', notional: '100' },
+      ],
+    },
+    {
+      symbol: 'ETHUSDT_250627',
+      pair: 'ETHUSDT',
+      status: 'DELIVERING',
+      baseAsset: 'ETH',
+      quoteAsset: 'USDT',
+      contractType: 'CURRENT_QUARTER DELIVERING',
+      marginAsset: 'USDT',
+      deliveryDate: 1751011200000,
+      onboardDate: 1735027200000,
+      filters: [
+        { filterType: 'PRICE_FILTER', tickSize: '0.01', minPrice: '41.10', maxPrice: '100000' },
+        { filterType: 'LOT_SIZE', stepSize: '0.001', minQty: '0.001', maxQty: '10000' },
+        { filterType: 'MIN_NOTIONAL', notional: '5' },
+      ],
+    },
+  ],
+};
+
+export const BINANCE_RAW_TICKER_FUTURES: BinanceTicker24hrRaw = {
+  symbol: 'BTCUSDT',
+  priceChange: '48.30',
+  priceChangePercent: '0.062',
+  weightedAvgPrice: '78882.12',
+  lastPrice: '78516.30',
+  lastQty: '0.0010',
+  openPrice: '78468.00',
+  highPrice: '79663.50',
+  lowPrice: '78315.50',
+  volume: '1371508.3717',
+  quoteVolume: '108187493027.15',
+  openTime: 1788893400000,
+  closeTime: 1788979852109,
+  firstId: 535867432,
+  lastId: 536191437,
+  count: 323989,
+};
+
+export const BINANCE_RAW_TICKER_SPOT: BinanceTicker24hrRaw = {
+  symbol: 'ETHBTC',
+  priceChange: '-0.00002000',
+  priceChangePercent: '-0.063',
+  weightedAvgPrice: '0.03165338',
+  prevClosePrice: '0.03170000',
+  lastPrice: '0.03169000',
+  lastQty: '0.27600000',
+  bidPrice: '0.03168000',
+  bidQty: '34.98980000',
+  askPrice: '0.03169000',
+  askQty: '38.29120000',
+  openPrice: '0.03171000',
+  highPrice: '0.03174000',
+  lowPrice: '0.03145000',
+  volume: '2976.76230000',
+  quoteVolume: '94.22458944',
+  openTime: 1788893456357,
+  closeTime: 1788979856357,
+  firstId: 9551104,
+  lastId: 9557799,
+  count: 6696,
+};
+
 export const BINANCE_RAW_TICKER_LIST: BinanceTicker24hrRaw[] = [
-  { symbol: 'BTCUSDT', lastPrice: '65432.10', openPrice: '63900.00', highPrice: '66000.00', lowPrice: '63500.00', priceChangePercent: '2.35', volume: '12345.67', quoteVolume: '805000000.00', time: 1700000000000 },
-  { symbol: 'ETHUSDT', lastPrice: '3456.78', openPrice: '3498.78', highPrice: '3550.00', lowPrice: '3400.00', priceChangePercent: '-1.20', volume: '98765.43', quoteVolume: '340000000.00', time: 1700000000000 },
+  BINANCE_RAW_TICKER_FUTURES,
+  {
+    symbol: 'ETHUSDT',
+    priceChange: '-2.49',
+    priceChangePercent: '-0.100',
+    weightedAvgPrice: '2495.35',
+    lastPrice: '2485.51',
+    lastQty: '0.011',
+    openPrice: '2488.00',
+    highPrice: '2520.68',
+    lowPrice: '2471.38',
+    volume: '40605465.232',
+    quoteVolume: '101324890603.69',
+    openTime: 1788893460000,
+    closeTime: 1788979917852,
+    firstId: 324823713,
+    lastId: 325218962,
+    count: 395245,
+  },
 ];
 
 export const BINANCE_RAW_KLINE_LIST: unknown[][] = [

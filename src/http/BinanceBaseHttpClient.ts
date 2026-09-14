@@ -12,12 +12,9 @@ import { ExchangeError } from '../errors/ExchangeError';
 import { applyTimeRangeOptions } from '../utils/httpParams';
 import { BaseHttpClient } from './BaseHttpClient';
 import { isBinanceStaleTimestampError } from './binanceTimestampError';
-import {
-  BINANCE_REQUEST_WEIGHT_LIMIT_PER_MIN,
-  parseRetryAfterMs,
-  parseUsedWeight1m,
-  resolveRateLimitCooldownMs,
-} from './binanceRateLimit';
+import { getBinanceRequestGate } from './binanceRequestGate';
+import type { BinanceRequestGate } from './binanceRequestGate';
+import type { ExchangeRateLimitState } from '../types/common';
 import type {
   BinanceEndpoints,
   BinanceErrorResponse,
@@ -36,40 +33,26 @@ const STALE_TIMESTAMP_ATTEMPT_LIMIT = 2;
 abstract class BinanceBaseHttpClient extends BaseHttpClient {
   protected readonly secret: string;
   protected abstract readonly endpoints: BinanceEndpoints;
-  private weightCooldownUntilMs = 0;
+  /** Память о лимитах — ОБЩАЯ на адрес, а не на экземпляр клиента: биржа считает их по адресу. */
+  private readonly requestGate: BinanceRequestGate;
 
   constructor(args: BinanceHttpClientArgs, timeout: number) {
     super({ baseUrl: args.baseUrl, apiKey: args.apiKey, logger: args.logger, timeout, httpsAgent: args.httpsAgent });
     this.secret = args.secret;
+    this.requestGate = getBinanceRequestGate(args.baseUrl);
   }
 
   protected override async beforeRequest(): Promise<void> {
-    const waitMs = this.weightCooldownUntilMs - Date.now();
-
-    if (waitMs > 0) {
-      await new Promise<void>((resolve) => setTimeout(resolve, waitMs));
-    }
+    await this.requestGate.waitForTurn(this.logger);
   }
 
-  protected override onResponse(status: number | undefined, headers: unknown): void {
-    const usedWeight = parseUsedWeight1m(headers);
-    const cooldownMs = resolveRateLimitCooldownMs({
-      status,
-      usedWeight,
-      retryAfterMs: parseRetryAfterMs(headers),
-    });
+  protected override onResponse(status: number | undefined, headers: unknown, body?: unknown): void {
+    this.requestGate.observe({ status, headers, body, logger: this.logger });
+  }
 
-    if (cooldownMs <= 0) {
-      return;
-    }
-
-    this.weightCooldownUntilMs = Date.now() + cooldownMs;
-
-    if (status === 418) {
-      this.logger.error(`Binance HTTP 418 — IP banned; backing off reads for ${cooldownMs}ms`);
-    } else {
-      this.logger.warn(`Binance REQUEST_WEIGHT near cap (used ${usedWeight}/${BINANCE_REQUEST_WEIGHT_LIMIT_PER_MIN} per min) — throttling reads for ${cooldownMs}ms`);
-    }
+  /** Сколько веса израсходовано на адресе и до какого момента дверь закрыта (для вызывающего). */
+  getRateLimitState(): ExchangeRateLimitState {
+    return this.requestGate.readState();
   }
 
   protected async signedGet<T>(

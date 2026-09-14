@@ -70,8 +70,10 @@ import {
 } from '../constants/mappings';
 import { chunkList as chunkListUtil } from '../utils/chunkList';
 import { isBinanceNumericOrderId } from '../utils/binanceOrderId';
+import { sleep } from '../utils/sleep';
 import { BinanceBaseClient } from './BinanceBaseClient';
 import { BaseExchangeClient } from './BaseExchangeClient';
+import { resolveTwoServiceOrderFailure } from './twoServiceOrderLookup';
 import type { AxiosLikeError, BinanceModifyBatchOrderParams, BinanceModifyOrderParams } from './BinanceFutures.types';
 
 /** Условные типы, которые принимают срок действия: у них после срабатывания рождается лимит. */
@@ -106,10 +108,6 @@ function isBinanceMissingOrderError(error: unknown): boolean {
 
   // Числовой код теряется при переносе ошибки в текст — приходится смотреть и на текст.
   return error instanceof Error && /-2011|-2013|does not exist|unknown order/i.test(error.message);
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 const BINANCE_POSITION_MODE_NOOP_ERROR_CODE = -4059;
@@ -362,7 +360,16 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
       return { order: normalizeBinanceOrder(plainOutcome.value), kind: 'plain' };
     }
 
-    throw plainOutcome.reason;
+    throw resolveTwoServiceOrderFailure({
+      exchangeLabel: this.exchangeLabel,
+      logger: this.logger,
+      symbol,
+      orderId,
+      action: 'reading',
+      errorList: [plainOutcome.reason, conditionalOutcome.reason],
+      missingOrderError: plainOutcome.reason,
+      isMissingOrderError: isBinanceMissingOrderError,
+    });
   }
 
   private async cancelConditionalOrderById(orderId: string): Promise<Order> {
@@ -386,13 +393,13 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
   async getOrderByClientOrderId(symbol: string, clientOrderId: string): Promise<Order> {
     // Наша собственная пометка — пространство без столкновений, поэтому спрашиваем обе
     // службы сразу и берём ту, что ответила.
-    const [plainOutcome, conditionalOutcome] = await Promise.allSettled([
+    const [plainOutcome, rawConditionalOutcome] = await Promise.allSettled([
       this.httpClient.getOrderByClientOrderId(symbol, clientOrderId),
       this.httpClient.fetchAlgoOrder({ clientAlgoId: clientOrderId }),
     ]);
 
-    if (conditionalOutcome.status === 'fulfilled' && isBinanceAlgoOrderRaw(conditionalOutcome.value)) {
-      const order = normalizeBinanceAlgoOrder(conditionalOutcome.value);
+    if (rawConditionalOutcome.status === 'fulfilled' && isBinanceAlgoOrderRaw(rawConditionalOutcome.value)) {
+      const order = normalizeBinanceAlgoOrder(rawConditionalOutcome.value);
       this.conditionalOrderRegistry.record(symbol, order.id, 'conditional');
 
       return this.hydrateTriggeredOrder(order);
@@ -407,7 +414,24 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
       return order;
     }
 
-    throw plainOutcome.reason;
+    // Отдать причину ОБЫЧНОЙ книги значило бы выдать «такой заявки нет» за общий ответ, тогда как
+    // условную службу могло просто не удаться спросить, — и вызывающий счёл бы защитную заявку
+    // снятой. Ровно тот же разбор, что у чтения и отмены по номеру заявки.
+    const conditionalOutcome =
+      rawConditionalOutcome.status === 'fulfilled'
+        ? { status: 'rejected' as const, reason: new Error(`Binance futures: order ${clientOrderId} not found in the conditional service`) }
+        : rawConditionalOutcome;
+
+    throw resolveTwoServiceOrderFailure({
+      exchangeLabel: this.exchangeLabel,
+      logger: this.logger,
+      symbol,
+      orderId: clientOrderId,
+      action: 'reading',
+      errorList: [plainOutcome.reason, conditionalOutcome.reason],
+      missingOrderError: plainOutcome.reason,
+      isMissingOrderError: isBinanceMissingOrderError,
+    });
   }
 
   async fetchOpenConditionalOrders(_settleCoin: string): Promise<Order[]> {
@@ -446,10 +470,21 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
 
       try {
         return await this.cancelConditionalOrderById(orderId);
-      } catch {
+      } catch (conditionalCancelError) {
         // Ни в одной службе заявки нет: наружу отдаём ИСХОДНУЮ ошибку обычной книги,
-        // иначе вызывающий не узнает свой случай «заявки уже нет».
-        throw plainCancelError;
+        // иначе вызывающий не узнает свой случай «заявки уже нет». Но отказ условной службы
+        // ПО СВЯЗИ — это не «заявки нет», и выдать его за отсутствие значит сказать вызывающему,
+        // что защитная заявка снята, когда она жива.
+        throw resolveTwoServiceOrderFailure({
+          exchangeLabel: this.exchangeLabel,
+          logger: this.logger,
+          symbol,
+          orderId,
+          action: 'cancelling',
+          errorList: [plainCancelError, conditionalCancelError],
+          missingOrderError: plainCancelError,
+          isMissingOrderError: isBinanceMissingOrderError,
+        });
       }
     }
   }

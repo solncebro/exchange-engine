@@ -215,6 +215,25 @@ describe('BybitTradeStream batch operations', () => {
       ]);
     });
 
+    it('rejects on top-level retCode !== 0', async () => {
+      await connectStream();
+
+      const promise = stream.modifyBatchOrders('linear', ['1'], [{ symbol: 'BTCUSDT', orderId: '1', price: '30000' }]);
+
+      await jest.advanceTimersByTimeAsync(0);
+
+      const sentMessage = mockWebSocket.sendToConnectedSocket.mock.calls[0][0];
+      capturedOnMessage!({
+        op: 'order.amend-batch',
+        reqId: sentMessage.reqId,
+        retCode: 10001,
+        retMsg: 'Top-level failure',
+      } as BybitBatchTradeMessage);
+
+      await expect(promise).rejects.toThrow('Top-level failure');
+      expect((stream as any).pendingBatchContextByReqId.size).toBe(0);
+    });
+
     it('rejects when WebSocket is not connected', async () => {
       await connectStream();
       mockWebSocket.getStatus.mockReturnValue(WebSocketStatus.DISCONNECTED);

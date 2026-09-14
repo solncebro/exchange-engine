@@ -1,8 +1,10 @@
 export { BybitPublicStream } from './ws/BybitPublicStream';
 export { BinanceFuturesPublicStream } from './ws/BinanceFuturesPublicStream';
+export { OkxPublicStream } from './ws/OkxPublicStream';
 
 export type { BybitPublicStreamArgs } from './ws/BybitPublicStream.types';
 export type { BinanceFuturesPublicStreamArgs } from './ws/BinanceFuturesPublicStream.types';
+export type { OkxPublicStreamArgs } from './ws/OkxPublicStream.types';
 
 export {
   normalizeBybitKlineWebSocketMessage,
@@ -14,6 +16,11 @@ export {
   normalizeBinanceKlines,
   normalizeBinanceTradeSymbols,
 } from './normalizers/binanceNormalizer';
+export {
+  normalizeOkxKlineWebSocketMessage,
+  normalizeOkxKlines,
+  normalizeOkxTradeSymbols,
+} from './normalizers/okxNormalizer';
 
 export type {
   BybitWebSocketKlineRaw,
@@ -23,6 +30,7 @@ export type {
   BinanceWebSocketKlineRaw,
   BinanceExchangeInfoRaw,
 } from './normalizers/binanceNormalizer';
+export type { OkxInstrumentRaw } from './normalizers/okxNormalizer';
 
 export {
   BYBIT_BASE_URL,
@@ -33,6 +41,12 @@ export {
   BINANCE_FUTURES_BASE_URL,
   BINANCE_FUTURES_WEBSOCKET_MARKET_COMBINED_URL,
 } from './constants/binance';
+export {
+  OKX_BASE_URL,
+  OKX_PUBLIC_WEBSOCKET_URL,
+  OKX_BUSINESS_WEBSOCKET_URL,
+  OKX_KLINE_INTERVAL,
+} from './constants/okx';
 
 export { WebSocketConnectionTypeEnum } from './types/common';
 export type {

@@ -10,7 +10,6 @@ import type {
   BalanceByAsset,
   AccountBalances,
   OrderBook,
-  OrderBookRawLevel,
   OrderBookUpdate,
   OrderBookUpdateType,
   PublicTrade,
@@ -18,16 +17,17 @@ import type {
   OpenInterest,
   FeeRate,
   FundingRateHistory,
+  FundingInfo,
   ClosedPnl,
   Income,
+  IncomeKind,
   LeverageFilter,
   PriceLimitRisk,
   TradingFunding,
 } from '../types/common';
 import { TradeSymbolTypeEnum, PositionSideEnum, MarginModeEnum, TimeInForceEnum, OrderSideEnum, OrderTypeEnum } from '../types/common';
 import { BYBIT_POSITION_SIDE, BYBIT_ORDER_STATUS, BYBIT_ORDER_SIDE, BYBIT_ORDER_TYPE, BYBIT_TIME_IN_FORCE } from '../constants/mappings';
-import { BYBIT_FUNDING_INCOME_TYPE_SET } from '../constants/bybit';
-import { parseOrderBookLevel } from './normalizerUtils';
+import { parseOrderBookLevel, toOrderBookRawLevelList } from './normalizerUtils';
 import { buildPlacedOrderOutcome, buildRejectedOrderOutcome } from './batchOrderOutcome';
 import type { CreateOrderItemResult, CreateOrderWebSocketArgs } from '../types/exchange';
 
@@ -866,16 +866,6 @@ export function normalizeBybitOrderBook(raw: BybitOrderBookRaw, symbol: string):
   };
 }
 
-function toOrderBookRawLevelList(rawList: string[][]): OrderBookRawLevel[] {
-  const result: OrderBookRawLevel[] = [];
-
-  for (const level of rawList) {
-    result.push([level[0], level[1]]);
-  }
-
-  return result;
-}
-
 export function normalizeBybitOrderBookUpdate(
   raw: BybitOrderBookRaw,
   symbol: string,
@@ -1019,6 +1009,48 @@ export function normalizeBybitFeeRateList(rawList: BybitFeeRateRaw[]): FeeRate[]
   }));
 }
 
+/** Сколько минут в часе: Bybit меряет интервал фандинга минутами, единый контракт — часами. */
+const BYBIT_MINUTES_PER_HOUR = 60;
+
+/** До сотых долей часа — как у OKX, где интервал считается из расстояния между начислениями. */
+const BYBIT_FUNDING_INTERVAL_HOURS_SCALE = 100;
+
+function parseBybitFundingRateBound(value: string | undefined): number {
+  if (value === undefined || value === '') {
+    return 0;
+  }
+
+  const parsedValue = parseFloat(value);
+
+  return Number.isFinite(parsedValue) ? parsedValue : 0;
+}
+
+/**
+ * Сведения о фандинге Bybit отдаёт не отдельной ручкой, а полями списка инструментов:
+ * `fundingInterval` в МИНУТАХ плюс потолок и пол ставки долями. Единый контракт `FundingInfo`
+ * меряет интервал часами (как `fundingIntervalHours` у Binance), поэтому минуты делятся на 60.
+ * Запись без пригодного интервала пропускается: ноль означал бы «начислений нет», а это не то же
+ * самое, что «биржа интервала не назвала» — у спота и у инструментов без фандинга поля просто нет.
+ */
+export function normalizeBybitFundingInfoList(rawList: BybitInstrumentInfoRaw[]): FundingInfo[] {
+  return rawList.flatMap((raw) => {
+    const intervalMinutes = raw.fundingInterval;
+
+    if (intervalMinutes === undefined || !Number.isFinite(intervalMinutes) || intervalMinutes <= 0) {
+      return [];
+    }
+
+    const intervalHours = intervalMinutes / BYBIT_MINUTES_PER_HOUR;
+
+    return {
+      symbol: raw.symbol,
+      fundingIntervalHours: Math.round(intervalHours * BYBIT_FUNDING_INTERVAL_HOURS_SCALE) / BYBIT_FUNDING_INTERVAL_HOURS_SCALE,
+      adjustedFundingRateCap: parseBybitFundingRateBound(raw.upperFundingRate),
+      adjustedFundingRateFloor: parseBybitFundingRateBound(raw.lowerFundingRate),
+    };
+  });
+}
+
 export function normalizeBybitFundingRateHistoryList(rawList: BybitFundingRateHistoryRaw[]): FundingRateHistory[] {
   return rawList.map((raw) => ({
     symbol: raw.symbol,
@@ -1080,6 +1112,7 @@ export function buildBybitCommissionIncomeList(rawList: BybitTransactionLogRaw[]
     .map((raw) => ({
       symbol: raw.symbol,
       incomeType: 'COMMISSION',
+      kind: 'commission' as const,
       income: -parseFloat(raw.fee ?? '0'),
       asset: raw.currency,
       timestamp: parseFloat(raw.transactionTime),
@@ -1093,16 +1126,20 @@ export function buildBybitCommissionIncomeList(rawList: BybitTransactionLogRaw[]
  * нулевой, а само начисление лежит в поле `funding` (живой счёт 02.09.2026, FLOCKUSDT:
  * `cashFlow=0`, `funding=-2.3156522` — списано); брать `cashFlow` значило бы всегда отдавать
  * ноль и выдавать его за факт с биржи. Знак у обеих бирж один: отрицательное = списано.
+ *
+ * Считается по ВИДУ дохода, а не по названию записи: `SETTLEMENT` — это одновременно и начисление
+ * фандинга, и денежный поток сделки, и одна такая запись законно даёт две строки разных видов.
  */
-function bybitIncomeAmount(raw: BybitTransactionLogRaw): number {
-  return BYBIT_FUNDING_INCOME_TYPE_SET.has(raw.type) ? parseFloat(raw.funding ?? '0') : parseFloat(raw.cashFlow);
+function bybitIncomeAmount(raw: BybitTransactionLogRaw, kind: IncomeKind): number {
+  return kind === 'funding' ? parseFloat(raw.funding ?? '0') : parseFloat(raw.cashFlow);
 }
 
-export function normalizeBybitIncomeList(rawList: BybitTransactionLogRaw[]): Income[] {
+export function normalizeBybitIncomeList(rawList: BybitTransactionLogRaw[], kind: IncomeKind): Income[] {
   return rawList.map((raw) => ({
     symbol: raw.symbol,
     incomeType: raw.type,
-    income: bybitIncomeAmount(raw),
+    kind,
+    income: bybitIncomeAmount(raw, kind),
     asset: raw.currency,
     timestamp: parseFloat(raw.transactionTime),
     info: { tradeId: raw.tradeId, orderId: raw.orderId },

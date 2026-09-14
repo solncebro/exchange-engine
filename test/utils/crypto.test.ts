@@ -1,4 +1,4 @@
-import { hmacSha256 } from '../../src/utils/crypto';
+import { hmacSha256, hmacSha256Base64 } from '../../src/utils/crypto';
 
 describe('hmacSha256', () => {
   it('produces correct hex digest for known input', () => {
@@ -20,5 +20,27 @@ describe('hmacSha256', () => {
 
     expect(result).toHaveLength(64);
     expect(result).toMatch(/^[0-9a-f]{64}$/);
+  });
+});
+
+describe('hmacSha256Base64', () => {
+  it('produces correct base64 digest for known input', () => {
+    const result = hmacSha256Base64('hello', 'secret');
+
+    expect(result).toBe('iKqz7ejTrflNJquQ07r9SiCDBww7zOnAFO4EpEOEfAs=');
+  });
+
+  it('produces different result for different secret', () => {
+    const result1 = hmacSha256Base64('hello', 'secret1');
+    const result2 = hmacSha256Base64('hello', 'secret2');
+
+    expect(result1).not.toBe(result2);
+  });
+
+  it('handles empty payload', () => {
+    const result = hmacSha256Base64('', 'secret');
+
+    expect(result).toHaveLength(44);
+    expect(result.endsWith('=')).toBe(true);
   });
 });

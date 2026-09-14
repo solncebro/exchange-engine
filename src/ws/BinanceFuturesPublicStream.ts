@@ -8,13 +8,13 @@ import {
   normalizeBinanceKlineWebSocketMessage,
   normalizeBinanceMarkPriceWebSocketList,
   normalizeBinanceOrderBookUpdate,
-  normalizeBinanceTickers,
+  normalizeBinanceMiniTickerList,
 } from '../normalizers/binanceNormalizer';
 import type {
   BinanceAggTradeWebSocketRaw,
   BinanceDepthWebSocketRaw,
   BinanceMarkPriceWebSocketRaw,
-  BinanceTicker24hrRaw,
+  BinanceMiniTickerWebSocketRaw,
   BinanceWebSocketKlineRaw,
 } from '../normalizers/binanceNormalizer';
 import { resolveUnifiedBinanceInterval } from './binanceWebSocketUtils';
@@ -29,12 +29,13 @@ import {
   BINANCE_WS_QUEUE_RATE_PER_SECOND,
   BINANCE_WS_RESUBSCRIBE_COALESCE_WINDOW_MS,
   BINANCE_WS_SOCKET_CAP_PER_SECOND,
+  WS_RECREATE_DEDUP_WINDOW_MS,
 } from './streamCommandRateLimit';
+import { sleep } from '../utils/sleep';
 
 const DEFAULT_PAUSE_BETWEEN_CONNECTIONS_MS = 1100;
 const DEFAULT_STALE_THRESHOLD_MS = 60000;
 const DEFAULT_STALE_CHECK_INTERVAL_MS = 5000;
-const DEFAULT_RECREATE_DEDUP_WINDOW_MS = 2000;
 const POST_RECREATE_GRACE_PERIOD_MS = 60000;
 const DEFAULT_SUBSCRIBE_BATCH_SIZE = 50;
 const DEFAULT_MAX_STREAMS_PER_CONNECTION = 900;
@@ -67,9 +68,6 @@ const extractSymbolFromStream = (stream: string): string | undefined => {
 
   return undefined;
 };
-
-const pause = (durationMs: number): Promise<void> =>
-  new Promise((resolve) => setTimeout(resolve, durationMs));
 
 function buildStreamName(symbol: string, interval: string, tradeSymbols: TradeSymbolBySymbol): string {
   const tradeSymbol = tradeSymbols.get(symbol.toUpperCase());
@@ -598,7 +596,7 @@ class BinanceFuturesPublicStream {
 
     if (aggTradeStreamList.length > 0) {
       if (!isFirstConnection && this.pauseBetweenConnectionsMs > 0) {
-        await pause(this.pauseBetweenConnectionsMs);
+        await sleep(this.pauseBetweenConnectionsMs);
       }
 
       this.createConnection({
@@ -610,7 +608,7 @@ class BinanceFuturesPublicStream {
 
     if (orderbookStreamList.length > 0) {
       if (!isFirstConnection && this.pauseBetweenConnectionsMs > 0) {
-        await pause(this.pauseBetweenConnectionsMs);
+        await sleep(this.pauseBetweenConnectionsMs);
       }
 
       this.createConnection({
@@ -625,7 +623,7 @@ class BinanceFuturesPublicStream {
 
       for (const streamChunk of chunkList(streamList, this.maxStreamsPerConnection)) {
         if (!isFirstConnection && this.pauseBetweenConnectionsMs > 0) {
-          await pause(this.pauseBetweenConnectionsMs);
+          await sleep(this.pauseBetweenConnectionsMs);
         }
 
         this.createConnection({ streamList: streamChunk, groupKey });
@@ -883,7 +881,7 @@ class BinanceFuturesPublicStream {
       const isLast = i === staleIndexList.length - 1;
 
       if (!isLast && this.pauseBetweenConnectionsMs > 0) {
-        await pause(this.pauseBetweenConnectionsMs);
+        await sleep(this.pauseBetweenConnectionsMs);
       }
     }
   }
@@ -927,7 +925,7 @@ class BinanceFuturesPublicStream {
 
     if (
       connection.lastRecreateTimestamp > 0 &&
-      recentRecreateAgeMs < DEFAULT_RECREATE_DEDUP_WINDOW_MS
+      recentRecreateAgeMs < WS_RECREATE_DEDUP_WINDOW_MS
     ) {
       this.logger.info(
         `BinanceFuturesPublicStream: skip recreate ${connection.label} (recent recreate ${recentRecreateAgeMs}ms ago, reason: ${reason})`,
@@ -1280,8 +1278,8 @@ class BinanceFuturesPublicStream {
       return;
     }
 
-    if (Array.isArray(message.data)) {
-      const tickerBySymbol = normalizeBinanceTickers(message.data as BinanceTicker24hrRaw[]);
+    if (message.stream === '!miniTicker@arr' && Array.isArray(message.data)) {
+      const tickerBySymbol = normalizeBinanceMiniTickerList(message.data as BinanceMiniTickerWebSocketRaw[]);
 
       for (const handler of this.tickerHandlerSet) {
         handler(tickerBySymbol);
@@ -1329,8 +1327,8 @@ class BinanceFuturesPublicStream {
     }
 
     if (firstEvent === '24hrMiniTicker') {
-      const tickerBySymbol = normalizeBinanceTickers(
-        items as unknown as BinanceTicker24hrRaw[],
+      const tickerBySymbol = normalizeBinanceMiniTickerList(
+        items as unknown as BinanceMiniTickerWebSocketRaw[],
       );
 
       for (const handler of this.tickerHandlerSet) {

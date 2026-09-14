@@ -43,6 +43,7 @@ import type {
   Income,
   ClosedPnl,
   UserDataStreamHandlerArgs,
+  ExchangeRateLimitState,
 } from '../types/common';
 import { MarginModeEnum, PositionModeEnum } from '../types/common';
 import type { PublicStreamLike } from '../types/stream';
@@ -454,6 +455,11 @@ abstract class BaseExchangeClient implements ExchangeClient {
 
   async getOrderRateLimit(): Promise<OrderRateLimit> {
     throw new Error(`Not supported for ${this.marketLabel} market`);
+  }
+
+  /** Пустое состояние — «не знаем»: счётчик расхода есть не у каждой биржи, и ноль тут был бы ложью. */
+  getRateLimitState(): ExchangeRateLimitState {
+    return { usedWeight: null, weightLimit: null, observedAtMs: null, bannedUntilMs: null };
   }
 
   async fetchMarkPrice(_symbol?: string): Promise<MarkPrice[]> {

@@ -3,11 +3,18 @@ import { BinanceFutures } from '../../src/exchanges/BinanceFutures';
 import { BinanceSpot } from '../../src/exchanges/BinanceSpot';
 import { BybitLinear } from '../../src/exchanges/BybitLinear';
 import { BybitSpot } from '../../src/exchanges/BybitSpot';
+import { OkxSwap } from '../../src/exchanges/OkxSwap';
+import { OkxSpot } from '../../src/exchanges/OkxSpot';
 import { createMockLogger } from '../fixtures/mockLogger';
 import { createMockAxiosInstance } from '../fixtures/mockAxios';
 import { OrderSideEnum, OrderTypeEnum } from '../../src/types/common';
 import { normalizeBinanceOrder } from '../../src/normalizers/binanceNormalizer';
 import { normalizeBybitOrder } from '../../src/normalizers/bybitNormalizer';
+import { normalizeOkxAlgoOrder, normalizeOkxOrder } from '../../src/normalizers/okxNormalizer';
+import {
+  OKX_RAW_ALGO_ORDER_STOP_MARKET,
+  OKX_RAW_ORDER_LIVE_POST_ONLY,
+} from '../fixtures/okxRaw';
 
 jest.mock('axios');
 jest.mock('../../src/ws/BinanceFuturesPublicStream');
@@ -15,25 +22,30 @@ jest.mock('../../src/ws/BinanceSpotPublicStream');
 jest.mock('../../src/ws/BinanceTradeStream');
 jest.mock('../../src/ws/BybitPublicStream');
 jest.mock('../../src/ws/BybitTradeStream');
+jest.mock('../../src/ws/OkxPublicStream');
+jest.mock('../../src/ws/OkxTradeStream');
+jest.mock('../../src/ws/OkxPrivateStream');
 
 const mockedAxios = axios as jest.Mocked<typeof axios>;
 
-type AnyClient = BinanceFutures | BinanceSpot | BybitLinear | BybitSpot;
+type AnyClient = BinanceFutures | BinanceSpot | BybitLinear | BybitSpot | OkxSwap | OkxSpot;
 
 function build<T>(Client: new (args: never) => T): T {
   mockedAxios.create.mockReturnValue(createMockAxiosInstance() as never);
 
-  return new Client({ config: { apiKey: 'k', secret: 's' }, logger: createMockLogger() } as never);
+  return new Client({ config: { apiKey: 'k', secret: 's', passphrase: 'p' }, logger: createMockLogger() } as never);
 }
 
 const FUTURES_CLIENT_LIST: Array<[string, () => AnyClient]> = [
   ['Binance futures', () => build(BinanceFutures)],
   ['Bybit futures', () => build(BybitLinear)],
+  ['OKX futures', () => build(OkxSwap)],
 ];
 
 const SPOT_CLIENT_LIST: Array<[string, () => AnyClient]> = [
   ['Binance spot', () => build(BinanceSpot)],
   ['Bybit spot', () => build(BybitSpot)],
+  ['OKX spot', () => build(OkxSpot)],
 ];
 
 const ALL_CLIENT_LIST: Array<[string, () => AnyClient]> = [...FUTURES_CLIENT_LIST, ...SPOT_CLIENT_LIST];
@@ -81,10 +93,12 @@ describe('обе биржи держат одни и те же обещания'
   });
 
   describe('единицы измерения общие для всех', () => {
-    it.each(ALL_CLIENT_LIST)('%s: сумма в котируемой валюте — только рыночная заявка', (_label, create) => {
+    it.each(ALL_CLIENT_LIST)('%s: сумма в котируемой валюте — только рыночная заявка', async (_label, create) => {
       const client = create();
-      const buildParams = (client as unknown as Record<string, (a: unknown) => unknown>).buildBinanceOrderParams
-        ?? (client as unknown as Record<string, (a: unknown) => unknown>).buildBybitOrderParams;
+      const clientMethodByName = client as unknown as Record<string, (a: unknown) => unknown>;
+      const buildParams = clientMethodByName.buildBinanceOrderParams
+        ?? clientMethodByName.buildBybitOrderParams
+        ?? clientMethodByName.buildOkxOrderParams;
       const args = {
         symbol: 'BTCUSDT',
         side: OrderSideEnum.Buy,
@@ -97,9 +111,11 @@ describe('обе биржи держат одни и те же обещания'
       // На фьючерсах этой единицы нет вовсе — там она просто игнорируется; на споте обязан
       // быть отказ. Проверяем ровно то общее обещание, что «сумма денег» не превращается
       // молча в «количество монет».
-      const outcome = (() => {
+      // Сборщик OKX асинхронный (режим позиции читается со счёта), у соседей — обычный.
+      // Ждём и тот и другой одинаково: `await` над не-обещанием возвращает само значение.
+      const outcome = await (async () => {
         try {
-          return buildParams.call(client, args) as Record<string, unknown>;
+          return await buildParams.call(client, args) as Record<string, unknown>;
         } catch {
           return null;
         }
@@ -143,6 +159,7 @@ describe('обе биржи держат одни и те же обещания'
         triggerPrice: '0', cumExecQty: '0', cumExecValue: '0', orderStatus: 'New',
         reduceOnly: true, createdTime: '1', updatedTime: '1',
       })],
+      ['OKX', () => normalizeOkxAlgoOrder({ ...OKX_RAW_ALGO_ORDER_STOP_MARKET, slTriggerPx: '0', slOrdPx: '-1' }, '0.01')],
     ];
 
     it.each(PROTECTIVE_CASE_LIST)('%s: стоп помечен защитным даже при нулевой цене срабатывания', (_label, normalize) => {
@@ -161,6 +178,7 @@ describe('обе биржи держат одни и те же обещания'
         triggerPrice: '', cumExecQty: '0', cumExecValue: '0', orderStatus: 'New',
         reduceOnly: false, createdTime: '1', updatedTime: '1',
       })],
+      ['OKX', () => normalizeOkxOrder(OKX_RAW_ORDER_LIVE_POST_ONLY, '')],
     ];
 
     it.each(PLAIN_CASE_LIST)('%s: обычная заявка защитной НЕ считается', (_label, normalize) => {

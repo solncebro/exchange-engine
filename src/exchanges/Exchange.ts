@@ -5,6 +5,8 @@ import { BinanceFutures } from './BinanceFutures';
 import { BinanceSpot } from './BinanceSpot';
 import { BybitLinear } from './BybitLinear';
 import { BybitSpot } from './BybitSpot';
+import { OkxSwap } from './OkxSwap';
+import { OkxSpot } from './OkxSpot';
 
 class Exchange {
   readonly name: ExchangeNameEnum;
@@ -20,6 +22,9 @@ class Exchange {
     } else if (name === ExchangeNameEnum.Bybit) {
       this.futures = new BybitLinear(args);
       this.spot = new BybitSpot(args);
+    } else if (name === ExchangeNameEnum.Okx) {
+      this.futures = new OkxSwap(args);
+      this.spot = new OkxSpot(args);
     } else {
       const exhaustiveCheck: never = name;
 

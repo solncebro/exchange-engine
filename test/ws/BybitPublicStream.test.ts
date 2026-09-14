@@ -155,6 +155,86 @@ describe('BybitPublicStream', () => {
     });
   });
 
+  // Живой поток tickers.BTCUSDT, 25 секунд: 176 кадров, из них 175 приращений, и в 149 из
+  // них НЕТ цены последней сделки. Приращение, разобранное в одиночку, отдавало наружу
+  // lastPrice и суточное изменение «не числами», а объём и границы суток — нулями.
+  describe('ticker delta frames carry only changed fields', () => {
+    const emitTickerFrame = (type: string, data: Partial<BybitTickerRaw>) => {
+      capturedOnMessage!({
+        topic: 'tickers.BTCUSDT',
+        type,
+        data: { symbol: 'BTCUSDT', ...data },
+        ts: 1700000000000,
+      });
+    };
+
+    it('a delta WITHOUT lastPrice carries the price from the snapshot, never NaN', async () => {
+      const stream = new BybitPublicStream({ url: 'wss://stream.bybit.com/v5/public/linear', logger: mockLogger, onNotify: undefined, label: 'test' });
+      const handler = jest.fn();
+      stream.subscribeAllTickers(handler, ['BTCUSDT']);
+
+      await Promise.resolve();
+
+      emitTickerFrame('snapshot', MOCK_TICKER_RAW);
+      // Живой кадр биржи: изменился только верх стакана.
+      emitTickerFrame('delta', { bid1Price: '78265.30', bid1Size: '1.274' });
+
+      expect(handler).toHaveBeenCalledTimes(2);
+      const ticker = handler.mock.calls[1][0].get('BTCUSDT');
+      expect(ticker.lastPrice).toBeCloseTo(50000);
+      expect(Number.isNaN(ticker.lastPrice)).toBe(false);
+      expect(Number.isNaN(ticker.priceChangePercent)).toBe(false);
+      expect(ticker.priceChangePercent).toBeCloseTo(2.5);
+      // Суточные величины тоже приходят из снимка, а не нулями.
+      expect(ticker.highPrice).toBeCloseTo(51000);
+      expect(ticker.volume).toBeCloseTo(1000);
+      // А то, что реально изменилось, — из приращения.
+      expect(ticker.bid1Price).toBeCloseTo(78265.3);
+    });
+
+    it('a delta BEFORE any snapshot is not delivered at all (a partial ticker is worse than none)', async () => {
+      const stream = new BybitPublicStream({ url: 'wss://stream.bybit.com/v5/public/linear', logger: mockLogger, onNotify: undefined, label: 'test' });
+      const handler = jest.fn();
+      stream.subscribeAllTickers(handler, ['BTCUSDT']);
+
+      await Promise.resolve();
+
+      emitTickerFrame('delta', { bid1Price: '78265.30', bid1Size: '1.274' });
+
+      expect(handler).not.toHaveBeenCalled();
+    });
+
+    it('a later delta merges over the previous merged frame, not only over the snapshot', async () => {
+      const stream = new BybitPublicStream({ url: 'wss://stream.bybit.com/v5/public/linear', logger: mockLogger, onNotify: undefined, label: 'test' });
+      const handler = jest.fn();
+      stream.subscribeAllTickers(handler, ['BTCUSDT']);
+
+      await Promise.resolve();
+
+      emitTickerFrame('snapshot', MOCK_TICKER_RAW);
+      emitTickerFrame('delta', { lastPrice: '51500' });
+      emitTickerFrame('delta', { bid1Price: '51499' });
+
+      const ticker = handler.mock.calls[2][0].get('BTCUSDT');
+      expect(ticker.lastPrice).toBeCloseTo(51500);
+      expect(ticker.bid1Price).toBeCloseTo(51499);
+    });
+
+    it('mark price still reads the RAW frame: a bid-only delta must not re-emit a stale mark price', async () => {
+      const stream = new BybitPublicStream({ url: 'wss://stream.bybit.com/v5/public/linear', logger: mockLogger, onNotify: undefined, label: 'test' });
+      const updates: MarkPriceUpdate[] = [];
+      stream.subscribeMarkPrices(list => updates.push(...list), ['BTCUSDT']);
+
+      await Promise.resolve();
+
+      emitTickerFrame('snapshot', { ...MOCK_TICKER_RAW, markPrice: '50000', indexPrice: '50100' });
+      emitTickerFrame('delta', { bid1Price: '49998' });
+
+      expect(updates).toHaveLength(1);
+      expect(updates[0].markPrice).toBeCloseTo(50000);
+    });
+  });
+
   describe('mark price index continuity (delta frames carry only changed fields)', () => {
     const emitTicker = (data: Partial<BybitTickerRaw>) => {
       capturedOnMessage!({
@@ -591,6 +671,73 @@ describe('BybitPublicStream', () => {
       expect(mockWebSocket.sendToConnectedSocket).not.toHaveBeenCalledWith(
         expect.objectContaining({ op: 'subscribe' }),
       );
+    });
+  });
+
+  describe('resubscribeStreamList (batched recovery)', () => {
+    it('sends one unsubscribe + one subscribe frame for the whole list, not a pair per symbol', async () => {
+      mockWebSocket.getStatus.mockReturnValue('connected');
+
+      const stream = new BybitPublicStream({ url: 'wss://stream.bybit.com/v5/public/linear', logger: mockLogger, onNotify: undefined, label: 'test' });
+      const symbolList = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT'];
+      symbolList.forEach((symbol) => stream.subscribeKlines(symbol, '5m', jest.fn()));
+
+      await Promise.resolve();
+      await Promise.resolve();
+
+      mockWebSocket.sendToConnectedSocket.mockClear();
+      mockWebSocket.close.mockClear();
+
+      stream.resubscribeStreamList(symbolList.map((symbol) => ({ symbol, interval: '5m' as const })));
+
+      const topicList = symbolList.map((symbol) => `kline.5.${symbol}`);
+
+      expect(mockWebSocket.sendToConnectedSocket).toHaveBeenCalledTimes(2);
+      expect(mockWebSocket.sendToConnectedSocket).toHaveBeenNthCalledWith(1, { op: 'unsubscribe', args: topicList });
+      expect(mockWebSocket.sendToConnectedSocket).toHaveBeenNthCalledWith(2, { op: 'subscribe', args: topicList });
+      expect(mockWebSocket.close).not.toHaveBeenCalled();
+    });
+
+    it('recreates the connection once the list reaches the cascade threshold', async () => {
+      mockWebSocket.getStatus.mockReturnValue('connected');
+
+      const stream = new BybitPublicStream({ url: 'wss://stream.bybit.com/v5/public/linear', logger: mockLogger, onNotify: undefined, label: 'test' });
+      const symbolList = Array.from({ length: 60 }, (_unused, index) => `SYM${index}USDT`);
+      symbolList.forEach((symbol) => stream.subscribeKlines(symbol, '5m', jest.fn()));
+
+      await Promise.resolve();
+      await Promise.resolve();
+
+      mockWebSocket.sendToConnectedSocket.mockClear();
+      mockWebSocket.close.mockClear();
+
+      stream.resubscribeStreamList(symbolList.map((symbol) => ({ symbol, interval: '5m' as const })));
+
+      expect(mockWebSocket.close).toHaveBeenCalledTimes(1);
+      expect(mockWebSocket.sendToConnectedSocket).not.toHaveBeenCalledWith(
+        expect.objectContaining({ op: 'unsubscribe' }),
+      );
+      expect(mockWebSocket.sendToConnectedSocket).not.toHaveBeenCalledWith(
+        expect.objectContaining({ op: 'subscribe' }),
+      );
+    });
+
+    it('does nothing for an empty list', async () => {
+      mockWebSocket.getStatus.mockReturnValue('connected');
+
+      const stream = new BybitPublicStream({ url: 'wss://stream.bybit.com/v5/public/linear', logger: mockLogger, onNotify: undefined, label: 'test' });
+      stream.subscribeKlines('BTCUSDT', '5m', jest.fn());
+
+      await Promise.resolve();
+      await Promise.resolve();
+
+      mockWebSocket.sendToConnectedSocket.mockClear();
+      mockWebSocket.close.mockClear();
+
+      stream.resubscribeStreamList([]);
+
+      expect(mockWebSocket.sendToConnectedSocket).not.toHaveBeenCalled();
+      expect(mockWebSocket.close).not.toHaveBeenCalled();
     });
   });
 

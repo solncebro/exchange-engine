@@ -2,6 +2,8 @@ export { ExchangeError } from './errors/ExchangeError';
 export { Exchange } from './exchanges/Exchange';
 export { parseBybitOrderbookRawFrame } from './normalizers/bybitNormalizer';
 export type { ParseBybitOrderbookRawFrameArgs } from './normalizers/bybitNormalizer';
+export { parseOkxOrderbookRawFrame } from './normalizers/okxNormalizer';
+export type { ParseOkxOrderbookRawFrameArgs } from './normalizers/okxNormalizer.types';
 export { formatWebSocketConnectionsReport } from './utils/formatWebSocketConnectionsReport';
 export type { FormatWebSocketConnectionsReportArgs } from './utils/formatWebSocketConnectionsReport';
 

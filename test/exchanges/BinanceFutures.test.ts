@@ -429,8 +429,8 @@ describe('BinanceFutures', () => {
 
       expect(btc).toBeDefined();
       expect(btc!.symbol).toBe('BTCUSDT');
-      expect(btc!.lastPrice).toBe(65432.1);
-      expect(btc!.priceChangePercent).toBe(2.35);
+      expect(btc!.lastPrice).toBe(78516.3);
+      expect(btc!.priceChangePercent).toBe(0.062);
     });
   });
 

@@ -1,5 +1,10 @@
 import { buildBybitAuthHeaders } from '../auth/bybitAuth';
-import { BYBIT_RECV_WINDOW, BYBIT_REQUEST_TIMEOUT } from '../constants/bybit';
+import {
+  BYBIT_INSTRUMENTS_MAX_PAGE_COUNT,
+  BYBIT_RECV_WINDOW,
+  BYBIT_REQUEST_TIMEOUT,
+  BYBIT_TRANSACTION_LOG_MAX_PAGE_COUNT,
+} from '../constants/bybit';
 import { ExchangeError } from '../errors/ExchangeError';
 import { serializeQueryParams } from '../utils/serializeQueryParams';
 import type {
@@ -15,7 +20,7 @@ import type {
   BybitTransactionLogRaw,
   BybitWalletBalanceRaw,
 } from '../normalizers/bybitNormalizer';
-import { applyTimeRangeOptions } from '../utils/httpParams';
+import { applyTimeRangeOptions, buildOptionalParams } from '../utils/httpParams';
 import { BaseHttpClient } from './BaseHttpClient';
 
 import type {
@@ -44,6 +49,10 @@ class BybitHttpClient extends BaseHttpClient {
   constructor(args: BybitHttpClientArgs) {
     super({ baseUrl: args.baseUrl, apiKey: args.apiKey, logger: args.logger, timeout: BYBIT_REQUEST_TIMEOUT, httpsAgent: args.httpsAgent });
     this.secret = args.secret;
+  }
+
+  protected override get errorExchangeLabel(): string {
+    return 'bybit';
   }
 
   private buildAuthHeaders(payload: string): Record<string, string> {
@@ -91,45 +100,20 @@ class BybitHttpClient extends BaseHttpClient {
     category: string,
     options?: SymbolLimitFilterArgs,
   ): Record<string, string | number | boolean> {
-    const params: Record<string, string | number | boolean> = { category };
-
-    if (options?.symbol !== undefined) {
-      params.symbol = options.symbol;
-    }
-
-    if (options?.limit !== undefined) {
-      params.limit = options.limit;
-    }
-
-    if (options?.orderId !== undefined) {
-      params.orderId = options.orderId;
-    }
-
-    if (options?.orderLinkId !== undefined) {
-      params.orderLinkId = options.orderLinkId;
-    }
-
-    if (options?.settleCoin !== undefined) {
-      params.settleCoin = options.settleCoin;
-    }
-
-    if (options?.baseCoin !== undefined) {
-      params.baseCoin = options.baseCoin;
-    }
-
-    if (options?.orderFilter !== undefined) {
-      params.orderFilter = options.orderFilter;
-    }
-
-    if (options?.startTime !== undefined) {
-      params.startTime = options.startTime;
-    }
-
-    if (options?.endTime !== undefined) {
-      params.endTime = options.endTime;
-    }
-
-    return params;
+    return {
+      category,
+      ...buildOptionalParams({
+        symbol: options?.symbol,
+        limit: options?.limit,
+        orderId: options?.orderId,
+        orderLinkId: options?.orderLinkId,
+        settleCoin: options?.settleCoin,
+        baseCoin: options?.baseCoin,
+        orderFilter: options?.orderFilter,
+        startTime: options?.startTime,
+        endTime: options?.endTime,
+      }),
+    };
   }
 
   async fetchInstrumentsInfo(
@@ -158,7 +142,7 @@ class BybitHttpClient extends BaseHttpClient {
     const allInstrumentList: BybitInstrumentInfoRaw[] = [];
     let cursor: string | undefined;
 
-    do {
+    for (let pageCount = 0; pageCount < BYBIT_INSTRUMENTS_MAX_PAGE_COUNT; pageCount++) {
       const params: Record<string, string | number | boolean> = { category, limit: 1000, status };
 
       if (cursor) {
@@ -172,7 +156,15 @@ class BybitHttpClient extends BaseHttpClient {
 
       allInstrumentList.push(...response.result.list);
       cursor = response.result.nextPageCursor ?? undefined;
-    } while (cursor);
+
+      if (!cursor) {
+        return allInstrumentList;
+      }
+    }
+
+    this.logger.warn(
+      `Bybit instruments-info (${category}, ${status}) reached the page count limit (${BYBIT_INSTRUMENTS_MAX_PAGE_COUNT}); returning a partial result`,
+    );
 
     return allInstrumentList;
   }
@@ -402,7 +394,40 @@ class BybitHttpClient extends BaseHttpClient {
       params.endTime = options.endTime;
     }
 
+    if (options?.cursor !== undefined) {
+      params.cursor = options.cursor;
+    }
+
     return this.authenticatedGet('/v5/account/transaction-log', params);
+  }
+
+  /**
+   * Журнал операций за окно ЦЕЛИКОМ: страницы дочитываются по курсору, пока биржа его отдаёт.
+   * Журнал один на весь счёт (символ этот вход не принимает), поэтому за несколько часов живой
+   * торговли в окне лежит больше одной страницы, и одиночное чтение теряло начисления, лежащие
+   * за первой. Курсор без конца — отказ, а не частичный список: см. потолок в константах.
+   */
+  async fetchAllTransactionLog(options?: FetchTransactionLogArgs): Promise<BybitTransactionLogRaw[]> {
+    const allEntryList: BybitTransactionLogRaw[] = [];
+    let cursor: string | undefined;
+
+    for (let pageCount = 0; pageCount < BYBIT_TRANSACTION_LOG_MAX_PAGE_COUNT; pageCount++) {
+      const response = await this.fetchTransactionLog({ ...options, cursor });
+
+      allEntryList.push(...response.result.list);
+      const nextPageCursor = response.result.nextPageCursor;
+
+      // Конец журнала биржа обозначает и отсутствием поля, и пустой строкой.
+      if (nextPageCursor === undefined || nextPageCursor === '') {
+        return allEntryList;
+      }
+
+      cursor = nextPageCursor;
+    }
+
+    throw new Error(
+      `[Bybit] transaction log reached the page count limit (${BYBIT_TRANSACTION_LOG_MAX_PAGE_COUNT}) — the answer would be incomplete`,
+    );
   }
 }
 

@@ -24,6 +24,8 @@ import type {
   ClosedPnl,
   UserDataStreamHandlerArgs,
   OrderRateLimitSnapshot,
+  ExchangeRateLimitState,
+  IncomeKind,
 } from './common';
 import {
   MarginModeEnum,
@@ -85,7 +87,8 @@ export interface FetchPageWithLimitArgs {
  * - `realizedPnl` — реализованный итог сделок, ВАЛОВОЙ (комиссия в него не входит);
  * - `commission` — торговая комиссия, со знаком минус когда она списана.
  */
-export type IncomeTypeFilter = 'funding' | 'realizedPnl' | 'commission';
+/** Что можно попросить отдельно. Без фильтра биржа отдаёт все виды разом, помеченные `kind`. */
+export type IncomeTypeFilter = Exclude<IncomeKind, 'other'>;
 
 export interface FetchIncomeArgs extends FetchPageWithLimitArgs {
   incomeType?: IncomeTypeFilter;
@@ -206,7 +209,7 @@ export interface ModifyOrderItemResult {
 
 export type ModifyBatchOrdersResult = ModifyOrderItemResult[];
 
-export type OrderRateLimitSource = 'binance-exchange-info' | 'bybit-exchange-header' | 'bybit-documented' | 'fallback';
+export type OrderRateLimitSource = 'binance-exchange-info' | 'bybit-exchange-header' | 'bybit-documented' | 'okx-documented' | 'fallback';
 
 export interface OrderRateLimit {
   writeRequestsPerSecond: number;
@@ -255,6 +258,9 @@ export interface ExchangeClient {
   cancelBatchOrders(symbol: string, orderIdList: string[]): Promise<CancelBatchOrdersResult>;
   modifyBatchOrders(orderList: ModifyBatchOrderArgs[]): Promise<ModifyBatchOrdersResult>;
   getOrderRateLimit(): Promise<OrderRateLimit>;
+  /** Расход лимита запросов на АДРЕС и срок запрета, если биржа его назвала. Без сети — по
+   *  последнему ответу; биржа без такого счётчика отвечает пустым состоянием. */
+  getRateLimitState(): ExchangeRateLimitState;
 
   fetchOrderBook(symbol: string, limit?: number): Promise<OrderBook>;
   fetchTrades(symbol: string, limit?: number): Promise<PublicTrade[]>;
