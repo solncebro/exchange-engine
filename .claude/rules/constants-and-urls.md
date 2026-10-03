@@ -23,6 +23,9 @@
 | BINANCE_REQUEST_TIMEOUT | 30000 ms |
 | BINANCE_KLINE_LIMIT_SPOT | 1000 |
 | BINANCE_KLINE_LIMIT_FUTURES | 499 |
+| BINANCE_SUB_ACCOUNT_*_PATH | пути подсчётов `/sapi/...` (0.26.0): список, универсальный перевод (он же история), активы спота v4, счёт фьючерсов v2 |
+| BINANCE_SUB_ACCOUNT_USDT_FUTURES_TYPE | 1 — `futuresType` для USDT-фьючерсов подсчёта |
+| BINANCE_SUB_ACCOUNT_LIST_PAGE_LIMIT / _MAX_PAGE_COUNT | 200 / 50 — страница списка подсчётов и потолок страниц |
 
 ## Bybit URL (src/constants/bybit.ts)
 
@@ -35,6 +38,7 @@
 | BYBIT_PRIVATE_WEBSOCKET_URL | wss://stream.bybit.com/v5/private |
 | BYBIT_TRADE_WEBSOCKET_URL | wss://stream.bybit.com/v5/trade |
 | BYBIT_DEMO_PRIVATE_WEBSOCKET_URL | wss://stream-demo.bybit.com/v5/private |
+| BYBIT_SUB_MEMBER_LIST_PATH, BYBIT_API_KEY_INFO_PATH, BYBIT_UNIVERSAL_TRANSFER_PATH, BYBIT_UNIVERSAL_TRANSFER_LIST_PATH, BYBIT_ACCOUNT_COINS_BALANCE_PATH | пути подсчётов (0.26.0) |
 | BYBIT_RECV_WINDOW | 7000 ms (используется в REST-подписи) |
 | BYBIT_REQUEST_TIMEOUT | 30000 ms |
 | BYBIT_PING_INTERVAL | 20000 ms |
@@ -174,16 +178,23 @@ countDecimalPlaces("0.001") → 3
 countDecimalPlaces("0.10") → 1  (trailing zeros removed)
 countDecimalPlaces("1") → 0
 
-roundToStep(value, step): number
+StepRounding = 'nearest' | 'up' | 'down'   (экспортируется из пакета)
+
+roundToStep(value, step, rounding = 'nearest'): number   — ЕДИНСТВЕННОЕ место математики сетки
   1. stepValue = parseFloat(step)
   2. Если stepValue === 0 или NaN → возвращает value
   3. decimals = countDecimalPlaces(step)
-  4. rounded = Math.round(value / stepValue) * stepValue
-  5. return parseFloat(rounded.toFixed(decimals))
+  4. stepCount = value / stepValue; nearestCount = Math.round(stepCount)
+  5. Значение «на сетке», если |stepCount − nearestCount| ≤ 1e-9 + |stepCount| × 4 × Number.EPSILON
+     (погрешность деления растёт с числом шагов — допуск растёт вместе с ней)
+  6. На сетке или 'nearest' → nearestCount; иначе 'up' → Math.ceil(stepCount), 'down' → Math.floor(stepCount)
+  7. return parseFloat((gridCount * stepValue).toFixed(decimals))
 
-amountToPrecision(tradeSymbol, amount): number → roundToStep(amount, filter.stepSize)
-priceToPrecision(tradeSymbol, price): number → roundToStep(price, filter.tickSize)
+amountToPrecision(tradeSymbol, amount, rounding = 'nearest'): number → roundToStep(amount, filter.stepSize, rounding)
+priceToPrecision(tradeSymbol, price, rounding = 'nearest'): number → roundToStep(price, filter.tickSize, rounding)
 ```
+
+Отдельных функций «округлить вверх» / «округлить вниз» не заводить — направление передаётся аргументом. Без шага инструмента направление не действует: количество отбрасывает дробную часть, цена режется до `MAX_PRICE_DECIMAL_PLACES` знаков, как раньше.
 
 ## WebSocket sharding и Binance rate-limit константы (0.15.0–0.16.0)
 

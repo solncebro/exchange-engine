@@ -436,6 +436,15 @@ describe('OkxSwap orders', () => {
    * иначе вызывающий проверяет одну заявку, а ставит другую.
    */
   describe('the size check outside and the size on the wire are one number', () => {
+    it('rounds an amount up to whole contracts only when asked to', async () => {
+      const { client } = await createLoadedClient();
+
+      expect(client.amountToPrecision('BTCUSDT', 0.0157, 'up')).toBeCloseTo(0.02);
+      expect(client.amountToPrecision('BTCUSDT', 0.02, 'up')).toBeCloseTo(0.02);
+      expect(client.amountToPrecision('BTCUSDT', 0.0157, 'down')).toBeCloseTo(0.01);
+      expect(client.amountToPrecision('BTCUSDT', 0.0157, 'nearest')).toBeCloseTo(0.01);
+    });
+
     it('rounds an amount down to whole contracts, the way the wire does', async () => {
       const { client } = await createLoadedClient();
 

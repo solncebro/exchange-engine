@@ -286,7 +286,7 @@ describe('OkxPrivateStream', () => {
       stream.connect();
       await capturedOnOpen!({ send: jest.fn(), waitForMessage: jest.fn() });
 
-      expect(capturedOnClose).toBeUndefined();
+      capturedOnClose!({} as never);
       expect(jest.getTimerCount()).toBe(0);
     });
   });

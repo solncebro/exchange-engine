@@ -72,6 +72,8 @@ BinanceTicker24hrRaw { symbol, lastPrice: string, priceChangePercent: string, ti
 - `TradeSymbol` — `{ symbol, baseAsset, quoteAsset, settle, isActive, type, isLinear, contractSize, contractType, isTradifi, filter, leverageFilter?, priceLimitRisk?, pricePrecision?, quantityPrecision?, funding?, launchTimestamp?, triggerProtect?, liquidationFee?, orderTypeList?, timeInForceList?, info? }`
 - `TradeSymbolFilter` — `{ tickSize, stepSize, minQty, maxQty, minNotional, minPrice?, maxPrice?, maxNotional?, marketMinQty?, marketMaxQty?, marketStepSize?, postOnlyMaxQty? }` (все string)
 - `LeverageFilter` — `{ minLeverage, maxLeverage, leverageStep }` (все string)
+- `LeverageTier` — `{ maxLeverage, maxNotional, maxBaseAmount, initialMarginRate, maintenanceMarginRate }`. Все поля — числа, кроме `maxLeverage` допускают `null`. Binance и Bybit задают верхнюю границу стоимости в `maxNotional`, OKX — количества в монетах в `maxBaseAmount`; ставки показываются человеку в процентах после умножения на сто. Доказательство: `src/types/common.ts:297`.
+- `LeverageTierListBySymbol` — карта символов на списки ступеней плеча, `Map<string, LeverageTier[]>`. Доказательство: `src/types/common.ts:305`.
 - `PriceLimitRisk` — дискриминированное объединение по `source`:
   - `'binancePercentPrice'` — `{ multiplierUp, multiplierDown, multiplierDecimal }`
   - `'binancePercentPriceBySide'` — `{ bidMultiplierUp, bidMultiplierDown, askMultiplierUp, askMultiplierDown, avgPriceMins }`
@@ -153,3 +155,22 @@ OKX_TRIGGER_PX_TYPE: { markPrice → 'mark', lastPrice → 'last', indexPrice �
 OKX_WORKING_TYPE_TRIGGER_PX_TYPE: { markPrice → 'mark', contractPrice → 'last' }
 OKX_INCOME_BILL_TYPE: { funding → '8', realizedPnl → '2', commission → '2' }
 ```
+
+## Подсчёты (0.26.0)
+
+- `src/normalizers/binanceSubAccountNormalizer.ts` (+ `.types.ts`): `normalizeBinanceSubAccountList`,
+  `normalizeBinanceUniversalTransferResponse`, `extractBinanceUniversalTransferRecordList` (понимает и
+  `{ result, totalCount }` действующей документации, и голый список старой спецификации),
+  `normalizeBinanceUniversalTransferRecord`, `normalizeBinanceSubAccountSpotAssets` (кошелёк =
+  free + locked + freeze + withdrawing, к выводу — free), `normalizeBinanceSubAccountFuturesAccount`
+  (к выводу — `maxWithdrawAmount`).
+- `src/normalizers/bybitSubAccountNormalizer.ts` (+ `.types.ts`): `normalizeBybitSubMemberList`,
+  `normalizeBybitUniversalTransferRecord`, `normalizeBybitAccountCoinsBalance`.
+- `normalizerUtils.parseAmountOrZero` — пустая строка и отсутствие поля дают ноль.
+- Типы в `common.ts`: `WalletTypeEnum`, `SubAccountStatusEnum`, `SubAccountTransferDirectionEnum`,
+  `SubAccountTransferStatusEnum`, `SubAccount`, `SubAccountTransferResult`, `SubAccountTransfer`,
+  `SubAccountBalance`.
+- Маппинги в `mappings.ts`: `BINANCE_SUB_ACCOUNT_WALLET_TYPE(_REVERSE)`,
+  `BINANCE_SUB_ACCOUNT_TRANSFER_STATUS`, `BYBIT_SUB_ACCOUNT_WALLET_TYPE(_REVERSE)`,
+  `BYBIT_SUB_ACCOUNT_TRANSFER_STATUS`, `BYBIT_SUB_MEMBER_STATUS`. Незнакомое состояние перевода —
+  `Pending`.

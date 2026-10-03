@@ -14,7 +14,9 @@ BaseHttpClient (abstract)
 ├── BinanceBaseHttpClient (abstract)
 │   ├── BinanceFuturesHttpClient
 │   └── BinanceSpotHttpClient
+│       └── BinanceSubAccountHttpClient (подсчёты, /sapi)
 ├── BybitHttpClient
+│   └── BybitSubAccountHttpClient (подсчёты)
 └── OkxHttpClient
 ```
 
@@ -85,9 +87,12 @@ Rate limiting в `BaseHttpClient` — **только реактивный** (н�
 ### Валидация ответов:
 - `validateResponse(data)` — бросает `ExchangeError` при `retCode !== 0` в ответе Bybit API
 
-### Приватные хелперы:
+### Защищённые хелперы (protected с 0.26.0 — ими пользуется `BybitSubAccountHttpClient`):
 - `authenticatedGet<T>(path, params)` — GET с подписью в заголовке, построенной фабрикой в момент отправки (см. «Подпись строится непосредственно перед отправкой» выше) — не заранее
 - `authenticatedPost<T>(path, body)` — JSON.stringify body → подписывает → POST
+
+### BybitSubAccountHttpClient (0.26.0, `extends BybitHttpClient`)
+- `fetchSubMemberList()` → `GET /v5/user/query-sub-members`; `fetchApiKeyInfo()` → `GET /v5/user/query-api` (номер главного счёта `userID`, признак `isMaster`); `createUniversalTransfer(params)` → `POST /v5/asset/transfer/universal-transfer` (оба номера пользователя — числами); `fetchUniversalTransferList(transferId)` → `GET /v5/asset/transfer/query-universal-transfer-list`; `fetchAccountCoinsBalance({ memberId, accountType })` → `GET /v5/asset/transfer/query-account-coins-balance`. Демо-служба этих путей не обслуживает.
 
 ### Private хелпер:
 - `buildCategoryParams(category, options?)` → `Record<string, ...>` — строит params с `{ category }` + optional `symbol`, `limit`, `orderId`, `settleCoin`, `baseCoin` и `orderFilter`. Используется в 7 методах: `fetchInstrumentsInfo`, `fetchTickers`, `getOpenOrders`, `getOrderHistory`, `getPositionList`, `getClosedPnl`, `fetchFeeRate`. `orderFilter` (0.16.0) — для `fetchOpenConditionalOrders(settleCoin)` (`BybitBaseClient`), передаётся как `OrderFilterEnum.StopOrder` через `getOpenOrders(category, { settleCoin, orderFilter })`

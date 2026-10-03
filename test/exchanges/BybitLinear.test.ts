@@ -18,6 +18,8 @@ import {
   BYBIT_RAW_CLOSED_PNL_FLOCKUSDT,
   BYBIT_RAW_TRANSACTION_LOG_LIST,
   BYBIT_RAW_AMEND_BATCH_RESPONSE,
+  BYBIT_RAW_RISK_LIMIT_AVAUSDT_LIST,
+  BYBIT_RAW_RISK_LIMIT_PAGE_LIST,
 } from '../fixtures/bybitRaw';
 import { BTCUSDT_TRADE_SYMBOL } from '../fixtures/mockTradeSymbol';
 import { OrderTypeEnum, OrderSideEnum, PositionSideEnum, MarginModeEnum, PositionModeEnum, TimeInForceEnum } from '../../src/types/common';
@@ -572,6 +574,42 @@ describe('BybitLinear', () => {
     });
   });
 
+  describe('fetchLeverageTierList', () => {
+    it('requests a single symbol and returns its tier list', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({
+        data: { retCode: 0, result: { category: 'linear', list: BYBIT_RAW_RISK_LIMIT_AVAUSDT_LIST, nextPageCursor: '' } },
+      });
+
+      const result = await client.fetchLeverageTierList('AVAUSDT');
+
+      expect(mockInstance.get).toHaveBeenCalledTimes(1);
+      const [, options] = mockInstance.get.mock.calls[0];
+      expect(options.params.symbol).toBe('AVAUSDT');
+      expect(result).toHaveLength(BYBIT_RAW_RISK_LIMIT_AVAUSDT_LIST.length);
+    });
+  });
+
+  describe('fetchAllLeverageTierList', () => {
+    it('pages by cursor until the exchange hands out null and groups by symbol', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get
+        .mockResolvedValueOnce({
+          data: { retCode: 0, result: { category: 'linear', list: BYBIT_RAW_RISK_LIMIT_PAGE_LIST, nextPageCursor: 'first%3DA%26last%3DB' } },
+        })
+        .mockResolvedValueOnce({
+          data: { retCode: 0, result: { category: 'linear', list: BYBIT_RAW_RISK_LIMIT_AVAUSDT_LIST, nextPageCursor: null } },
+        });
+
+      const result = await client.fetchAllLeverageTierList();
+
+      expect(mockInstance.get).toHaveBeenCalledTimes(2);
+      const [, secondOptions] = mockInstance.get.mock.calls[1];
+      expect(secondOptions.params.cursor).toBe('first%3DA%26last%3DB');
+      expect(result.get('AVAUSDT')).toHaveLength(BYBIT_RAW_RISK_LIMIT_AVAUSDT_LIST.length);
+    });
+  });
+
   describe('loadTradeSymbols', () => {
     it('fetches and normalizes linear trade symbols', async () => {
       const { client, mockInstance } = createClient();
@@ -846,6 +884,32 @@ describe('BybitLinear', () => {
       expect(result).toHaveLength(1);
       expect(result[0].id).toBe('abc-123-def');
       expect(result[0].symbol).toBe('BTCUSDT');
+    });
+
+    // Живой ответ 18.09.2026: без символа фьючерсы Bybit отказывают 10001 "Missing some parameters
+    // that must be filled in, symbol or settleCoin or baseCoin" — без валюты расчётов запрос невалиден.
+    it('asks for USDT settleCoin when no symbol is given (linear requires it)', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: { result: { list: [] } } });
+
+      await client.fetchOpenOrders();
+
+      const [, options] = mockInstance.get.mock.calls[0];
+
+      expect(options.params.settleCoin).toBe('USDT');
+      expect(options.params.symbol).toBeUndefined();
+    });
+
+    it('asks by symbol, not settleCoin, when a symbol is given', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: { result: { list: [] } } });
+
+      await client.fetchOpenOrders('BTCUSDT');
+
+      const [, options] = mockInstance.get.mock.calls[0];
+
+      expect(options.params.symbol).toBe('BTCUSDT');
+      expect(options.params.settleCoin).toBeUndefined();
     });
   });
 
@@ -1173,7 +1237,9 @@ describe('BybitLinear', () => {
       const fullPageList = Array.from({ length: 50 }, () => BYBIT_RAW_TRANSACTION_LOG_LIST[0]);
       mockInstance.get.mockResolvedValue({ data: { result: { list: fullPageList, nextPageCursor: 'again' } } });
 
-      await expect(client.fetchIncome({ incomeType: 'funding' })).rejects.toThrow('page count limit');
+      // A cursor that never moves is refused on its first repeat — no longer paged 200 times into 10006.
+      await expect(client.fetchIncome({ incomeType: 'funding' })).rejects.toThrow('same page cursor twice');
+      expect(mockInstance.get).toHaveBeenCalledTimes(2);
     });
   });
 
@@ -1855,6 +1921,7 @@ describe('BybitLinear', () => {
 
       expect(body.category).toBe('linear');
       expect(body.mode).toBe(3);
+      expect(body.coin).toBe('USDT');
     });
 
     it('sends mode 0 for OneWay', async () => {
@@ -2215,6 +2282,20 @@ describe('BybitLinear', () => {
           callbackRate: 2,
         }),
       ).toThrow(ExchangeError);
+    });
+  });
+
+  describe('fetchOpenConditionalOrders', () => {
+    it('keeps the settle coin on linear, where the exchange requires it', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: { retCode: 0, retMsg: 'OK', result: { list: [], nextPageCursor: '' } } });
+
+      await client.fetchOpenConditionalOrders('USDT');
+
+      const { params } = mockInstance.get.mock.calls[0][1];
+      expect(params.category).toBe('linear');
+      expect(params.settleCoin).toBe('USDT');
+      expect(params.orderFilter).toBe('StopOrder');
     });
   });
 });

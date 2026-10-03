@@ -24,6 +24,7 @@ import {
   OKX_RAW_ORDER_LIVE_POST_ONLY,
   OKX_RAW_ORDER_FILLED,
   OKX_RAW_ALGO_ORDER_STOP_MARKET,
+  OKX_RAW_POSITION_TIER_LIST,
 } from '../fixtures/okxRaw';
 import type { KlineInterval } from '../../src/types/common';
 import { MarginModeEnum, OrderSideEnum, OrderTypeEnum, PositionModeEnum, PositionSideEnum } from '../../src/types/common';
@@ -717,6 +718,24 @@ describe('OkxSwap', () => {
       const result = await client.setLeverage(10, 'BTCUSDT');
 
       expect(result.confirmedLeverage).toBeNull();
+    });
+  });
+
+  describe('fetchLeverageTierList', () => {
+    it('requests position-tiers by instFamily and normalizes by the contract value', async () => {
+      const { client, mockInstance } = createClient();
+
+      await loadInstruments(client, mockInstance);
+
+      mockInstance.get.mockResolvedValue(okxSuccess(OKX_RAW_POSITION_TIER_LIST));
+
+      const result = await client.fetchLeverageTierList('BTCUSDT');
+
+      const [url, options] = mockInstance.get.mock.calls[0];
+
+      expect(url).toBe('/api/v5/public/position-tiers');
+      expect(options.params).toEqual({ instType: 'SWAP', tdMode: 'cross', instFamily: 'BTC-USDT' });
+      expect(result[0]?.maxBaseAmount).toBeCloseTo(10, 9);
     });
   });
 

@@ -34,7 +34,7 @@
 - `cancelOrder(symbol, orderId)` → `httpClient.cancelOrder()` → затем `getOrder(symbol, orderId)` возвращает реальный нормализованный Order (а не фабрикованный stub с `side: Buy`)
 - `getOrder(symbol, orderId)` → сначала `httpClient.getOpenOrders()` (realtime), fallback на `httpClient.getOrderHistory()` → `normalizeBybitOrder()`
 - `fetchOpenOrders(symbol?)` → `httpClient.getOpenOrders()` → `map(normalizeBybitOrder)`
-- `fetchOpenConditionalOrders(settleCoin)` → `httpClient.getOpenOrders(category, { settleCoin, orderFilter: OrderFilterEnum.StopOrder })` → `map(normalizeBybitOrder)` (условные/стоп ордера — Bybit REST `/v5/order/realtime` с `orderFilter=StopOrder`)
+- `fetchOpenConditionalOrders(settleCoin)` → `httpClient.getOpenOrders(category, { settleCoin, orderFilter: OrderFilterEnum.StopOrder })` → `map(normalizeBybitOrder)` (условные/стоп ордера — Bybit REST `/v5/order/realtime` с `orderFilter=StopOrder`). На споте `settleCoin` НЕ передаётся (0.26.0): вход его у спота не принимает (документация open-order)
 - `fetchOrderHistory(symbol, options?)` → `httpClient.getOrderHistory()` → `map(normalizeBybitOrder)`
 - `fetchOrderBook(symbol, limit?)` → `httpClient.fetchOrderBook()` → `normalizeBybitOrderBook()`
 - `fetchTrades(symbol, limit?)` → `httpClient.fetchRecentTrades()` → `normalizeBybitPublicTradeList()`
@@ -74,7 +74,7 @@
   - `fetchFundingRateHistory(symbol, options?)` → `httpClient.fetchFundingHistory()` → `normalizeBybitFundingRateHistoryList()`
   - `fetchFundingInfo(symbol?)` — отдельной ручки сведений о фандинге у Bybit нет: интервал начислений и границы ставки лежат в списке инструментов. С символом — `httpClient.fetchInstrumentsInfo('linear', { symbol })`, без символа — `httpClient.fetchAllInstrumentsInfo('linear')` (постранично, вместе с инструментами до запуска торгов). Дальше `normalizeBybitFundingInfoList()`. Кеша нет намеренно: границы ставки биржа меняет, устаревшее значение опаснее лишнего запроса
   - `fetchPositionMode()` → `httpClient.fetchPositionList({ category: 'linear', settleCoin: 'USDT' })` → инференс по `positionIdx`: Hedge если ∃ позиция с `positionIdx ∈ {1, 2}`, OneWay если все `positionIdx === 0`, `undefined` если позиций нет (Bybit V5 не даёт API для чтения mode без позиций). Сигнатура — `Promise<PositionModeEnum | undefined>` (3.4.0/0.13.0 BREAKING).
-- `setPositionMode(mode)` → `httpClient.setPositionMode()`, код Bybit `110025` обрабатывается как no-op без throw
+- `setPositionMode(mode)` → `httpClient.setPositionMode(category, mode, coin)` с монетой расчётов `coin: 'USDT'` (0.26.0): Bybit требует `symbol` или `coin` в запросе `/v5/position/switch-mode`, с монетой переключаются все USDT-контракты без позиции и без открытых заявок; код Bybit `110025` обрабатывается как no-op без throw
 
 ### BybitSpot
 - `marketLabel = 'spot'`
@@ -82,3 +82,11 @@
 - Наследует `BybitBaseClient`
 - Для market ордеров устанавливает `marketUnit = 'baseCoin'` по умолчанию (только если не задан явно через `args.marketUnit` И не используется `quoteOrderQty`)
 - Фьючерсные методы наследуют default throw из `BaseExchangeClient`
+
+## BybitSubAccount (0.26.0, `SubAccountClient`, поле `Exchange.subAccount`)
+
+- Не наследник `BaseExchangeClient`: уровень счёта. HTTP — `BybitSubAccountHttpClient` на `BYBIT_BASE_URL`.
+- Номер главного счёта для перевода узнаётся один раз из `/v5/user/query-api` (`userID`) и запоминается; неудача не запоминается. Ключ подсчёта (`isMaster: false`) → `ExchangeError('NOT_MASTER_ACCOUNT_KEY')`.
+- Кошельки: `Spot` и `UsdtFutures` → `UNIFIED` (единый торговый счёт — один кошелёк), `Funding` → `FUND`. «Классический» счёт не поддерживается.
+- `transferId` — только UUID (`INVALID_TRANSFER_ID` до сети), `subAccountId` — числовой UID (`INVALID_SUB_ACCOUNT_ID`).
+- Состояние перевода ищется по `transferId`; совпадение точное или по вхождению — пример документации отдаёт номер в оправе `universalTransfer_<uuid>_<uid>`.

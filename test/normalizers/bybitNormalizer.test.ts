@@ -20,6 +20,7 @@ import {
   normalizeBybitClosedPnlList,
   normalizeBybitIncomeList,
   buildBybitCommissionIncomeList,
+  normalizeBybitRiskLimitList,
 } from '../../src/normalizers/bybitNormalizer';
 import { TradeSymbolTypeEnum, PositionSideEnum, MarginModeEnum, OrderSideEnum, OrderTypeEnum } from '../../src/types/common';
 import {
@@ -45,6 +46,8 @@ import {
   BYBIT_RAW_TRANSACTION_LOG_LIST,
   BYBIT_RAW_CLOSED_PNL_FLOCKUSDT,
   BYBIT_RAW_TRANSACTION_LOG_SETTLEMENT,
+  BYBIT_RAW_RISK_LIMIT_AVAUSDT_LIST,
+  BYBIT_RAW_RISK_LIMIT_PAGE_LIST,
 } from '../fixtures/bybitRaw';
 
 describe('normalizeBybitTradeSymbols', () => {
@@ -1508,5 +1511,48 @@ describe('normalizeBybitMarkPriceList', () => {
     const result = normalizeBybitMarkPriceList([]);
 
     expect(result).toHaveLength(0);
+  });
+});
+
+describe('normalizeBybitRiskLimitList', () => {
+  it('returns a list of the same length as the fixture', () => {
+    const result = normalizeBybitRiskLimitList(BYBIT_RAW_RISK_LIMIT_AVAUSDT_LIST);
+
+    expect(result.get('AVAUSDT')).toHaveLength(BYBIT_RAW_RISK_LIMIT_AVAUSDT_LIST.length);
+  });
+
+  it('normalizes the first tier', () => {
+    const result = normalizeBybitRiskLimitList(BYBIT_RAW_RISK_LIMIT_AVAUSDT_LIST);
+    const tier = result.get('AVAUSDT')?.[0];
+
+    expect(tier?.maxLeverage).toBe(5);
+    expect(tier?.maxNotional).toBe(5000);
+    expect(tier?.initialMarginRate).toBeCloseTo(0.2, 9);
+    expect(tier?.maintenanceMarginRate).toBeCloseTo(0.1, 9);
+  });
+
+  it('matches the tier with maxNotional 10000 to maxLeverage 4.5', () => {
+    const result = normalizeBybitRiskLimitList(BYBIT_RAW_RISK_LIMIT_AVAUSDT_LIST);
+    const tierList = result.get('AVAUSDT') ?? [];
+    const tier = tierList.find((item) => item.maxNotional === 10000);
+
+    expect(tier?.maxLeverage).toBeCloseTo(4.5, 9);
+  });
+
+  it('sorts caps strictly ascending', () => {
+    const result = normalizeBybitRiskLimitList(BYBIT_RAW_RISK_LIMIT_AVAUSDT_LIST);
+    const tierList = result.get('AVAUSDT') ?? [];
+    const capList = tierList.map((tier) => tier.maxNotional);
+
+    for (let i = 1; i < capList.length; i++) {
+      expect(capList[i]).toBeGreaterThan(capList[i - 1] ?? 0);
+    }
+  });
+
+  it('groups tiers by symbol on a page with several symbols', () => {
+    const result = normalizeBybitRiskLimitList(BYBIT_RAW_RISK_LIMIT_PAGE_LIST);
+    const symbolList = [...result.keys()];
+
+    expect(symbolList).toEqual(['0GUSDT', '1000000BABYDOGEUSDT']);
   });
 });

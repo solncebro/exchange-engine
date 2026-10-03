@@ -13,6 +13,8 @@ class BinanceUserDataStream {
   private readonly baseWebSocketUrl: string;
   private readonly onNotify?: (message: string) => void | Promise<void>;
   private readonly onMessageHandler: (event: Record<string, unknown>) => void;
+  private readonly onConnectionLost?: () => void;
+  private readonly onConnectionRestored?: () => void;
   private url: string | null = null;
 
   constructor(args: BinanceUserDataStreamArgs) {
@@ -22,6 +24,8 @@ class BinanceUserDataStream {
     this.baseWebSocketUrl = args.baseWebSocketUrl;
     this.onNotify = args.onNotify;
     this.onMessageHandler = args.onMessage;
+    this.onConnectionLost = args.onConnectionLost;
+    this.onConnectionRestored = args.onConnectionRestored;
   }
 
   connect(): void {
@@ -45,6 +49,8 @@ class BinanceUserDataStream {
         }
       },
       onNotify: this.onNotify,
+      onClose: () => this.onConnectionLost?.(),
+      onReconnectSuccess: () => this.onConnectionRestored?.(),
     });
 
     this.logger.info(`BinanceUserDataStream connected with listenKey: ${this.listenKey}`);

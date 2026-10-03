@@ -30,6 +30,7 @@ import {
   buildOkxAlgoOrderUpdateEvent,
   buildOkxPositionUpdateEvent,
   buildOkxBalanceUpdateEvent,
+  normalizeOkxPositionTierList,
 } from '../../src/normalizers/okxNormalizer';
 import type {
   OkxFeeRateRaw,
@@ -90,6 +91,7 @@ import {
   OKX_RAW_BILL_TRADE_OPEN,
   OKX_RAW_ORDER_RESULT_OK,
   OKX_RAW_ORDER_RESULT_REJECTED,
+  OKX_RAW_POSITION_TIER_LIST,
 } from '../fixtures/okxRaw';
 
 /** Курс USDT в долларах, каким его даёт заготовка баланса: `eqUsd / eq` (у биржи — `coinUsdPrice`). */
@@ -1983,5 +1985,26 @@ describe('buildOkxBalanceUpdateEvent', () => {
     const event = buildOkxBalanceUpdateEvent(raw);
 
     expect(event.balanceList).toEqual([]);
+  });
+});
+
+describe('normalizeOkxPositionTierList', () => {
+  it('normalizes the first tier', () => {
+    const result = normalizeOkxPositionTierList(OKX_RAW_POSITION_TIER_LIST, '0.01');
+
+    expect(result[0]?.maxLeverage).toBe(100);
+    expect(result[0]?.maxNotional).toBeNull();
+    expect(result[0]?.maxBaseAmount).toBeCloseTo(10, 9);
+    expect(result[0]?.initialMarginRate).toBeCloseTo(0.01, 9);
+    expect(result[0]?.maintenanceMarginRate).toBeCloseTo(0.004, 9);
+  });
+
+  it('sorts by maxBaseAmount ascending', () => {
+    const result = normalizeOkxPositionTierList(OKX_RAW_POSITION_TIER_LIST, '0.01');
+    const amountList = result.map((tier) => tier.maxBaseAmount);
+
+    for (let i = 1; i < amountList.length; i++) {
+      expect(amountList[i]).toBeGreaterThan(amountList[i - 1] ?? 0);
+    }
   });
 });

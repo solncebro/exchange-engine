@@ -30,6 +30,7 @@ import type {
   PositionUpdateEvent,
   BalanceUpdateEvent,
   ExchangeLogger,
+  LeverageTier,
 } from '../types/common';
 import { TradeSymbolTypeEnum, PositionSideEnum, MarginModeEnum, OrderSideEnum, OrderTypeEnum, TimeInForceEnum } from '../types/common';
 import type { CreateOrderWebSocketArgs, CreateOrderItemResult, ModifyOrderItemResult } from '../types/exchange';
@@ -2162,4 +2163,34 @@ export function buildOkxBalanceUpdateEvent(raw: OkxBalanceRaw): BalanceUpdateEve
     })),
     timestamp: parseOkxNumber(raw.uTime),
   };
+}
+
+export interface OkxPositionTierRaw {
+  baseMaxLoan: string;
+  imr: string;
+  instFamily: string;
+  instId: string;
+  maxLever: string;
+  maxSz: string;
+  minSz: string;
+  mmr: string;
+  optMgnFactor: string;
+  quoteMaxLoan: string;
+  tier: string;
+  uly: string;
+}
+
+export function normalizeOkxPositionTierList(
+  rawList: OkxPositionTierRaw[],
+  contractValue: string,
+): LeverageTier[] {
+  return [...rawList]
+    .sort((a, b) => parseOkxNumber(a.maxSz) - parseOkxNumber(b.maxSz))
+    .map((raw) => ({
+      maxLeverage: parseOkxNumber(raw.maxLever),
+      maxNotional: null,
+      maxBaseAmount: convertContractsToCoins(raw.maxSz, contractValue),
+      initialMarginRate: parseOkxNumber(raw.imr),
+      maintenanceMarginRate: parseOkxNumber(raw.mmr),
+    }));
 }

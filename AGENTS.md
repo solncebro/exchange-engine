@@ -5,8 +5,8 @@
 ## Команды
 
 ```bash
-yarn build              # Компиляция TypeScript → dist/
-yarn lint               # ESLint src/ test/
+yarn build              # Проверка стиля и тесты, затем компиляция TypeScript → dist/
+yarn lint               # ESLint src/ test/ scripts/
 yarn test               # Запустить все Jest-тесты
 yarn test -- --testPathPatterns=normalizers  # Запустить тесты по образцу пути (Jest 30: ключ во множественном числе)
 yarn test:coverage      # Тесты с отчётом по покрытию
@@ -14,7 +14,7 @@ yarn test:smoke         # Smoke-тесты (верификация контра�
 yarn type-check         # Проверка типов (без emit)
 ```
 
-Последовательность верификации: `yarn lint && yarn test --coverage && yarn test:smoke && yarn build`
+yarn lint               # ESLint src/ test/ scripts/
 
 ## Архитектура
 
@@ -72,36 +72,36 @@ Exchange (фабрика) → ExchangeClient (интерфейс)
 
 После завершения любой задачи (фича, багфикс, рефакторинг):
 1. **Обязательно** запусти агент `code-style-enforcer` для проверки всех изменённых файлов на соответствие стилю кода.
-2. **Обязательно** примени скилл `sync-docs` — синхронизируй `.Codex/rules/` и `AGENTS.md` с фактическим состоянием кода. Документация всегда должна отражать текущую архитектуру.
+2. **Обязательно** примени скилл `sync-docs` — синхронизируй `.claude/rules/` и `AGENTS.md` с фактическим состоянием кода. Документация всегда должна отражать текущую архитектуру.
 
 ## Детальная документация
 
-Подробные описания архитектуры, паттернов и гайды находятся в `.Codex/rules/`:
+Подробные описания архитектуры, паттернов и гайды находятся в `.claude/rules/`:
 
 | Файл | Содержание |
 |------|-----------|
-| [architecture.md](.Codex/rules/architecture.md) | Общая архитектура, слои, поток данных, фабрика Exchange |
-| [exchange-layer.md](.Codex/rules/exchange-layer.md) | Иерархия классов, BaseExchangeClient, demo mode, кеширование, getOrderRateLimit, ленивый разбор стакана, bid1/ask1 тикера (index; контракт и конкретные биржи — в сателлитах ниже) |
-| [exchange-layer-contract.md](.Codex/rules/exchange-layer-contract.md) | Полный контракт `ExchangeClient`: все методы и args-типы (`CreateOrderWebSocketArgs`, `ModifyOrderArgs`, `ModifyBatchOrderArgs`, `FetchIncomeArgs`, `SubscribeOrderbookArgs`, `SubscribePublicTradesArgs`) |
-| [exchange-layer-binance.md](.Codex/rules/exchange-layer-binance.md) | BinanceBaseClient, BinanceFutures, BinanceSpot |
-| [exchange-layer-bybit.md](.Codex/rules/exchange-layer-bybit.md) | BybitBaseClient, BybitLinear, BybitSpot |
-| [exchange-layer-okx.md](.Codex/rules/exchange-layer-okx.md) | OkxBaseClient: имена инструментов, единицы объёма, режим маржи как память клиента, рыночные данные, журнал начислений (index) |
-| [exchange-layer-okx-orders.md](.Codex/rules/exchange-layer-okx-orders.md) | OKX: заявки, условная служба, реестр происхождения заявок, чтение и отмена, пакетные операции |
-| [exchange-layer-okx-classes.md](.Codex/rules/exchange-layer-okx-classes.md) | OKX: поток счёта на двух соединениях, соединения и завершение, OkxSwap, OkxSpot |
-| [http-layer.md](.Codex/rules/http-layer.md) | `BaseHttpClient` (retry, rate-limit extension points), `BybitHttpClient`, `OkxHttpClient`, все эндпоинты Bybit и OKX, общие паттерны (index; Binance — в сателлите ниже) |
-| [http-layer-binance.md](.Codex/rules/http-layer-binance.md) | `BinanceBaseHttpClient`/`BinanceFuturesHttpClient`/`BinanceSpotHttpClient`: signing, пересдача при протухшей отметке, rate-limit awareness (REQUEST_WEIGHT/HTTP 418/429), все эндпоинты Binance |
-| [websocket-layer.md](.Codex/rules/websocket-layer.md) | Общие паттерны стримов, PublicStreamLike, BaseTradeStream (index; конкретные биржи — в сателлитах ниже) |
-| [websocket-layer-binance.md](.Codex/rules/websocket-layer-binance.md) | Binance Futures/Spot Public Stream, User Data Stream, Trade Stream |
-| [websocket-layer-bybit.md](.Codex/rules/websocket-layer-bybit.md) | Bybit Public Stream, TradeToKlineAggregator, Trade Stream (+ Batch), Private Stream |
-| [websocket-layer-okx.md](.Codex/rules/websocket-layer-okx.md) | OKX: текстовое сердцебиение, вход, OkxConnection (index) |
-| [websocket-layer-okx-public.md](.Codex/rules/websocket-layer-okx-public.md) | OKX Public Stream: три набора соединений, бюджет операций подписки, подписка и отписка, темы |
-| [websocket-layer-okx-orderbook.md](.Codex/rules/websocket-layer-okx-orderbook.md) | OKX: стакан, разрывы номеров, ленивый разбор, разбор входящих кадров |
-| [websocket-layer-okx-trade.md](.Codex/rules/websocket-layer-okx-trade.md) | OKX Trade Stream (+ Batch, признак непригодности канала), Private Stream ×2 |
-| [normalizers-and-types.md](.Codex/rules/normalizers-and-types.md) | Унифицированные типы, маппинги, сборщики исхода записи пачки (index) |
-| [normalizers-and-types-binance-bybit.md](.Codex/rules/normalizers-and-types-binance-bybit.md) | Raw-интерфейсы и функции нормализации Binance и Bybit |
-| [normalizers-and-types-okx.md](.Codex/rules/normalizers-and-types-okx.md) | Raw-интерфейсы и функции нормализации OKX, единицы контрактов |
-| [constants-and-urls.md](.Codex/rules/constants-and-urls.md) | URL, таймауты, retry-константы, precision, kline loader |
-| [testing-patterns.md](.Codex/rules/testing-patterns.md) | Мокирование axios/WS, createClient, фикстуры, верификация HTTP-вызовов |
-| [testing-patterns-catalog.md](.Codex/rules/testing-patterns-catalog.md) | Каталог тест-файлов по слоям и живые проверки против настоящих бирж (`exchange:live-check`, `okx:probe`) |
-| [adding-endpoint.md](.Codex/rules/adding-endpoint.md) | Пошаговый гайд + чеклист по добавлению нового эндпоинта |
+| [architecture.md](.claude/rules/architecture.md) | Общая архитектура, слои, поток данных, фабрика Exchange |
+| [exchange-layer.md](.claude/rules/exchange-layer.md) | Иерархия классов, BaseExchangeClient, demo mode, кеширование, getOrderRateLimit, ленивый разбор стакана, bid1/ask1 тикера (index; контракт и конкретные биржи — в сателлитах ниже) |
+| [exchange-layer-contract.md](.claude/rules/exchange-layer-contract.md) | Полный контракт `ExchangeClient`: все методы и args-типы (`CreateOrderWebSocketArgs`, `ModifyOrderArgs`, `ModifyBatchOrderArgs`, `FetchIncomeArgs`, `SubscribeOrderbookArgs`, `SubscribePublicTradesArgs`) |
+| [exchange-layer-binance.md](.claude/rules/exchange-layer-binance.md) | BinanceBaseClient, BinanceFutures, BinanceSpot |
+| [exchange-layer-bybit.md](.claude/rules/exchange-layer-bybit.md) | BybitBaseClient, BybitLinear, BybitSpot |
+| [exchange-layer-okx.md](.claude/rules/exchange-layer-okx.md) | OkxBaseClient: имена инструментов, единицы объёма, режим маржи как память клиента, рыночные данные, журнал начислений (index) |
+| [exchange-layer-okx-orders.md](.claude/rules/exchange-layer-okx-orders.md) | OKX: заявки, условная служба, реестр происхождения заявок, чтение и отмена, пакетные операции |
+| [exchange-layer-okx-classes.md](.claude/rules/exchange-layer-okx-classes.md) | OKX: поток счёта на двух соединениях, соединения и завершение, OkxSwap, OkxSpot |
+| [http-layer.md](.claude/rules/http-layer.md) | `BaseHttpClient` (retry, rate-limit extension points), `BybitHttpClient`, `OkxHttpClient`, все эндпоинты Bybit и OKX, общие паттерны (index; Binance — в сателлите ниже) |
+| [http-layer-binance.md](.claude/rules/http-layer-binance.md) | `BinanceBaseHttpClient`/`BinanceFuturesHttpClient`/`BinanceSpotHttpClient`: signing, пересдача при протухшей отметке, rate-limit awareness (REQUEST_WEIGHT/HTTP 418/429), все эндпоинты Binance |
+| [websocket-layer.md](.claude/rules/websocket-layer.md) | Общие паттерны стримов, PublicStreamLike, BaseTradeStream (index; конкретные биржи — в сателлитах ниже) |
+| [websocket-layer-binance.md](.claude/rules/websocket-layer-binance.md) | Binance Futures/Spot Public Stream, User Data Stream, Trade Stream |
+| [websocket-layer-bybit.md](.claude/rules/websocket-layer-bybit.md) | Bybit Public Stream, TradeToKlineAggregator, Trade Stream (+ Batch), Private Stream |
+| [websocket-layer-okx.md](.claude/rules/websocket-layer-okx.md) | OKX: текстовое сердцебиение, вход, OkxConnection (index) |
+| [websocket-layer-okx-public.md](.claude/rules/websocket-layer-okx-public.md) | OKX Public Stream: три набора соединений, бюджет операций подписки, подписка и отписка, темы |
+| [websocket-layer-okx-orderbook.md](.claude/rules/websocket-layer-okx-orderbook.md) | OKX: стакан, разрывы номеров, ленивый разбор, разбор входящих кадров |
+| [websocket-layer-okx-trade.md](.claude/rules/websocket-layer-okx-trade.md) | OKX Trade Stream (+ Batch, признак непригодности канала), Private Stream ×2 |
+| [normalizers-and-types.md](.claude/rules/normalizers-and-types.md) | Унифицированные типы, маппинги, сборщики исхода записи пачки (index) |
+| [normalizers-and-types-binance-bybit.md](.claude/rules/normalizers-and-types-binance-bybit.md) | Raw-интерфейсы и функции нормализации Binance и Bybit |
+| [normalizers-and-types-okx.md](.claude/rules/normalizers-and-types-okx.md) | Raw-интерфейсы и функции нормализации OKX, единицы контрактов |
+| [constants-and-urls.md](.claude/rules/constants-and-urls.md) | URL, таймауты, retry-константы, precision, kline loader |
+| [testing-patterns.md](.claude/rules/testing-patterns.md) | Мокирование axios/WS, createClient, фикстуры, верификация HTTP-вызовов |
+| [testing-patterns-catalog.md](.claude/rules/testing-patterns-catalog.md) | Каталог тест-файлов по слоям и живые проверки против настоящих бирж (`exchange:live-check`, `okx:probe`) |
+| [adding-endpoint.md](.claude/rules/adding-endpoint.md) | Пошаговый гайд + чеклист по добавлению нового эндпоинта |
 | [api-reference.md](docs/api-reference.md) | Полная API-документация ExchangeClient: методы, типы, enum-ы, матрица поддержки |

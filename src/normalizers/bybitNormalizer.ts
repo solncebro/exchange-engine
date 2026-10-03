@@ -24,6 +24,7 @@ import type {
   LeverageFilter,
   PriceLimitRisk,
   TradingFunding,
+  LeverageTierListBySymbol,
 } from '../types/common';
 import { TradeSymbolTypeEnum, PositionSideEnum, MarginModeEnum, TimeInForceEnum, OrderSideEnum, OrderTypeEnum } from '../types/common';
 import { BYBIT_POSITION_SIDE, BYBIT_ORDER_STATUS, BYBIT_ORDER_SIDE, BYBIT_ORDER_TYPE, BYBIT_TIME_IN_FORCE } from '../constants/mappings';
@@ -1145,4 +1146,39 @@ export function normalizeBybitIncomeList(rawList: BybitTransactionLogRaw[], kind
     info: { tradeId: raw.tradeId, orderId: raw.orderId },
     quantity: parseFloat(raw.qty),
   }));
+}
+
+export interface BybitRiskLimitRaw {
+  id: number;
+  symbol: string;
+  riskLimitValue: string;
+  maintenanceMargin: string;
+  initialMargin: string;
+  isLowestRisk: number;
+  maxLeverage: string;
+  mmDeduction: string;
+}
+
+export function normalizeBybitRiskLimitList(rawList: BybitRiskLimitRaw[]): LeverageTierListBySymbol {
+  const tierListBySymbol: LeverageTierListBySymbol = new Map();
+
+  for (const raw of rawList) {
+    const tierList = tierListBySymbol.get(raw.symbol) ?? [];
+
+    tierList.push({
+      maxLeverage: parseFloat(raw.maxLeverage),
+      maxNotional: parseFloat(raw.riskLimitValue),
+      maxBaseAmount: null,
+      initialMarginRate: parseFloat(raw.initialMargin),
+      maintenanceMarginRate: parseFloat(raw.maintenanceMargin),
+    });
+
+    tierListBySymbol.set(raw.symbol, tierList);
+  }
+
+  for (const tierList of tierListBySymbol.values()) {
+    tierList.sort((a, b) => (a.maxNotional ?? 0) - (b.maxNotional ?? 0));
+  }
+
+  return tierListBySymbol;
 }

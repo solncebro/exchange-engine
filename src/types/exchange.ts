@@ -1,3 +1,4 @@
+import type { StepRounding } from '../precision/precision';
 import type {
   ExchangeConfig,
   ExchangeLogger,
@@ -26,6 +27,12 @@ import type {
   OrderRateLimitSnapshot,
   ExchangeRateLimitState,
   IncomeKind,
+  LeverageTier,
+  LeverageTierListBySymbol,
+  SubAccount,
+  SubAccountBalance,
+  SubAccountTransfer,
+  SubAccountTransferResult,
 } from './common';
 import {
   MarginModeEnum,
@@ -35,8 +42,10 @@ import {
   OrderTypeEnum,
   PositionModeEnum,
   PositionSideEnum,
+  SubAccountTransferDirectionEnum,
   TimeInForceEnum,
   TriggerByEnum,
+  WalletTypeEnum,
   WorkingTypeEnum,
 } from './common';
 
@@ -231,9 +240,11 @@ export interface ExchangeClient {
   fetchPositionList(symbol: string): Promise<Position[]>;
   fetchAllPositions(): Promise<Position[]>;
   setLeverage(leverage: number, symbol: string): Promise<SetLeverageResult>;
+  fetchLeverageTierList(symbol: string): Promise<LeverageTier[]>;
+  fetchAllLeverageTierList(): Promise<LeverageTierListBySymbol>;
   setMarginMode(marginMode: MarginModeEnum, symbol: string): Promise<void>;
-  amountToPrecision(symbol: string, amount: number): number;
-  priceToPrecision(symbol: string, price: number): number;
+  amountToPrecision(symbol: string, amount: number, rounding?: StepRounding): number;
+  priceToPrecision(symbol: string, price: number, rounding?: StepRounding): number;
   getMinOrderQty(symbol: string): number;
   getMinNotional(symbol: string): number;
   getMaxOrderQty(symbol: string): number;
@@ -297,4 +308,53 @@ export interface ExchangeClient {
   connectUserDataStream(handler: UserDataStreamHandlerArgs): Promise<void>;
   disconnectUserDataStream(): void;
   isUserDataStreamConnected(): boolean;
+}
+
+export interface SubAccountTransferArgs {
+  subAccountId: string;
+  direction: SubAccountTransferDirectionEnum;
+  asset: string;
+  amount: number;
+  fromWalletType: WalletTypeEnum;
+  toWalletType: WalletTypeEnum;
+  /**
+   * Номер перевода, придуманный вызывающим, — защита от двойного перевода при повторе после
+   * обрыва. Bybit принимает ТОЛЬКО UUID; Binance — любую уникальную строку, поэтому UUID годится
+   * для обеих.
+   */
+  transferId: string;
+}
+
+export interface FetchSubAccountTransferArgs {
+  subAccountId: string;
+  direction: SubAccountTransferDirectionEnum;
+  transferId: string;
+  /** Binance не пишет перевод фьючерсы → фьючерсы в историю универсальных переводов и не хранит там
+   *  номер вызывающего (живая проверка 26.09.2026). С суммой и моментом записи намерения такой перевод
+   *  ищется в истории фьючерсных переводов по направлению, сумме и времени; одно совпадение — он, несколько —
+   *  ошибка «не различить». Без них — только поиск по номеру, как раньше. */
+  amount?: number;
+  asset?: string;
+  sinceMs?: number;
+}
+
+export interface FetchSubAccountBalancesArgs {
+  subAccountId: string;
+  walletType: WalletTypeEnum;
+  /** Монеты, которые прочитать. Bybit у единого счёта (UNIFIED) без списка отвечает 131203 «Limit the
+   *  query to 1 to 10 coins» (живой ответ 26.09.2026), поэтому там по умолчанию USDT; не больше 10.
+   *  Binance список не использует — отдаёт все монеты. */
+  assetList?: string[];
+}
+
+/**
+ * Операции главного счёта над его подсчётами. Живут на уровне счёта, а не рынка: ключ главного
+ * счёта один на спот и фьючерсы, и перевод не принадлежит ни одному из рынков.
+ */
+export interface SubAccountClient {
+  fetchSubAccountList(): Promise<SubAccount[]>;
+  transferSubAccountAsset(args: SubAccountTransferArgs): Promise<SubAccountTransferResult>;
+  /** null — биржа такого перевода не знает (или он старше окна её истории: Binance — 7 дней). */
+  fetchSubAccountTransfer(args: FetchSubAccountTransferArgs): Promise<SubAccountTransfer | null>;
+  fetchSubAccountBalances(args: FetchSubAccountBalancesArgs): Promise<SubAccountBalance[]>;
 }

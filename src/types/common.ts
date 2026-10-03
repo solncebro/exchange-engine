@@ -286,6 +286,24 @@ export interface Position {
   info: Record<string, unknown>;
 }
 
+/**
+ * Ступень плеча инструмента: пока суммарная стоимость позиции и заявок символа не выше потолка
+ * ступени, биржа допускает плечо не больше `maxLeverage`; чем больше позиция, тем ниже плечо.
+ * Bybit зовёт это ступенью риска, Binance — скобкой плеча, OKX — ступенью позиции. Список идёт
+ * по возрастанию потолка (по убыванию плеча). Потолок — в котируемой валюте (`maxNotional`);
+ * OKX задаёт его в контрактах, поэтому у него потолок отдаётся в монетах базового актива
+ * (`maxBaseAmount`), а в деньги его переводит вызывающий по цене.
+ */
+export interface LeverageTier {
+  maxLeverage: number;
+  maxNotional: number | null;
+  maxBaseAmount: number | null;
+  initialMarginRate: number | null;
+  maintenanceMarginRate: number | null;
+}
+
+export type LeverageTierListBySymbol = Map<string, LeverageTier[]>;
+
 export interface OrderRateLimitSnapshot {
   limit: number;
   remaining: number;
@@ -629,4 +647,80 @@ export interface UserDataStreamHandlerArgs {
   onOrderUpdate: OrderUpdateHandler;
   onPositionUpdate: PositionUpdateHandler;
   onBalanceUpdate?: BalanceUpdateHandler;
+  /** Поток оборвался: события за время обрыва потеряны, потребителю надо перечитать состояние заявок сам. Зовётся один раз на эпизод обрыва. */
+  onConnectionLost?: () => void;
+  /** Поток снова подключён (после обрыва) и, где нужно, заново вошёл и подписался. Зовётся один раз после каждого `onConnectionLost`. */
+  onConnectionRestored?: () => void;
+}
+
+/**
+ * Кошелёк, между которыми ходит перевод главного счёта и подсчёта. Это НАМЕРЕНИЕ, а не биржевое
+ * слово: у Bybit на едином торговом счёте спот и фьючерсы живут в ОДНОМ кошельке (`UNIFIED`), и оба
+ * значения там означают его; у Binance это разные кошельки (`SPOT`, `USDT_FUTURE`), а «пополнения»
+ * у переводов подсчётов нет вовсе — такой запрос отвергается до сети.
+ */
+export enum WalletTypeEnum {
+  Spot = 'spot',
+  UsdtFutures = 'usdtFutures',
+  Funding = 'funding',
+}
+
+export enum SubAccountStatusEnum {
+  Active = 'active',
+  Frozen = 'frozen',
+  LoginBanned = 'loginBanned',
+  Unknown = 'unknown',
+}
+
+export enum SubAccountTransferDirectionEnum {
+  MasterToSub = 'masterToSub',
+  SubToMaster = 'subToMaster',
+}
+
+export enum SubAccountTransferStatusEnum {
+  Success = 'success',
+  Pending = 'pending',
+  Failed = 'failed',
+}
+
+export interface SubAccount {
+  /** То, чем подсчёт называется в переводах: почта у Binance, номер пользователя (UID) у Bybit. */
+  subAccountId: string;
+  /** Почта у Binance, имя пользователя у Bybit. */
+  name: string;
+  note: string | null;
+  status: SubAccountStatusEnum;
+  createdAt: number | null;
+}
+
+export interface SubAccountTransferResult {
+  /** Номер, выданный вызывающим: по нему биржа не даст провести перевод дважды. */
+  transferId: string;
+  /** Собственный номер биржи; у Bybit его нет — там номер перевода и есть номер вызывающего. */
+  exchangeTransferId: string | null;
+}
+
+export interface SubAccountTransfer {
+  transferId: string;
+  exchangeTransferId: string | null;
+  asset: string;
+  amount: number;
+  fromAccountId: string;
+  toAccountId: string;
+  /** null — биржа назвала кошелёк, которого в `WalletTypeEnum` нет; сырое имя — в `rawFromWalletType`. */
+  fromWalletType: WalletTypeEnum | null;
+  toWalletType: WalletTypeEnum | null;
+  rawFromWalletType: string;
+  rawToWalletType: string;
+  status: SubAccountTransferStatusEnum;
+  rawStatus: string;
+  timestamp: number;
+}
+
+export interface SubAccountBalance {
+  asset: string;
+  /** Всё, что лежит в кошельке, включая занятое. */
+  walletBalance: number;
+  /** Сколько можно вывести переводом прямо сейчас. */
+  transferableBalance: number;
 }

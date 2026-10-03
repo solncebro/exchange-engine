@@ -5,8 +5,8 @@
 ## Команды
 
 ```bash
-yarn build              # Компиляция TypeScript → dist/
-yarn lint               # ESLint src/ test/
+yarn build              # Проверка стиля и тесты, затем компиляция TypeScript → dist/
+yarn lint               # ESLint src/ test/ scripts/
 yarn test               # Запустить все Jest-тесты
 yarn test -- --testPathPatterns=normalizers  # Запустить тесты по образцу пути (Jest 30: ключ во множественном числе)
 yarn test:coverage      # Тесты с отчётом по покрытию
@@ -14,7 +14,7 @@ yarn test:smoke         # Smoke-тесты (верификация контра�
 yarn type-check         # Проверка типов (без emit)
 ```
 
-Последовательность верификации: `yarn lint && yarn test --coverage && yarn test:smoke && yarn build`
+yarn lint               # ESLint src/ test/ scripts/
 
 ## Архитектура
 
@@ -27,12 +27,15 @@ Exchange (фабрика) → ExchangeClient (интерфейс)
   │   ├── BybitBaseClient → BybitLinear / BybitSpot
   │   └── OkxBaseClient → OkxSwap / OkxSpot
   │
+  ├── Exchange.subAccount → SubAccountClient (уровень счёта, не рынка):
+  │   BinanceSubAccount / BybitSubAccount / UnsupportedSubAccount (OKX и демо-режим)
+  │
   ├── HTTP-клиенты (src/http/)
   │   ├── BaseHttpClient (retry, rate limits, axios, executeRequest)
   │   ├── BinanceBaseHttpClient (signing, signRequest, buildOptionalSymbolParams, троттлинг через binanceRateLimit.ts)
   │   │   ├── BinanceFuturesHttpClient
-  │   │   └── BinanceSpotHttpClient
-  │   ├── BybitHttpClient (buildCategoryParams)
+  │   │   └── BinanceSpotHttpClient → BinanceSubAccountHttpClient (подсчёты, /sapi)
+  │   ├── BybitHttpClient (buildCategoryParams) → BybitSubAccountHttpClient (подсчёты)
   │   └── OkxHttpClient (подпись в заголовках, демо-заголовок, пересдача 50102, повтор 50011)
   │
   ├── Нормализаторы (src/normalizers/)

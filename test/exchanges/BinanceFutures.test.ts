@@ -21,6 +21,7 @@ import {
   BINANCE_RAW_COMMISSION_RATE,
   BINANCE_RAW_INCOME_LIST,
   BINANCE_RAW_MODIFY_BATCH_RESPONSE_MIXED,
+  BINANCE_RAW_LEVERAGE_BRACKET_LIST,
 } from '../fixtures/binanceRaw';
 import { MarginModeEnum, OrderSideEnum, OrderTypeEnum, PositionModeEnum, PositionSideEnum, TimeInForceEnum, TradeSymbolTypeEnum, WorkingTypeEnum } from '../../src/types/common';
 import { BinanceFuturesPublicStream } from '../../src/ws/BinanceFuturesPublicStream';
@@ -323,6 +324,36 @@ describe('BinanceFutures', () => {
       const result = await client.fetchFundingRateHistory('BTCUSDT');
 
       expect(result[1].markPrice).toBeNull();
+    });
+  });
+
+  describe('fetchLeverageTierList', () => {
+    it('returns tiers for the requested symbol with the signed url and symbol param', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: BINANCE_RAW_LEVERAGE_BRACKET_LIST });
+
+      const result = await client.fetchLeverageTierList('AVAUSDT');
+
+      const [url, options] = mockInstance.get.mock.calls[0];
+
+      expect(url).toBe('/fapi/v1/leverageBracket');
+      expect(options.params.symbol).toBe('AVAUSDT');
+      expect(options.params.signature).toBeDefined();
+      expect(result).toHaveLength(8);
+    });
+  });
+
+  describe('fetchAllLeverageTierList', () => {
+    it('requests without a symbol param and keys the result by symbol', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: BINANCE_RAW_LEVERAGE_BRACKET_LIST });
+
+      const result = await client.fetchAllLeverageTierList();
+
+      const [, options] = mockInstance.get.mock.calls[0];
+
+      expect(options.params.symbol).toBeUndefined();
+      expect(result.has('AVAUSDT')).toBe(true);
     });
   });
 
@@ -2055,6 +2086,43 @@ describe('BinanceFutures', () => {
       await jest.advanceTimersByTimeAsync(30 * 60 * 1000);
 
       expect(MockedUserDataStream).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('connectUserDataStream connection notifications', () => {
+    it('deduplicates onConnectionLost/onConnectionRestored until the matching counterpart fires', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.post.mockResolvedValue({ data: { listenKey: 'lk-1' } });
+
+      const onConnectionLost = jest.fn();
+      const onConnectionRestored = jest.fn();
+
+      try {
+        await client.connectUserDataStream({
+          onOrderUpdate: jest.fn(),
+          onPositionUpdate: jest.fn(),
+          onConnectionLost,
+          onConnectionRestored,
+        });
+
+        const constructorArgs = MockedUserDataStream.mock.calls[0][0];
+
+        constructorArgs.onConnectionLost!();
+        constructorArgs.onConnectionLost!();
+
+        expect(onConnectionLost).toHaveBeenCalledTimes(1);
+
+        constructorArgs.onConnectionRestored!();
+        constructorArgs.onConnectionRestored!();
+
+        expect(onConnectionRestored).toHaveBeenCalledTimes(1);
+
+        constructorArgs.onConnectionLost!();
+
+        expect(onConnectionLost).toHaveBeenCalledTimes(2);
+      } finally {
+        await client.close();
+      }
     });
   });
 });

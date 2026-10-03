@@ -33,6 +33,12 @@ export interface FetchOkxFundingRateHistoryArgs extends OkxTimeRangeArgs {
   instId: string;
 }
 
+export interface FetchOkxPositionTiersArgs {
+  instType: string;
+  tdMode: string;
+  instFamily: string;
+}
+
 export interface FetchOkxPositionsArgs {
   instType?: OkxInstrumentType;
   instId?: string;

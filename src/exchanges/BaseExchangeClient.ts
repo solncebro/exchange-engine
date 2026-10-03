@@ -44,11 +44,14 @@ import type {
   ClosedPnl,
   UserDataStreamHandlerArgs,
   ExchangeRateLimitState,
+  LeverageTier,
+  LeverageTierListBySymbol,
 } from '../types/common';
 import { MarginModeEnum, PositionModeEnum } from '../types/common';
 import type { PublicStreamLike } from '../types/stream';
 import { loadKlinesInChunks } from '../utils/klineLoader';
 import { amountToPrecision, priceToPrecision, MAX_PRICE_DECIMAL_PLACES } from '../precision/precision';
+import type { StepRounding } from '../precision/precision';
 
 abstract class BaseExchangeClient implements ExchangeClient {
   readonly apiKey: string;
@@ -273,24 +276,24 @@ abstract class BaseExchangeClient implements ExchangeClient {
     publicStream.unsubscribePublicTrades(args.symbol, args.handler);
   }
 
-  amountToPrecision(symbol: string, amount: number): number {
+  amountToPrecision(symbol: string, amount: number, rounding: StepRounding = 'nearest'): number {
     const tradeSymbol = this.getTradeSymbolOrWarn(symbol, 'amountToPrecision');
 
     if (!tradeSymbol) {
       return amount;
     }
 
-    return amountToPrecision(tradeSymbol, amount);
+    return amountToPrecision(tradeSymbol, amount, rounding);
   }
 
-  priceToPrecision(symbol: string, price: number): number {
+  priceToPrecision(symbol: string, price: number, rounding: StepRounding = 'nearest'): number {
     const tradeSymbol = this.getTradeSymbolOrWarn(symbol, 'priceToPrecision');
 
     if (!tradeSymbol) {
       return parseFloat(price.toFixed(MAX_PRICE_DECIMAL_PLACES));
     }
 
-    return priceToPrecision(tradeSymbol, price);
+    return priceToPrecision(tradeSymbol, price, rounding);
   }
 
   getMinOrderQty(symbol: string): number {
@@ -398,6 +401,14 @@ abstract class BaseExchangeClient implements ExchangeClient {
   }
 
   async setLeverage(_leverage: number, _symbol: string): Promise<SetLeverageResult> {
+    throw new Error(`Not supported for ${this.marketLabel} market`);
+  }
+
+  async fetchLeverageTierList(_symbol: string): Promise<LeverageTier[]> {
+    throw new Error(`Not supported for ${this.marketLabel} market`);
+  }
+
+  async fetchAllLeverageTierList(): Promise<LeverageTierListBySymbol> {
     throw new Error(`Not supported for ${this.marketLabel} market`);
   }
 

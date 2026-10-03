@@ -13,6 +13,7 @@ import type {
   BybitFundingRateHistoryRaw,
   BybitClosedPnlRaw,
   BybitTransactionLogRaw,
+  BybitRiskLimitRaw,
 } from '../../src/normalizers/bybitNormalizer';
 
 export const BYBIT_RAW_INSTRUMENT_LIST: BybitInstrumentInfoRaw[] = [
@@ -307,3 +308,48 @@ export const BYBIT_RAW_TRANSACTION_LOG_SETTLEMENT: BybitTransactionLogRaw = {
   tradeId: '',
   orderId: '',
 };
+
+export const BYBIT_RAW_RISK_LIMIT_AVAUSDT_LIST: BybitRiskLimitRaw[] = [
+  { id: 1, symbol: 'AVAUSDT', riskLimitValue: '5000', maintenanceMargin: '0.1', initialMargin: '0.2', isLowestRisk: 1, maxLeverage: '5.00', mmDeduction: '' },
+  { id: 2, symbol: 'AVAUSDT', riskLimitValue: '6000', maintenanceMargin: '0.102', initialMargin: '0.2041', isLowestRisk: 0, maxLeverage: '4.90', mmDeduction: '10' },
+  { id: 3, symbol: 'AVAUSDT', riskLimitValue: '7000', maintenanceMargin: '0.1042', initialMargin: '0.2083', isLowestRisk: 0, maxLeverage: '4.80', mmDeduction: '23.2' },
+  { id: 4, symbol: 'AVAUSDT', riskLimitValue: '8000', maintenanceMargin: '0.1064', initialMargin: '0.2128', isLowestRisk: 0, maxLeverage: '4.70', mmDeduction: '38.6' },
+  { id: 5, symbol: 'AVAUSDT', riskLimitValue: '9000', maintenanceMargin: '0.1087', initialMargin: '0.2174', isLowestRisk: 0, maxLeverage: '4.60', mmDeduction: '57' },
+  { id: 6, symbol: 'AVAUSDT', riskLimitValue: '10000', maintenanceMargin: '0.1111', initialMargin: '0.2222', isLowestRisk: 0, maxLeverage: '4.50', mmDeduction: '78.6' },
+  { id: 7, symbol: 'AVAUSDT', riskLimitValue: '11000', maintenanceMargin: '0.1136', initialMargin: '0.2273', isLowestRisk: 0, maxLeverage: '4.40', mmDeduction: '103.6' },
+  { id: 8, symbol: 'AVAUSDT', riskLimitValue: '12000', maintenanceMargin: '0.1163', initialMargin: '0.2326', isLowestRisk: 0, maxLeverage: '4.30', mmDeduction: '133.3' },
+  { id: 9, symbol: 'AVAUSDT', riskLimitValue: '13000', maintenanceMargin: '0.119', initialMargin: '0.2381', isLowestRisk: 0, maxLeverage: '4.20', mmDeduction: '165.7' },
+  { id: 10, symbol: 'AVAUSDT', riskLimitValue: '14000', maintenanceMargin: '0.122', initialMargin: '0.2439', isLowestRisk: 0, maxLeverage: '4.10', mmDeduction: '204.7' },
+  { id: 11, symbol: 'AVAUSDT', riskLimitValue: '15000', maintenanceMargin: '0.125', initialMargin: '0.25', isLowestRisk: 0, maxLeverage: '4.00', mmDeduction: '246.7' },
+  { id: 12, symbol: 'AVAUSDT', riskLimitValue: '19000', maintenanceMargin: '0.1282', initialMargin: '0.2564', isLowestRisk: 0, maxLeverage: '3.90', mmDeduction: '294.7' },
+  { id: 13, symbol: 'AVAUSDT', riskLimitValue: '23000', maintenanceMargin: '0.1316', initialMargin: '0.2632', isLowestRisk: 0, maxLeverage: '3.80', mmDeduction: '359.3' },
+  { id: 14, symbol: 'AVAUSDT', riskLimitValue: '27000', maintenanceMargin: '0.1351', initialMargin: '0.2703', isLowestRisk: 0, maxLeverage: '3.70', mmDeduction: '439.8' },
+  { id: 15, symbol: 'AVAUSDT', riskLimitValue: '31000', maintenanceMargin: '0.1389', initialMargin: '0.2778', isLowestRisk: 0, maxLeverage: '3.60', mmDeduction: '542.4' },
+  { id: 16, symbol: 'AVAUSDT', riskLimitValue: '35000', maintenanceMargin: '0.1429', initialMargin: '0.2857', isLowestRisk: 0, maxLeverage: '3.50', mmDeduction: '666.4' },
+  { id: 17, symbol: 'AVAUSDT', riskLimitValue: '39000', maintenanceMargin: '0.1471', initialMargin: '0.2941', isLowestRisk: 0, maxLeverage: '3.40', mmDeduction: '813.4' },
+  { id: 18, symbol: 'AVAUSDT', riskLimitValue: '43000', maintenanceMargin: '0.1515', initialMargin: '0.303', isLowestRisk: 0, maxLeverage: '3.30', mmDeduction: '985' },
+  { id: 19, symbol: 'AVAUSDT', riskLimitValue: '47000', maintenanceMargin: '0.1563', initialMargin: '0.3125', isLowestRisk: 0, maxLeverage: '3.20', mmDeduction: '1191.4' },
+  { id: 20, symbol: 'AVAUSDT', riskLimitValue: '51000', maintenanceMargin: '0.1613', initialMargin: '0.3226', isLowestRisk: 0, maxLeverage: '3.10', mmDeduction: '1426.4' },
+  { id: 21, symbol: 'AVAUSDT', riskLimitValue: '55000', maintenanceMargin: '0.1667', initialMargin: '0.3333', isLowestRisk: 0, maxLeverage: '3.00', mmDeduction: '1701.8' },
+  { id: 22, symbol: 'AVAUSDT', riskLimitValue: '130000', maintenanceMargin: '0.1724', initialMargin: '0.3448', isLowestRisk: 0, maxLeverage: '2.90', mmDeduction: '2015.3' },
+  { id: 23, symbol: 'AVAUSDT', riskLimitValue: '205000', maintenanceMargin: '0.1786', initialMargin: '0.3571', isLowestRisk: 0, maxLeverage: '2.80', mmDeduction: '2821.3' },
+  { id: 24, symbol: 'AVAUSDT', riskLimitValue: '280000', maintenanceMargin: '0.1852', initialMargin: '0.3704', isLowestRisk: 0, maxLeverage: '2.70', mmDeduction: '4174.3' },
+  { id: 25, symbol: 'AVAUSDT', riskLimitValue: '355000', maintenanceMargin: '0.1923', initialMargin: '0.3846', isLowestRisk: 0, maxLeverage: '2.60', mmDeduction: '6162.3' },
+  { id: 26, symbol: 'AVAUSDT', riskLimitValue: '430000', maintenanceMargin: '0.2', initialMargin: '0.4', isLowestRisk: 0, maxLeverage: '2.50', mmDeduction: '8895.8' },
+  { id: 27, symbol: 'AVAUSDT', riskLimitValue: '505000', maintenanceMargin: '0.2083', initialMargin: '0.4167', isLowestRisk: 0, maxLeverage: '2.40', mmDeduction: '12464.8' },
+  { id: 28, symbol: 'AVAUSDT', riskLimitValue: '600000', maintenanceMargin: '0.2174', initialMargin: '0.4348', isLowestRisk: 0, maxLeverage: '2.30', mmDeduction: '17060.3' },
+  { id: 29, symbol: 'AVAUSDT', riskLimitValue: '750000', maintenanceMargin: '0.25', initialMargin: '0.5', isLowestRisk: 0, maxLeverage: '2.00', mmDeduction: '36620.3' },
+  { id: 30, symbol: 'AVAUSDT', riskLimitValue: '1000000', maintenanceMargin: '0.5', initialMargin: '1', isLowestRisk: 0, maxLeverage: '1.00', mmDeduction: '224120.3' },
+];
+
+// Брифом запрошены «первые 4 записи page1», но в живом ответе они все одного символа (0GUSDT,
+// у него 30 ступеней риска) — для теста группировки по символам («ключи карты = разные символы»)
+// нужен как минимум один переход на другой символ. Взят верный по данным срез: последняя запись
+// 0GUSDT (id 30) и первые три записи следующего символа page1 — тоже вербатим, тоже из начала
+// файла, просто на несколько строк дальше, чем буквально «первые 4».
+export const BYBIT_RAW_RISK_LIMIT_PAGE_LIST: BybitRiskLimitRaw[] = [
+  { id: 30, symbol: '0GUSDT', riskLimitValue: '5000000', maintenanceMargin: '0.5', initialMargin: '1', isLowestRisk: 0, maxLeverage: '1.00', mmDeduction: '609579' },
+  { id: 1, symbol: '1000000BABYDOGEUSDT', riskLimitValue: '25000', maintenanceMargin: '0.02', initialMargin: '0.04', isLowestRisk: 1, maxLeverage: '25.00', mmDeduction: '' },
+  { id: 2, symbol: '1000000BABYDOGEUSDT', riskLimitValue: '50000', maintenanceMargin: '0.025', initialMargin: '0.05', isLowestRisk: 0, maxLeverage: '20.00', mmDeduction: '125' },
+  { id: 3, symbol: '1000000BABYDOGEUSDT', riskLimitValue: '75000', maintenanceMargin: '0.03', initialMargin: '0.06', isLowestRisk: 0, maxLeverage: '16.67', mmDeduction: '375' },
+];

@@ -4,16 +4,24 @@ Universal TypeScript client library for cryptocurrency trading on Binance, Bybit
 
 ## Latest Release
 
-Current version: `0.25.0`
+Текущая версия: `0.26.0`
 
-- **OKX support** — a third exchange behind the same `ExchangeClient` interface: `new Exchange('okx', …)` returns USDT/USDC-settled linear perpetuals (`exchange.futures`) and spot (`exchange.spot`). Symbols stay unified (`BTCUSDT`) and sizes stay in coins — the contract↔coin conversion, the instrument-id translation and OKX's separate conditional-order service are handled inside the client. OKX requires `ExchangeConfig.passphrase` (the client refuses to construct without it), and a client order id must be 1–32 letters or digits. See [docs/api-reference.md](./docs/api-reference.md#особенности-okx) for the exchange quirks a consumer has to know (quote volume on perpetuals is an estimate, `triggerDirection` is ignored, margin mode is remembered client-side, no index price in the mark-price stream).
+- **Округление по шагу инструмента:** направление можно выбрать — к ближайшему значению, вверх или вниз.
+- **Ступени плеча:** единое чтение ограничений позиции и требований к марже на Binance, Bybit и OKX.
+- **Дочерние счета Binance и Bybit:** список счетов, переводы, поиск перевода и чтение остатков.
+- **Исправления биржевых клиентов:** чтение страниц Bybit, ограничения запросов Binance, порядок свечей OKX и отмена всех заявок Binance Spot.
+- **Совместимость соединений:** требуется `@solncebro/websocket-engine` версии не ниже 0.6.1 и ниже 1.0.0; эта версия разрешает текстовую проверку живости OKX.
+
+Предыдущий выпуск: `0.25.0`.
+
+- **OKX support** — a third exchange behind the same `ExchangeClient` interface: `new Exchange('okx', …)` returns USDT/USDC-settled linear perpetuals (`exchange.futures`) and spot (`exchange.spot`). Symbols stay unified (`BTCUSDT`) and sizes stay in coins — the contract↔coin conversion, the instrument-id translation and OKX's separate conditional-order service are handled inside the client. OKX requires `ExchangeConfig.passphrase` (the client refuses to construct without it), and a client order id must be 1–32 letters or digits. See [docs/api-reference.md](https://github.com/solncebro/exchange-engine/blob/main/docs/api-reference.md#особенности-okx) for the exchange quirks a consumer has to know (quote volume on perpetuals is an estimate, `triggerDirection` is ignored, margin mode is remembered client-side, no index price in the mark-price stream).
 
 Previously in `0.24.0`:
 
 - **Account balance fixes**: consumer-side summation across coins was adding balances denominated in different units — one BTC on an account was worth one dollar in the "free" total instead of six figures (live incident 2026-08-29, an empty Bybit account showed negative margin in use). `fetchBalances()` now sums only `Balance.usdValue` (the per-coin dollar valuation the exchange itself uses to build `totalWalletBalance`) for any account-level total, and margin in use is converted to dollars at each coin's own rate. Binance Futures margin in use is now read from `/fapi/v3/account`'s own `totalInitialMargin` field instead of derived by subtracting free from wallet balance (that subtraction silently drifts with unrealized PnL on an open position). `AccountBalances.availableBalanceSource` names where the free-balance number came from — `'exchange'`, `'derived'`, or `'unknown'` — so a consumer can tell a fact from a guess.
 - **Bybit accounting fixes**: `fetchIncome` now reads a funding settlement from its `funding` field (the `cashFlow` of such a row is always zero — the old code reported every Bybit funding charge as 0), and `fetchClosedPnl` no longer returns Bybit's own `closedPnl`, which already subtracts the funding paid over the life of the position: the result is rebuilt from the record's own fields (`cumEntryValue − cumExitValue − openFee − closeFee`), so `closedPnl` means the same on both exchanges — net of trading commissions, funding NOT included. Consumers that added funding on top of a Bybit `closedPnl` were double-counting it; recount affected rows.
 - **Binance Futures order-book stream fix**: the depth (`@depth20@100ms`) stream was subscribed on the same market endpoint as every other public stream, which the exchange acknowledges but never actually pushes frames on (live-verified 2026-09-06) — every order-book connection silently sat empty and got endlessly recreated by the stale-connection watchdog. It now opens on the combined endpoint (`wss://fstream.binance.com/stream`), the one that actually streams depth updates in the wrapped shape the parser expects.
-- **Breaking — `@solncebro/websocket-engine` moved from a regular dependency to a peer dependency** (range `>=0.6.0 <1.0.0`; it stays a dev dependency so this package can still build and test itself). While it was a regular dependency pinned as `^0.5.0`, a consumer already running a newer branch of that channel was forced to carry a *second*, older copy nested inside this package — pre-1.0 caret ranges don't cross a minor boundary. Two implementations of the channel ended up in one process, and the sockets that actually talk to the exchange ran on the stale one, while fixes landed only in the app's own copy. A peer dependency removes the possibility itself, not just today's mismatch — this package no longer has the right to carry its own copy of the channel. Behavior is unchanged: the same two exports are used, the socket class and the status enum. **Action required on upgrade**: if you depend on this package directly, declare the channel yourself — `"@solncebro/websocket-engine": ">=0.6.0 <1.0.0"`. Yarn classic does not auto-install peer dependencies, so without that line the package won't find the channel at runtime. If the channel is already in your tree — your own install, or another package that declares it — there is nothing to do.
+- **Breaking — `@solncebro/websocket-engine` moved from a regular dependency to a peer dependency** (range `>=0.6.1 <1.0.0`; it stays a dev dependency so this package can still build and test itself). While it was a regular dependency pinned as `^0.5.0`, a consumer already running a newer branch of that channel was forced to carry a *second*, older copy nested inside this package — pre-1.0 caret ranges don't cross a minor boundary. Two implementations of the channel ended up in one process, and the sockets that actually talk to the exchange ran on the stale one, while fixes landed only in the app's own copy. A peer dependency removes the possibility itself, not just today's mismatch — this package no longer has the right to carry its own copy of the channel. Behavior is unchanged: the same two exports are used, the socket class and the status enum. **Action required on upgrade**: if you depend on this package directly, declare the channel yourself — `"@solncebro/websocket-engine": ">=0.6.1 <1.0.0"`. Yarn classic does not auto-install peer dependencies, so without that line the package won't find the channel at runtime. If the channel is already in your tree — your own install, or another package that declares it — there is nothing to do.
 
 Previously in `0.22.0` — signed requests are now signed at send time rather than in advance (fixes stale-timestamp `-1021` rejections on Binance/Bybit), and four `ExchangeClient` argument types (`FetchIncomeArgs`, `IncomeTypeFilter`, `ResubscribeOrderbookArgs`, `ResubscribePublicTradesArgs`) that never left the package are now exported.
 
@@ -31,7 +39,7 @@ Full release notes: [CHANGELOG.md](./CHANGELOG.md)
 
 - 🔀 **Single API for multiple exchanges** — same code works with Binance, Bybit or OKX
 - 🎯 **Type-safe unified types** — all responses normalized to consistent types (Kline, Ticker, Position, etc.)
-- 📊 **REST & WebSocket support** — fetch historical data and subscribe to real-time streams
+- **REST & WebSocket support** — fetch historical data and subscribe to real-time streams
 - 🔄 **Automatic reconnection** — resilient WebSocket connections with exponential backoff
 - 📝 **Comprehensive logging** — built-in structured logging via custom logger interface
 - 🚀 **Minimal dependencies** — axios, agentkeepalive and websocket-engine
@@ -41,7 +49,7 @@ Full release notes: [CHANGELOG.md](./CHANGELOG.md)
 `@solncebro/websocket-engine` is a peer dependency — install it alongside this package:
 
 ```bash
-yarn add @solncebro/exchange-engine @solncebro/websocket-engine
+yarn add @solncebro/exchange-engine "@solncebro/websocket-engine@>=0.6.1 <1.0.0"
 ```
 
 ## Quick Start
@@ -123,6 +131,13 @@ const exchange = new Exchange('binance' | 'bybit' | 'okx', {
 exchange.futures   // BinanceFutures | BybitLinear | OkxSwap
 exchange.spot      // BinanceSpot | BybitSpot | OkxSpot
 
+// Sub-accounts of the master account (Binance, Bybit; OKX and demo mode refuse)
+exchange.subAccount.fetchSubAccountList();
+exchange.subAccount.transferSubAccountAsset({
+  subAccountId, direction: SubAccountTransferDirectionEnum.MasterToSub, asset: 'USDT', amount: 100,
+  fromWalletType: WalletTypeEnum.Spot, toWalletType: WalletTypeEnum.UsdtFutures, transferId: randomUUID(),
+});
+
 // Cleanup
 await exchange.close();
 ```
@@ -130,7 +145,7 @@ await exchange.close();
 ### ExchangeClient Interface
 
 All six classes (BinanceFutures, BinanceSpot, BybitLinear, BybitSpot, OkxSwap, OkxSpot) implement this interface.
-Which method is available on which market: see the support matrix in [docs/api-reference.md](./docs/api-reference.md#матрица-поддержки-методов).
+Which method is available on which market: see the support matrix in [docs/api-reference.md](https://github.com/solncebro/exchange-engine/blob/main/docs/api-reference.md#матрица-поддержки-методов).
 
 #### Market Data (REST)
 
@@ -209,6 +224,9 @@ const formatted = client.amountToPrecision('BTCUSDT', 0.12345);
 
 // Format price to exchange precision
 const formatted = client.priceToPrecision('BTCUSDT', 65432.1);
+
+// Direction of the rounding: 'nearest' (default), 'up' (never below the value), 'down' (never above)
+const sellLimitPrice = client.priceToPrecision('BTCUSDT', 65432.13, 'up');
 ```
 
 ### Unified Types

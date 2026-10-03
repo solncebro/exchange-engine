@@ -11,4 +11,6 @@ export interface OkxPrivateStreamArgs {
   onNotify?: (message: string) => void | Promise<void>;
   onMessage: (message: OkxWebSocketMessage) => void;
   subscriptionArgList: OkxSubscriptionArg[];
+  onConnectionLost?: () => void;
+  onConnectionRestored?: () => void;
 }

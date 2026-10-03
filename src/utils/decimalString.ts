@@ -131,7 +131,7 @@ export function multiplyDecimalStrings(left: string, right: string): string {
 }
 
 export function convertCoinsToContracts(args: ConvertCoinsToContractsArgs): string {
-  const { amount, contractValue, lotSize } = args;
+  const { amount, contractValue, lotSize, rounding = 'nearest' } = args;
 
   if (!Number.isFinite(amount) || amount < 0) {
     return '0';
@@ -145,7 +145,8 @@ export function convertCoinsToContracts(args: ConvertCoinsToContractsArgs): stri
   const numerator = amountDigits * 10n ** BigInt(contractValueMagnitude.decimals + lotSizeMagnitude.decimals);
   const denominator = contractValueMagnitude.digits * lotSizeMagnitude.digits * 10n ** BigInt(amountMagnitude.fractionLength);
 
-  const lotCount = numerator / denominator;
+  const flooredLotCount = numerator / denominator;
+  const lotCount = rounding === 'up' && numerator % denominator !== 0n ? flooredLotCount + 1n : flooredLotCount;
 
   if (lotCount === 0n) {
     return '0';

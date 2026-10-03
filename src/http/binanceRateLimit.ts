@@ -24,6 +24,14 @@ const USED_WEIGHT_HEADER = 'x-mbx-used-weight-1m';
 const RETRY_AFTER_HEADER = 'retry-after';
 const HTTP_STATUS_TOO_MANY_REQUESTS = 429;
 const HTTP_STATUS_IP_BANNED = 418;
+/**
+ * Code of the per-ACCOUNT order-count limit. Binance answers it with the same HTTP 429 as the
+ * per-IP weight limit (docs: «A 429 will be returned when either rate limit is violated»; live demo
+ * answer 17.09.2026: `429 {"code":-1015,"msg":"Too many new orders; current limit is 300 orders per
+ * TEN_SECONDS."}`, no `retry-after`). It is not a closed door for the ADDRESS: reads, cancels and
+ * stop placement are not orders and still go through.
+ */
+const BINANCE_ORDER_COUNT_LIMIT_CODE = -1015;
 /** «Way too many requests; … IP banned until 1757280000000.» — биржа называет срок прямо в тексте. */
 const BAN_UNTIL_PATTERN = /banned until (\d{10,})/i;
 
@@ -92,6 +100,16 @@ export function parseBinanceBanUntilMs(body: unknown): number | undefined {
   return Number.isFinite(value) ? value : undefined;
 }
 
+function readBinanceErrorCode(body: unknown): number | undefined {
+  if (!body || typeof body !== 'object') {
+    return undefined;
+  }
+
+  const code = (body as Record<string, unknown>).code;
+
+  return typeof code === 'number' ? code : undefined;
+}
+
 export interface RateLimitObservationArgs {
   status: number | undefined;
   headers: unknown;
@@ -113,11 +131,15 @@ export interface RateLimitObservation {
  * Срок берётся ПОЗДНИЙ из двух названных — заголовка и текста ошибки: они приходят вместе не всегда,
  * а верить надо тому, который дальше, иначе стук возобновится раньше времени. Отказ 429 тоже считается
  * закрытой дверью: он предупреждение перед 418, и продолжать в него ломиться — прямой путь к запрету.
+ * Кроме 429 с кодом −1015: это лимит числа заявок СЧЁТА, а не веса адреса, и закрывать из-за него
+ * все запросы процесса (чтения, отмены, постановку стопов) значило бы наказать не то.
  */
 export function observeRateLimitResponse(args: RateLimitObservationArgs): RateLimitObservation {
   const usedWeight = parseUsedWeight1m(args.headers);
   const banUntilFromBody = parseBinanceBanUntilMs(args.body);
-  const isRefusedByLimit = args.status === HTTP_STATUS_IP_BANNED || args.status === HTTP_STATUS_TOO_MANY_REQUESTS;
+  const isRefusedByLimit =
+    args.status === HTTP_STATUS_IP_BANNED ||
+    (args.status === HTTP_STATUS_TOO_MANY_REQUESTS && readBinanceErrorCode(args.body) !== BINANCE_ORDER_COUNT_LIMIT_CODE);
 
   const banUntilMs = ((): number | undefined => {
     if (!isRefusedByLimit && banUntilFromBody === undefined) {

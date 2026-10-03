@@ -57,6 +57,7 @@ abstract class BinanceBaseClient<T extends BinanceBaseHttpClient> extends BaseEx
   private listenKeyKeepAliveTimer: ReturnType<typeof setInterval> | null = null;
   private userDataStreamRecreateTimer: ReturnType<typeof setTimeout> | null = null;
   private userDataStreamConnecting = false;
+  private isUserDataStreamLost = false;
 
   constructor(args: BinanceBaseClientArgs<T>) {
     super(args.exchangeArgs);
@@ -352,6 +353,8 @@ abstract class BinanceBaseClient<T extends BinanceBaseHttpClient> extends BaseEx
         logger: this.logger,
         onNotify: this.onNotify,
         onMessage: (event) => this.handleUserDataMessage(event, handler),
+        onConnectionLost: () => this.reportUserDataStreamLost(handler),
+        onConnectionRestored: () => this.reportUserDataStreamRestored(handler),
       });
 
       this.userDataStream.connect();
@@ -388,14 +391,36 @@ abstract class BinanceBaseClient<T extends BinanceBaseHttpClient> extends BaseEx
     }
 
     this.logger.warn(`[${this.exchangeLabel}] Recreating user data stream after listenKey keepAlive failure (${this.marketLabel})`);
+    this.reportUserDataStreamLost(handler);
     this.disconnectUserDataStream();
 
     try {
       await this.connectUserDataStream(handler);
+      this.reportUserDataStreamRestored(handler);
     } catch (error) {
       this.logger.error(`[${this.exchangeLabel}] Failed to recreate user data stream: ${error instanceof Error ? error.message : String(error)}`);
       this.scheduleUserDataStreamRecreate(handler, USER_DATA_STREAM_RECREATE_RETRY_MS);
     }
+  }
+
+  /** Извещение об обрыве — один раз на эпизод, флаг гасит повторные вызовы (например, если позже сокет тоже отвалится по своей причине). */
+  private reportUserDataStreamLost(handler: UserDataStreamHandlerArgs): void {
+    if (this.isUserDataStreamLost) {
+      return;
+    }
+
+    this.isUserDataStreamLost = true;
+    handler.onConnectionLost?.();
+  }
+
+  /** Извещение о восстановлении — только если до этого сообщали об обрыве. */
+  private reportUserDataStreamRestored(handler: UserDataStreamHandlerArgs): void {
+    if (!this.isUserDataStreamLost) {
+      return;
+    }
+
+    this.isUserDataStreamLost = false;
+    handler.onConnectionRestored?.();
   }
 
   disconnectUserDataStream(): void {

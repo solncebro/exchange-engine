@@ -1,4 +1,14 @@
-import { PositionSideEnum, OrderSideEnum, OrderTypeEnum, TimeInForceEnum, WorkingTypeEnum, TriggerByEnum } from '../types/common';
+import {
+  PositionSideEnum,
+  OrderSideEnum,
+  OrderTypeEnum,
+  TimeInForceEnum,
+  WorkingTypeEnum,
+  TriggerByEnum,
+  WalletTypeEnum,
+  SubAccountStatusEnum,
+  SubAccountTransferStatusEnum,
+} from '../types/common';
 import type { IncomeKind } from '../types/common';
 import type { IncomeTypeFilter } from '../types/exchange';
 
@@ -307,4 +317,57 @@ export const OKX_INCOME_BILL_TYPE: Record<IncomeTypeFilter, string> = {
   funding: '8',
   realizedPnl: '2',
   commission: '2',
+};
+
+/** Кошелька «пополнение» у переводов подсчётов Binance нет — его отсутствие здесь и есть отказ. */
+export const BINANCE_SUB_ACCOUNT_WALLET_TYPE: Partial<Record<WalletTypeEnum, string>> = {
+  [WalletTypeEnum.Spot]: 'SPOT',
+  [WalletTypeEnum.UsdtFutures]: 'USDT_FUTURE',
+};
+
+export const BINANCE_SUB_ACCOUNT_WALLET_TYPE_REVERSE: Record<string, WalletTypeEnum> = {
+  SPOT: WalletTypeEnum.Spot,
+  USDT_FUTURE: WalletTypeEnum.UsdtFutures,
+};
+
+/**
+ * В документации назван только `SUCCESS`; прочие значения не перечислены. Неизвестное состояние
+ * читается как «ещё идёт» (см. нормализатор) — счесть незнакомый ответ успехом значило бы
+ * начать торговлю на деньгах, которые могли не дойти.
+ */
+export const BINANCE_SUB_ACCOUNT_TRANSFER_STATUS: Record<string, SubAccountTransferStatusEnum> = {
+  SUCCESS: SubAccountTransferStatusEnum.Success,
+  PROCESS: SubAccountTransferStatusEnum.Pending,
+  PENDING: SubAccountTransferStatusEnum.Pending,
+  FAILURE: SubAccountTransferStatusEnum.Failed,
+  FAILED: SubAccountTransferStatusEnum.Failed,
+};
+
+/**
+ * Единый торговый счёт Bybit держит спот и фьючерсы в ОДНОМ кошельке, поэтому оба намерения ведут
+ * в `UNIFIED`. Подсчёт на старом («классическом») счёте с раздельными кошельками этим путём не
+ * обслуживается.
+ */
+export const BYBIT_SUB_ACCOUNT_WALLET_TYPE: Record<WalletTypeEnum, string> = {
+  [WalletTypeEnum.Spot]: 'UNIFIED',
+  [WalletTypeEnum.UsdtFutures]: 'UNIFIED',
+  [WalletTypeEnum.Funding]: 'FUND',
+};
+
+/** Обратно `UNIFIED` не различить на спот и фьючерсы; читается как спот — тот же кошелёк. */
+export const BYBIT_SUB_ACCOUNT_WALLET_TYPE_REVERSE: Record<string, WalletTypeEnum> = {
+  UNIFIED: WalletTypeEnum.Spot,
+  FUND: WalletTypeEnum.Funding,
+};
+
+export const BYBIT_SUB_ACCOUNT_TRANSFER_STATUS: Record<string, SubAccountTransferStatusEnum> = {
+  SUCCESS: SubAccountTransferStatusEnum.Success,
+  PENDING: SubAccountTransferStatusEnum.Pending,
+  FAILED: SubAccountTransferStatusEnum.Failed,
+};
+
+export const BYBIT_SUB_MEMBER_STATUS: Record<number, SubAccountStatusEnum> = {
+  1: SubAccountStatusEnum.Active,
+  2: SubAccountStatusEnum.LoginBanned,
+  4: SubAccountStatusEnum.Frozen,
 };

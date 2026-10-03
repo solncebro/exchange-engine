@@ -2,7 +2,7 @@
 
 ## Зависимость
 
-Все стримы используют `ReliableWebSocket<TMessage>` из `@solncebro/websocket-engine` — автоматический reconnect, heartbeat, backoff.
+Все стримы используют `ReliableWebSocket<TMessage>` из `@solncebro/websocket-engine` — автоматический reconnect, heartbeat, backoff. Зависимость потребителя и зависимость разработки должны разрешать версию с `heartbeat.buildPayload`, принимающим объект или строку: OKX передаёт текстовую проверку живости.
 
 ## PublicStreamLike интерфейс (src/types/stream.ts)
 

@@ -71,6 +71,11 @@ describe('обе биржи держат одни и те же обещания'
       await expect(create().setLeverage(10, 'BTCUSDT')).rejects.toThrow(/not supported/i);
     });
 
+    it.each(SPOT_CLIENT_LIST)('%s: ступени плеча — не спотовое понятие', async (_label, create) => {
+      await expect(create().fetchLeverageTierList('BTCUSDT')).rejects.toThrow(/not supported/i);
+      await expect(create().fetchAllLeverageTierList()).rejects.toThrow(/not supported/i);
+    });
+
     it.each(SPOT_CLIENT_LIST)('%s: режим маржи — не спотовое понятие', async (_label, create) => {
       await expect(create().setMarginMode('isolated' as never, 'BTCUSDT')).rejects.toThrow(/not supported/i);
     });

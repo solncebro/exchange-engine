@@ -29,6 +29,7 @@ class Exchange {
   readonly name: ExchangeNameEnum;
   readonly futures: ExchangeClient;
   readonly spot: ExchangeClient;
+  readonly subAccount: SubAccountClient;
 
   constructor(name: ExchangeNameEnum, args: ExchangeArgs);
   getWebSocketConnectionInfoList(): WebSocketConnectionInfo[];
@@ -41,6 +42,81 @@ class Exchange {
 При `ExchangeNameEnum.Okx` создает `OkxSwap` + `OkxSpot`. Для OKX обязательна кодовая фраза
 (`ExchangeConfig.passphrase`): без неё конструктор `Exchange` сразу выбрасывает `ExchangeError`
 с кодом `OKX_PASSPHRASE_REQUIRED`.
+
+### Подсчёты главного счёта — `exchange.subAccount` (0.26.0)
+
+Операции уровня СЧЁТА, а не рынка: ключ главного счёта один на спот и фьючерсы. Все вызовы идут
+ключом главного счёта.
+
+```typescript
+interface SubAccountClient {
+  fetchSubAccountList(): Promise<SubAccount[]>;
+  transferSubAccountAsset(args: SubAccountTransferArgs): Promise<SubAccountTransferResult>;
+  fetchSubAccountTransfer(args: FetchSubAccountTransferArgs): Promise<SubAccountTransfer | null>;
+  fetchSubAccountBalances(args: FetchSubAccountBalancesArgs): Promise<SubAccountBalance[]>;
+}
+
+interface SubAccountTransferArgs {
+  subAccountId: string;            // Binance — почта подсчёта, Bybit — его номер пользователя (UID)
+  direction: SubAccountTransferDirectionEnum; // MasterToSub | SubToMaster
+  asset: string;                   // 'USDT'
+  amount: number;                  // уходит десятичной записью, без показательной формы
+  fromWalletType: WalletTypeEnum;  // Spot | UsdtFutures | Funding
+  toWalletType: WalletTypeEnum;
+  transferId: string;              // номер вызывающего; UUID годится для обеих бирж
+}
+
+interface FetchSubAccountTransferArgs {
+  subAccountId: string;
+  direction: SubAccountTransferDirectionEnum;
+  transferId: string;
+  amount?: number;
+  asset?: string;
+  sinceMs?: number;
+}
+
+interface FetchSubAccountBalancesArgs {
+  subAccountId: string;
+  walletType: WalletTypeEnum;
+  assetList?: string[];
+}
+```
+
+| | Binance | Bybit | OKX / демо |
+|---|---|---|---|
+| Кто такой подсчёт | почта | номер пользователя (строка из цифр) | — |
+| Кошелёк `Spot` | `SPOT` | `UNIFIED` | — |
+| Кошелёк `UsdtFutures` | `USDT_FUTURE` | `UNIFIED` (тот же кошелёк единого счёта) | — |
+| Кошелёк `Funding` | отказ `WALLET_TYPE_NOT_SUPPORTED` до сети | `FUND` | — |
+| Номер перевода | `clientTranId`; дефисы удаляются перед отправкой и поиском | `transferId`, ТОЛЬКО UUID (проверка до сети) | — |
+| Состояние перевода | история `/sapi/v1/sub-account/universalTransfer`, окно 7 дней; при заданных сумме и времени также история фьючерсных переводов | `/v5/asset/transfer/query-universal-transfer-list` | — |
+| Остатки подсчёта | спот `/sapi/v4/sub-account/assets` (вес 60), фьючерсы `/sapi/v2/sub-account/futures/account` | `/v5/asset/transfer/query-account-coins-balance` | — |
+| Право ключа | «внутренний перевод» (internal transfer) | «Subaccount Transfer» (`SubMemberTransfer`) | — |
+
+- Незнакомое биржевое состояние перевода читается как `Pending`, никогда как `Success`; сырое
+  значение лежит в `rawStatus`.
+- `fetchSubAccountTransfer` возвращает `null`, если биржа такого перевода не знает. У Binance
+  история видит только последние 7 дней.
+- Binance: если перевод не найден по номеру и заданы `amount` и `sinceMs`, выполняется поиск
+  в истории фьючерсных переводов по направлению, монете, сумме и времени. `sinceMs` — отметка
+  намерения в миллисекундах; начало поиска берётся на минуту раньше. `asset` по умолчанию — USDT.
+  Несколько совпадений дают `TRANSFER_MATCH_AMBIGUOUS`, отсутствие совпадений — `null`.
+  Bybit эти дополнительные поля не использует. Доказательство: `src/exchanges/BinanceSubAccount.ts:111`.
+- Повтор перевода с тем же номером биржа не проводит: Bybit отвечает кодом 131214 «TransferId
+  exist»; что отвечает Binance, в документации не сказано — после любого обрыва проверять
+  состояние через `fetchSubAccountTransfer`, а не слать перевод снова вслепую.
+- `SubAccountBalance`: `walletBalance` — всё в кошельке, `transferableBalance` — что можно вывести
+  сейчас (Binance спот — свободное, Binance фьючерсы — `maxWithdrawAmount`, Bybit —
+  `transferBalance`).
+- Bybit: номер главного счёта узнаётся один раз из `/v5/user/query-api`; ключ подсчёта
+  отвергается кодом `NOT_MASTER_ACCOUNT_KEY`. Подсчёт на «классическом» счёте (раздельные кошельки
+  `SPOT`/`CONTRACT`) не поддерживается — только единый торговый счёт.
+- Bybit: `assetList` задаёт монеты для чтения остатков, не больше десяти. Для единого счёта без
+  этого поля запрашивается USDT; названия монет переводятся в верхний регистр. Binance поле
+  не использует и возвращает все монеты. Доказательство: `src/exchanges/BybitSubAccount.ts:100`,
+  `src/exchanges/BinanceSubAccount.ts:152`.
+- В демо-режиме Binance и Bybit и на OKX все четыре метода отвечают `ExchangeError` с кодом
+  `SUB_ACCOUNT_NOT_SUPPORTED`, не выходя в сеть.
 
 ---
 
@@ -74,6 +150,8 @@ class Exchange {
 | `fetchPositionMode` | ✅ | ❌ | ✅ | ❌ | ✅ | ❌ |
 | `setPositionMode` | ✅ | ❌ | ✅ | ❌ | ✅ | ❌ |
 | `setLeverage` | ✅ | ❌ | ✅ | ❌ | ✅ | ❌ |
+| `fetchLeverageTierList` | ✅ | ❌ | ✅ | ❌ | ✅ | ❌ |
+| `fetchAllLeverageTierList` | ✅ | ❌ | ✅ | ❌ | ✅ | ❌ |
 | `setMarginMode` | ✅ | ❌ | ✅ | ❌ | ⚠️ | ❌ |
 | `fetchFundingRateHistory` | ✅ | ❌ | ✅ | ❌ | ✅ | ❌ |
 | `fetchFundingInfo` | ✅ | ❌ | ✅ | ❌ | ✅ | ❌ |
@@ -85,7 +163,7 @@ class Exchange {
 | `fetchOpenConditionalOrders` | ⚠️ | ⚠️ | ✅ | ✅ | ✅ | ⚠️ |
 | `fetchOrderHistory` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `modifyOrder` | ✅ | ❌ | ✅ | ✅ | ✅ | ✅ |
-| `cancelAllOrders` | ✅ | ❌ | ✅ | ✅ | ✅ | ✅ |
+| `cancelAllOrders` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `createBatchOrders` | ✅ | ❌ | ✅ | ✅ | ✅ | ✅ |
 | `cancelBatchOrders` | ✅ | ❌ | ✅ | ✅ | ✅ | ✅ |
 | `modifyBatchOrders` | ✅ | ❌ | ✅ | ✅ | ✅ | ✅ |
@@ -481,7 +559,7 @@ console.log(btc?.filter.stepSize); // '0.001'
 ### `amountToPrecision()`
 
 ```typescript
-amountToPrecision(symbol: string, amount: number): number
+amountToPrecision(symbol: string, amount: number, rounding?: StepRounding): number
 ```
 
 Округляет количество до шага `stepSize` инструмента. Требует предварительного вызова `loadTradeSymbols()`.
@@ -490,12 +568,15 @@ amountToPrecision(symbol: string, amount: number): number
 |---|---|:---:|---|
 | `symbol` | `string` | да | Торговый символ, напр. `'BTCUSDT'` |
 | `amount` | `number` | да | Количество для округления |
+| `rounding` | `StepRounding` | нет | Направление: `'nearest'` (по умолчанию) — к ближайшему шагу, `'up'` — наименьшая точка сетки не ниже значения, `'down'` — наибольшая не выше. Значение, уже лежащее на сетке, не сдвигается. У бессрочного контракта OKX `'nearest'` и `'down'` отбрасывают остаток сверх целого контракта, `'up'` добирает до следующего |
 
 **Возврат:** `number` — округленное значение. Если символ не найден, возвращает исходное значение.
 
 ```typescript
 const qty = futures.amountToPrecision('BTCUSDT', 0.00156);
-// 0.001 (при stepSize = '0.001')
+// 0.002 (при stepSize = '0.001', к ближайшему шагу)
+const qtyDown = futures.amountToPrecision('BTCUSDT', 0.00156, 'down');
+// 0.001
 ```
 
 ---
@@ -503,7 +584,7 @@ const qty = futures.amountToPrecision('BTCUSDT', 0.00156);
 ### `priceToPrecision()`
 
 ```typescript
-priceToPrecision(symbol: string, price: number): number
+priceToPrecision(symbol: string, price: number, rounding?: StepRounding): number
 ```
 
 Округляет цену до шага `tickSize` инструмента. Требует предварительного вызова `loadTradeSymbols()`.
@@ -512,12 +593,15 @@ priceToPrecision(symbol: string, price: number): number
 |---|---|:---:|---|
 | `symbol` | `string` | да | Торговый символ |
 | `price` | `number` | да | Цена для округления |
+| `rounding` | `StepRounding` | нет | Направление: `'nearest'` (по умолчанию) — к ближайшему шагу, `'up'` — наименьшая точка сетки не ниже цены, `'down'` — наибольшая не выше. Цена, уже лежащая на сетке, не сдвигается |
 
 **Возврат:** `number` — округленная цена. Если символ не найден, возвращает исходное значение.
 
 ```typescript
 const price = futures.priceToPrecision('BTCUSDT', 50123.456789);
 // 50123.50 (при tickSize = '0.10')
+const sellLimit = futures.priceToPrecision('BTCUSDT', 50123.41, 'up');
+// 50123.50 — заявка на продажу не встанет ниже задуманной цены
 ```
 
 ---
@@ -1002,6 +1086,36 @@ setLeverage(leverage: number, symbol: string): Promise<SetLeverageResult>
 
 ---
 
+### `fetchLeverageTierList()` и `fetchAllLeverageTierList()`
+
+```typescript
+fetchLeverageTierList(symbol: string): Promise<LeverageTier[]>
+fetchAllLeverageTierList(): Promise<LeverageTierListBySymbol>
+```
+
+Читают ступени плеча одного инструмента или всех инструментов. Список отсортирован по
+возрастанию верхней границы размера позиции. `LeverageTierListBySymbol` — карта символов
+на списки ступеней. На споте оба метода отвечают отказом «Not supported».
+Доказательство: `src/types/exchange.ts:243`, `src/exchanges/BaseExchangeClient.ts:407`.
+
+| Поле ступени | Смысл |
+|---|---|
+| `maxLeverage` | Наибольшее плечо ступени |
+| `maxNotional` | Верхняя граница стоимости в котируемой валюте; у OKX — `null` |
+| `maxBaseAmount` | Верхняя граница количества в монетах базового актива у OKX; у Binance и Bybit — `null` |
+| `initialMarginRate` | Ставка начальной маржи из биржевых данных; при отсутствии — `null` |
+| `maintenanceMarginRate` | Ставка поддерживающей маржи из биржевых данных; при отсутствии — `null` |
+
+Доказательство структуры: `src/types/common.ts:297`. Ставки для показа человеку переводятся
+в проценты умножением на сто. Верхнюю границу OKX вызывающий переводит в стоимость по цене
+инструмента; перед чтением одного символа OKX нужно загрузить инструменты. Обход всех символов
+OKX загружает инструменты сам, если карта пуста, и запрашивает каждое семейство один раз
+в режиме общей маржи. Binance требует подписанного запроса, Bybit дочитывает страницы.
+Доказательство: `src/exchanges/OkxSwap.ts:304`, `src/http/BinanceFuturesHttpClient.ts:194`,
+`src/http/BybitHttpClient.ts:499`.
+
+---
+
 ### `setMarginMode()`
 
 ```typescript
@@ -1298,8 +1412,11 @@ cancelAllOrders(symbol: string): Promise<void>
 
 | Биржа | Futures | Spot |
 |---|:---:|:---:|
-| Binance | ✅ | ❌ |
+| Binance | ✅ | ✅ |
 | Bybit | ✅ | ✅ |
+
+Binance Spot (с 0.26.0) — один запрос `DELETE /api/v3/openOrders`: условные заявки спота живут в той
+же книге и снимаются вместе с обычными.
 
 У OKX условные заявки снимаются по видам, и отказ биржи по одному виду даёт исключение
 `OKX_CANCEL_ALL_INCOMPLETE` ПОСЛЕ того, как снято всё остальное, — с перечнем несделанного. См.

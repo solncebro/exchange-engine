@@ -1,5 +1,5 @@
 import type { ExchangeArgs, FetchPageWithLimitArgs, SetLeverageResult } from '../types/exchange';
-import type { ClosedPnl, FundingInfo, FundingRateHistory, MarkPrice, OpenInterest, Position } from '../types/common';
+import type { ClosedPnl, FundingInfo, FundingRateHistory, LeverageTier, LeverageTierListBySymbol, MarkPrice, OpenInterest, Position } from '../types/common';
 import { MarginModeEnum, PositionModeEnum } from '../types/common';
 import { ExchangeError } from '../errors/ExchangeError';
 import type { OkxIndexTickerRaw, OkxPositionRaw, OkxSetLeverageRaw } from '../normalizers/okxNormalizer';
@@ -10,6 +10,7 @@ import {
   normalizeOkxMarkPriceList,
   normalizeOkxOpenInterest,
   normalizeOkxPosition,
+  normalizeOkxPositionTierList,
   toOkxIndexInstId,
 } from '../normalizers/okxNormalizer';
 import { OKX_POSITION_IDX } from '../constants/mappings';
@@ -18,7 +19,10 @@ import {
   OKX_ISOLATED_MARGIN_UNAVAILABLE_ACCOUNT_LEVEL_LIST,
   OKX_LINEAR_SETTLE_CURRENCY_LIST,
   OKX_POSITIONS_HISTORY_PAGE_LIMIT,
+  OKX_POSITION_TIERS_REQUEST_INTERVAL_MS,
+  OKX_POSITION_TIERS_TD_MODE,
 } from '../constants/okx';
+import { sleep } from '../utils/sleep';
 import { OkxBaseClient } from './OkxBaseClient';
 
 const OKX_HEDGE_POSITION_SIDE_LIST: ReadonlyArray<'long' | 'short'> = ['long', 'short'];
@@ -295,6 +299,61 @@ class OkxSwap extends OkxBaseClient {
     }
 
     return { confirmedLeverage: resolveOkxConfirmedLeverage(outcomeList.map((outcome) => outcome.dataList ?? [])) };
+  }
+
+  async fetchLeverageTierList(symbol: string): Promise<LeverageTier[]> {
+    const instId = this.symbolMap.resolveInstId(symbol);
+    const rawList = await this.httpClient.fetchPositionTierList({
+      instType: this.instType,
+      tdMode: OKX_POSITION_TIERS_TD_MODE,
+      instFamily: toOkxIndexInstId(instId),
+    });
+
+    return normalizeOkxPositionTierList(rawList, this.resolveContractValue(symbol));
+  }
+
+  /**
+   * Ступени плеча заданы на СЕМЬЮ инструментов (`instFamily`), а не на отдельный символ, поэтому
+   * символы группируются по семье и каждая семья запрашивается один раз — иначе обход всей биржи
+   * повторял бы один и тот же запрос для каждого символа семьи впустую.
+   */
+  async fetchAllLeverageTierList(): Promise<LeverageTierListBySymbol> {
+    if (this.tradeSymbols.size === 0) {
+      await this.loadTradeSymbols();
+    }
+
+    const symbolListByFamily = new Map<string, string[]>();
+
+    for (const symbol of this.tradeSymbols.keys()) {
+      const family = toOkxIndexInstId(this.symbolMap.resolveInstId(symbol));
+      const symbolList = symbolListByFamily.get(family) ?? [];
+
+      symbolList.push(symbol);
+      symbolListByFamily.set(family, symbolList);
+    }
+
+    const tierListBySymbol: LeverageTierListBySymbol = new Map();
+    let isFirstFamily = true;
+
+    for (const [family, symbolList] of symbolListByFamily) {
+      if (!isFirstFamily) {
+        await sleep(OKX_POSITION_TIERS_REQUEST_INTERVAL_MS);
+      }
+
+      isFirstFamily = false;
+
+      const rawList = await this.httpClient.fetchPositionTierList({
+        instType: this.instType,
+        tdMode: OKX_POSITION_TIERS_TD_MODE,
+        instFamily: family,
+      });
+
+      for (const symbol of symbolList) {
+        tierListBySymbol.set(symbol, normalizeOkxPositionTierList(rawList, this.resolveContractValue(symbol)));
+      }
+    }
+
+    return tierListBySymbol;
   }
 
   async fetchPosition(symbol: string): Promise<Position> {

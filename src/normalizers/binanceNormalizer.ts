@@ -21,6 +21,8 @@ import type {
   Income,
   ClosedPnl,
   PriceLimitRisk,
+  LeverageTier,
+  LeverageTierListBySymbol,
 } from '../types/common';
 import { TradeSymbolTypeEnum, PositionSideEnum, MarginModeEnum, TimeInForceEnum, OrderSideEnum } from '../types/common';
 import type { OrderRateLimit } from '../types/exchange';
@@ -1226,4 +1228,40 @@ export function normalizeBinanceIncomeList(rawList: BinanceIncomeRaw[]): Income[
     timestamp: raw.time,
     info: { tranId: raw.tranId, tradeId: raw.tradeId, info: raw.info },
   }));
+}
+
+export interface BinanceLeverageBracketItemRaw {
+  bracket: number;
+  initialLeverage: number;
+  notionalCap: number;
+  notionalFloor: number;
+  maintMarginRatio: number;
+  cum: number;
+}
+
+export interface BinanceLeverageBracketRaw {
+  symbol: string;
+  brackets: BinanceLeverageBracketItemRaw[];
+}
+
+export function normalizeBinanceLeverageBracketList(
+  rawList: BinanceLeverageBracketRaw[],
+): LeverageTierListBySymbol {
+  const tierListBySymbol: LeverageTierListBySymbol = new Map();
+
+  for (const raw of rawList) {
+    const tierList: LeverageTier[] = [...raw.brackets]
+      .sort((a, b) => a.notionalCap - b.notionalCap)
+      .map((item) => ({
+        maxLeverage: item.initialLeverage,
+        maxNotional: item.notionalCap,
+        maxBaseAmount: null,
+        initialMarginRate: 1 / item.initialLeverage,
+        maintenanceMarginRate: item.maintMarginRatio,
+      }));
+
+    tierListBySymbol.set(raw.symbol, tierList);
+  }
+
+  return tierListBySymbol;
 }

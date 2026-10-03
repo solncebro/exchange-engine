@@ -1744,8 +1744,13 @@ class OkxPublicStream implements PublicStreamLike {
     }
 
     const intervalMs = OKX_KLINE_INTERVAL_MS[interval];
+    // Rows are handed out oldest first by their open time, whatever order the frame carries them in.
+    // The order of rows inside a multi-row candle frame is not confirmed live (okx-live-probe claim 7:
+    // no multi-row frame arrived in 60 s on 17.09.2026), and a newer candle handed out before an older
+    // one would let the older overwrite it in the consumer's buffer.
+    const orderedRowList = [...dataList].sort((left, right) => Number(left[0]) - Number(right[0]));
 
-    for (const row of dataList) {
+    for (const row of orderedRowList) {
       const kline = normalizeOkxKlineWebSocketMessage(row, this.isSwap, intervalMs);
 
       for (const handler of handlerSet) {

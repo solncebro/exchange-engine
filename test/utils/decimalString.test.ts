@@ -21,6 +21,19 @@ describe('multiplyDecimalStrings', () => {
   });
 });
 
+describe('convertCoinsToContracts rounding direction', () => {
+  it('rounds up to the next whole lot only when there is a remainder', () => {
+    expect(convertCoinsToContracts({ amount: 0.035, contractValue: '0.01', lotSize: '1', rounding: 'up' })).toBe('4');
+    expect(convertCoinsToContracts({ amount: 0.03, contractValue: '0.01', lotSize: '1', rounding: 'up' })).toBe('3');
+    expect(convertCoinsToContracts({ amount: 0.00123, contractValue: '0.001', lotSize: '0.1', rounding: 'up' })).toBe('1.3');
+  });
+
+  it('keeps the floor for nearest and down', () => {
+    expect(convertCoinsToContracts({ amount: 0.035, contractValue: '0.01', lotSize: '1', rounding: 'nearest' })).toBe('3');
+    expect(convertCoinsToContracts({ amount: 0.035, contractValue: '0.01', lotSize: '1', rounding: 'down' })).toBe('3');
+  });
+});
+
 describe('convertCoinsToContracts', () => {
   it('converts an amount to a whole number of contracts', () => {
     expect(convertCoinsToContracts({ amount: 0.035, contractValue: '0.01', lotSize: '1' })).toBe('3');

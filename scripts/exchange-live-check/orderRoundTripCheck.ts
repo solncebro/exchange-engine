@@ -1,4 +1,4 @@
-import { ExchangeNameEnum, OrderSideEnum, OrderTypeEnum, PositionModeEnum, PositionSideEnum, TimeInForceEnum } from '../../src/types/common';
+import { OrderSideEnum, OrderTypeEnum, PositionModeEnum, PositionSideEnum, TimeInForceEnum } from '../../src/types/common';
 import type { CreateOrderWebSocketArgs } from '../../src/types/exchange';
 import { describeError } from '../live-support/liveError';
 import { printNote } from '../live-support/liveOutput';
@@ -31,13 +31,9 @@ function resolveOrderAmount(context: LiveCheckContext, lastPrice: number): numbe
 }
 
 async function checkOrderRoundTrip(context: LiveCheckContext): Promise<LiveCheckOutcome> {
-  if (context.exchangeName === ExchangeNameEnum.Bybit) {
-    return {
-      status: 'skipped',
-      fact: 'заявки на Bybit не ставим: демо-ключ привязан к списку адресов, приватный вызов отвечает 10010',
-    };
-  }
-
+  // Bybit was skipped here with a hard-coded "the key answers 10010" — without asking the exchange.
+  // On 17.09.2026 the same run read the Bybit demo balance and position mode with that key, so the
+  // reason was stale; a real 10010 now surfaces as a failure with the exchange's own words.
   const client = context.exchange.futures;
   const symbol = context.settings.futuresSymbol;
 

@@ -22,4 +22,17 @@ describe('sleep', () => {
     await jest.advanceTimersByTimeAsync(1);
     expect(isResolved).toBe(true);
   });
+
+  it('keeps the process alive while it is awaited — an unref-ed pause let the bot exit silently mid-start', async () => {
+    jest.useRealTimers();
+
+    const setTimeoutSpy = jest.spyOn(global, 'setTimeout');
+    const pause = sleep(5);
+    const timer = setTimeoutSpy.mock.results[0].value as NodeJS.Timeout;
+
+    expect(timer.hasRef()).toBe(true);
+
+    await pause;
+    setTimeoutSpy.mockRestore();
+  });
 });

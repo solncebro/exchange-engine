@@ -114,5 +114,9 @@ order, openOrders, allOrders, account, listenKey
 
 ## BinanceSpotHttpClient
 
-Только переопределяет `endpoints` (все методы из base). Нет дополнительных методов.
+Переопределяет `endpoints`; свой метод один — `cancelAllOrders(symbol)` → `DELETE /api/v3/openOrders` (0.26.0, снимает и заявки связок).
+
+## BinanceSubAccountHttpClient (0.26.0, `extends BinanceSpotHttpClient`)
+
+Подсчёты главного счёта на том же адресе api.binance.com (подпись, пересдача при −1021, общий на адрес сторож — от предка). Методы: `fetchSubAccountListPage(page, limit)` → `GET /sapi/v1/sub-account/list`; `createUniversalTransfer(params)` → `POST /sapi/v1/sub-account/universalTransfer` (параметры в строке запроса, вес 360 на пользователя, право ключа «internal transfer»); `fetchUniversalTransferHistory(params)` → `GET` того же пути по `clientTranId` (+ `fromEmail` ИЛИ `toEmail`, оба сразу биржа не принимает; окно 7 дней); `fetchSubAccountSpotAssets(email)` → `GET /sapi/v4/sub-account/assets` (вес 60); `fetchSubAccountUsdtFuturesAccount(email)` → `GET /sapi/v2/sub-account/futures/account?futuresType=1`. Ответы `/sapi` несут свои заголовки веса (не `x-mbx-used-weight-1m`), сторож запросов их не считает.
 

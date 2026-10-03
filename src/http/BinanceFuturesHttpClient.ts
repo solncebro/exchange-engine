@@ -1,5 +1,6 @@
 import type {
   BinancePositionRiskRaw,
+  BinanceLeverageBracketRaw,
   BinanceFundingRateHistoryRaw,
   BinanceFundingInfoRaw,
   BinanceOrderResponseRaw,
@@ -188,6 +189,10 @@ class BinanceFuturesHttpClient extends BinanceBaseHttpClient {
 
   async fetchPositionRisk(symbol?: string): Promise<BinancePositionRiskRaw[]> {
     return this.signedGet<BinancePositionRiskRaw[]>('/fapi/v3/positionRisk', this.buildOptionalSymbolParams(symbol));
+  }
+
+  async fetchLeverageBracket(symbol?: string): Promise<BinanceLeverageBracketRaw[]> {
+    return this.signedGet<BinanceLeverageBracketRaw[]>('/fapi/v1/leverageBracket', this.buildOptionalSymbolParams(symbol));
   }
 
   async fetchCommissionRate(symbol?: string): Promise<BinanceCommissionRateRaw> {

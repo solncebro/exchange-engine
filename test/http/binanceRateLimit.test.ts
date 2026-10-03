@@ -38,7 +38,8 @@ describe('parseBinanceBanUntilMs', () => {
   it('reads the deadline the exchange names in the -1003 message', () => {
     const body = {
       code: -1003,
-      msg: 'Way too many requests; current limit is 2400 request weight per 1 MINUTE. Please use WebSocket Streams for live updates to avoid polling the API. IP banned until 1757000480000. Please use WebSocket Streams for live updates.',
+      // Verbatim live 418 body, 17.09.2026 (production fapi) — only the moment differs.
+      msg: 'Way too many requests; IP(51.79.167.222) banned until 1757000480000. Please use the websocket for live updates to avoid bans.',
     };
 
     expect(parseBinanceBanUntilMs(body)).toBe(1757000480000);
@@ -106,6 +107,41 @@ describe('observeRateLimitResponse', () => {
     const observation = observeRateLimitResponse({ status: 429, headers: { 'retry-after': '5' }, body: {}, nowMs: NOW_MS });
 
     expect(observation.banUntilMs).toBe(NOW_MS + 5000);
+  });
+
+  // Live answers captured 17.09.2026 — production fapi (weight) and the demo account (order count).
+  it('closes the door on the live weight 429 for the retry-after it names', () => {
+    const observation = observeRateLimitResponse({
+      status: 429,
+      headers: { 'x-mbx-used-weight-1m': '2440', 'retry-after': '11' },
+      body: { code: -1003, msg: 'Too many requests; current limit of IP(51.79.167.222) is 2400 requests per minute. Please use the websocket for live updates to avoid polling the API.' },
+      nowMs: NOW_MS,
+    });
+
+    expect(observation.banUntilMs).toBe(NOW_MS + 11_000);
+  });
+
+  it('does NOT close the address on the live order-count 429 (-1015): that limit belongs to the account', () => {
+    const observation = observeRateLimitResponse({
+      status: 429,
+      headers: { 'x-mbx-used-weight-1m': '-1', 'x-mbx-order-count-10s': '301', 'x-mbx-order-count-1m': '0' },
+      body: { code: -1015, msg: 'Too many new orders; current limit is 300 orders per TEN_SECONDS.' },
+      nowMs: NOW_MS,
+    });
+
+    expect(observation.banUntilMs).toBeUndefined();
+  });
+
+  it('reads the ban deadline from the live 418 answer', () => {
+    const bannedUntilMs = 1789621189740;
+    const observation = observeRateLimitResponse({
+      status: 418,
+      headers: { 'x-mbx-used-weight-1m': '2880', 'retry-after': '120' },
+      body: { code: -1003, msg: `Way too many requests; IP(51.79.167.222) banned until ${bannedUntilMs}. Please use the websocket for live updates to avoid bans.` },
+      nowMs: bannedUntilMs - 120_000,
+    });
+
+    expect(observation.banUntilMs).toBe(bannedUntilMs);
   });
 
   it('falls back to a default wait when the refusal names no deadline at all', () => {

@@ -17,6 +17,7 @@ import type {
   OkxAlgoOrderRaw,
   OkxBillRaw,
   OkxOrderResultRaw,
+  OkxPositionTierRaw,
 } from '../../src/normalizers/okxNormalizer';
 
 export const OKX_RAW_INSTRUMENT_SPOT: OkxInstrumentRaw = {
@@ -1147,3 +1148,10 @@ export const OKX_RAW_ORDER_RESULT_REJECTED: OkxOrderResultRaw = {
   sCode: '51008',
   sMsg: 'Order failed. Insufficient balance',
 };
+
+export const OKX_RAW_POSITION_TIER_LIST: OkxPositionTierRaw[] = [
+  { baseMaxLoan: '', imr: '0.01', instFamily: 'BTC-USDT', instId: '', maxLever: '100', maxSz: '1000', minSz: '0', mmr: '0.004', optMgnFactor: '0', quoteMaxLoan: '', tier: '1', uly: 'BTC-USDT' },
+  { baseMaxLoan: '', imr: '0.015', instFamily: 'BTC-USDT', instId: '', maxLever: '66.66', maxSz: '5000', minSz: '1000.01', mmr: '0.005', optMgnFactor: '0', quoteMaxLoan: '', tier: '2', uly: 'BTC-USDT' },
+  { baseMaxLoan: '', imr: '0.02', instFamily: 'BTC-USDT', instId: '', maxLever: '50', maxSz: '20000', minSz: '5000.01', mmr: '0.0075', optMgnFactor: '0', quoteMaxLoan: '', tier: '3', uly: 'BTC-USDT' },
+  { baseMaxLoan: '', imr: '0.025', instFamily: 'BTC-USDT', instId: '', maxLever: '40', maxSz: '40000', minSz: '20000.01', mmr: '0.0125', optMgnFactor: '0', quoteMaxLoan: '', tier: '4', uly: 'BTC-USDT' },
+];

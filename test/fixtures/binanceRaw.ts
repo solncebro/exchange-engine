@@ -15,6 +15,7 @@ import type {
   BinanceOpenInterestRaw,
   BinanceCommissionRateRaw,
   BinanceIncomeRaw,
+  BinanceLeverageBracketRaw,
 } from '../../src/normalizers/binanceNormalizer';
 
 export const BINANCE_RAW_EXCHANGE_INFO: BinanceExchangeInfoRaw = {
@@ -380,4 +381,20 @@ export const BINANCE_RAW_MODIFY_BATCH_RESPONSE_MIXED: Array<Record<string, unkno
     updateTime: 1700000000000,
   },
   { code: -2022, msg: 'ReduceOnly Order is rejected.' },
+];
+
+export const BINANCE_RAW_LEVERAGE_BRACKET_LIST: BinanceLeverageBracketRaw[] = [
+  {
+    symbol: 'AVAUSDT',
+    brackets: [
+      { bracket: 1, initialLeverage: 25, notionalCap: 5000, notionalFloor: 0, maintMarginRatio: 0.02, cum: 0.0 },
+      { bracket: 2, initialLeverage: 20, notionalCap: 10000, notionalFloor: 5000, maintMarginRatio: 0.025, cum: 25.0 },
+      { bracket: 3, initialLeverage: 10, notionalCap: 20000, notionalFloor: 10000, maintMarginRatio: 0.05, cum: 275.0 },
+      { bracket: 4, initialLeverage: 5, notionalCap: 50000, notionalFloor: 20000, maintMarginRatio: 0.1, cum: 1275.0 },
+      { bracket: 5, initialLeverage: 4, notionalCap: 100000, notionalFloor: 50000, maintMarginRatio: 0.125, cum: 2525.0 },
+      { bracket: 6, initialLeverage: 3, notionalCap: 250000, notionalFloor: 100000, maintMarginRatio: 0.1667, cum: 6695.0 },
+      { bracket: 7, initialLeverage: 2, notionalCap: 2500000, notionalFloor: 250000, maintMarginRatio: 0.25, cum: 27520.0 },
+      { bracket: 8, initialLeverage: 1, notionalCap: 5000000, notionalFloor: 2500000, maintMarginRatio: 0.5, cum: 652520.0 },
+    ],
+  },
 ];

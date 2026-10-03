@@ -4,6 +4,8 @@ import { createMockLogger } from '../fixtures/mockLogger';
 import { createMockAxiosInstance } from '../fixtures/mockAxios';
 
 jest.mock('axios');
+// Пауза между страницами журнала операций в тестах не нужна — листание проверяется по запросам.
+jest.mock('../../src/utils/sleep', () => ({ sleep: jest.fn().mockResolvedValue(undefined) }));
 const mockedAxios = axios as jest.Mocked<typeof axios>;
 
 describe('BybitHttpClient', () => {
@@ -346,6 +348,51 @@ describe('BybitHttpClient', () => {
     });
   });
 
+  describe('fetchAllOpenOrders', () => {
+    it('follows nextPageCursor across three one-order pages until an empty page ends the list', async () => {
+      mockInstance.get
+        .mockResolvedValueOnce({ data: { result: { list: [{ symbol: '1' }], nextPageCursor: 'c1' } } })
+        .mockResolvedValueOnce({ data: { result: { list: [{ symbol: '2' }], nextPageCursor: 'c2' } } })
+        .mockResolvedValueOnce({ data: { result: { list: [{ symbol: '3' }], nextPageCursor: 'c3' } } })
+        .mockResolvedValueOnce({ data: { result: { list: [], nextPageCursor: '' } } });
+
+      const result = await client.fetchAllOpenOrders('linear', { settleCoin: 'USDT' });
+
+      expect(result.map((row: any) => row.symbol)).toEqual(['1', '2', '3']);
+      expect(mockInstance.get).toHaveBeenCalledTimes(4);
+      expect(mockInstance.get.mock.calls.map(([, options]) => options.params.cursor)).toEqual([undefined, 'c1', 'c2', 'c3']);
+      expect(mockInstance.get.mock.calls.every(([, options]) => options.params.limit === 50)).toBe(true);
+    });
+
+    // Живой ответ 18.09.2026: непустой курсор стоит и на последней ЗАПОЛНЕННОЙ странице —
+    // конец узнаётся по пустому списку следующей страницы, а не по одному курсору.
+    it('stops on a non-empty page whose cursor is followed by an empty page', async () => {
+      mockInstance.get
+        .mockResolvedValueOnce({ data: { result: { list: [{ symbol: '1' }, { symbol: '2' }, { symbol: '3' }], nextPageCursor: 'c1' } } })
+        .mockResolvedValueOnce({ data: { result: { list: [], nextPageCursor: '' } } });
+
+      const result = await client.fetchAllOpenOrders('linear', { settleCoin: 'USDT' });
+
+      expect(result.map((row: any) => row.symbol)).toEqual(['1', '2', '3']);
+      expect(mockInstance.get).toHaveBeenCalledTimes(2);
+    });
+
+    it('stops on a null cursor without a second request', async () => {
+      mockInstance.get.mockResolvedValueOnce({ data: { result: { list: [{ symbol: '1' }], nextPageCursor: null } } });
+
+      const result = await client.fetchAllOpenOrders('linear', { settleCoin: 'USDT' });
+
+      expect(result.map((row: any) => row.symbol)).toEqual(['1']);
+      expect(mockInstance.get).toHaveBeenCalledTimes(1);
+    });
+
+    it('throws instead of paging on when the exchange repeats the same cursor', async () => {
+      mockInstance.get.mockResolvedValue({ data: { result: { list: [{ symbol: 'x' }], nextPageCursor: 'same' } } });
+
+      await expect(client.fetchAllOpenOrders('linear', { settleCoin: 'USDT' })).rejects.toThrow('same page cursor twice');
+    });
+  });
+
   describe('getOrderHistory', () => {
     it('calls GET /v5/order/history with category', async () => {
       await client.getOrderHistory('linear');
@@ -604,8 +651,32 @@ describe('BybitHttpClient', () => {
       expect(mockInstance.get.mock.calls.every(([, options]) => options.params.startTime === 5 && options.params.endTime === 9)).toBe(true);
     });
 
+    // 17.09.2026: the live exchange ends the log with nextPageCursor: null. The loop did not stop on
+    // it, sent `cursor=null` 73 times in two seconds and got 10006 — every funding read and report failed.
+    it('stops on a null cursor — the way the exchange really ends the log', async () => {
+      mockInstance.get
+        .mockResolvedValueOnce({ data: { result: { list: [{ symbol: '1' }], nextPageCursor: 'c1' } } })
+        .mockResolvedValueOnce({ data: { result: { list: [], nextPageCursor: null } } })
+        .mockResolvedValue({ data: { result: { list: [{ symbol: 'must not be read' }], nextPageCursor: null } } });
+
+      const result = await client.fetchAllTransactionLog({ category: 'linear', limit: 50 });
+
+      expect(result.map((row) => row.symbol)).toEqual(['1']);
+      expect(mockInstance.get).toHaveBeenCalledTimes(2);
+      expect(mockInstance.get.mock.calls.map(([, options]) => options.params.cursor)).toEqual([undefined, 'c1']);
+    });
+
+    it('throws instead of paging on when the exchange repeats the same cursor', async () => {
+      mockInstance.get.mockResolvedValue({ data: { result: { list: [{ symbol: 'x' }], nextPageCursor: 'same' } } });
+
+      await expect(client.fetchAllTransactionLog({ category: 'linear' })).rejects.toThrow('same page cursor twice');
+      expect(mockInstance.get).toHaveBeenCalledTimes(2);
+    });
+
     it('throws rather than returning a partial log when the page count limit is reached', async () => {
-      mockInstance.get.mockResolvedValue({ data: { result: { list: [{ symbol: 'x' }], nextPageCursor: 'more' } } });
+      let pageNumber = 0;
+
+      mockInstance.get.mockImplementation(async () => ({ data: { result: { list: [{ symbol: 'x' }], nextPageCursor: `c${++pageNumber}` } } }));
 
       await expect(client.fetchAllTransactionLog({ category: 'linear' })).rejects.toThrow('page count limit');
     });

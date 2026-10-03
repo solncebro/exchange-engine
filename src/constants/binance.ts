@@ -72,3 +72,20 @@ export const BINANCE_CONDITIONAL_ORDER_REGISTRY_TTL_MS = 24 * 60 * 60 * 1000;
 export const BINANCE_FUTURES_CREATE_BATCH_CHUNK_SIZE = 5;
 export const BINANCE_FUTURES_MODIFY_BATCH_CHUNK_SIZE = 5;
 export const BINANCE_FUTURES_CANCEL_BATCH_CHUNK_SIZE = 10;
+
+// Подсчёты главного счёта (раздел «VIP and institutional sub-account» документации):
+// https://developers.binance.com/en/docs/catalog/vip-and-institutional-sub-account/api/rest-api/asset-management
+// Живут только на боевом адресе api.binance.com: демо-режим обслуживает лишь пути /api
+// (https://developers.binance.com/docs/binance-spot-api-docs/demo-mode/general-info), а эти — /sapi.
+export const BINANCE_SUB_ACCOUNT_LIST_PATH = '/sapi/v1/sub-account/list';
+// Один путь на перевод (POST) и на историю переводов (GET). Вес перевода — 360 на пользователя.
+export const BINANCE_SUB_ACCOUNT_UNIVERSAL_TRANSFER_PATH = '/sapi/v1/sub-account/universalTransfer';
+/** История переводов фьючерсных кошельков подсчётов: туда (а не в историю универсальных) Binance пишет
+ *  универсальный перевод USDT_FUTURE → USDT_FUTURE (живая проверка 26.09.2026). */
+export const BINANCE_SUB_ACCOUNT_FUTURES_INTERNAL_TRANSFER_PATH = '/sapi/v1/sub-account/futures/internalTransfer';
+// Вес 60 на пользователя: читать по надобности, а не в цикле.
+export const BINANCE_SUB_ACCOUNT_SPOT_ASSETS_PATH = '/sapi/v4/sub-account/assets';
+export const BINANCE_SUB_ACCOUNT_FUTURES_ACCOUNT_PATH = '/sapi/v2/sub-account/futures/account';
+export const BINANCE_SUB_ACCOUNT_USDT_FUTURES_TYPE = 1;
+export const BINANCE_SUB_ACCOUNT_LIST_PAGE_LIMIT = 200;
+export const BINANCE_SUB_ACCOUNT_LIST_MAX_PAGE_COUNT = 50;

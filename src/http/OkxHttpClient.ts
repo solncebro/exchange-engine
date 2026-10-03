@@ -34,6 +34,7 @@ import type {
   OkxPositionHistoryRaw,
   OkxPositionModeRaw,
   OkxPositionRaw,
+  OkxPositionTierRaw,
   OkxPublicTradeRaw,
   OkxSetLeverageRaw,
   OkxTickerRaw,
@@ -63,6 +64,7 @@ import type {
   FetchOkxPendingAlgoOrdersArgs,
   FetchOkxPendingOrdersArgs,
   FetchOkxPositionsArgs,
+  FetchOkxPositionTiersArgs,
   FetchOkxPositionsHistoryArgs,
   FetchOkxTradeFeeArgs,
   OkxApiResponse,
@@ -377,6 +379,14 @@ class OkxHttpClient extends BaseHttpClient {
     };
 
     return this.publicGet<OkxFundingRateHistoryRaw>('/api/v5/public/funding-rate-history', params);
+  }
+
+  async fetchPositionTierList(args: FetchOkxPositionTiersArgs): Promise<OkxPositionTierRaw[]> {
+    return this.publicGet<OkxPositionTierRaw>('/api/v5/public/position-tiers', {
+      instType: args.instType,
+      tdMode: args.tdMode,
+      instFamily: args.instFamily,
+    });
   }
 
   async fetchBalance(): Promise<OkxBalanceRaw[]> {

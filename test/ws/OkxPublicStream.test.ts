@@ -411,6 +411,24 @@ describe('OkxPublicStream', () => {
   });
 
   describe('klines', () => {
+    it('hands a multi-row candle frame out oldest first, whatever order the rows arrive in', async () => {
+      const stream = createStream();
+      const handler = jest.fn();
+      stream.subscribeKlines('BTCUSDT', '1m', handler);
+
+      await flushMicrotasks();
+
+      const olderRow = ['1789621020000', ...MOCK_KLINE_ROW.slice(1)];
+      const newerRow = ['1789621080000', ...MOCK_KLINE_ROW.slice(1)];
+
+      capturedConnectionList[0].onMessage({
+        arg: { channel: 'candle1m', instId: 'BTC-USDT' },
+        data: [newerRow, olderRow],
+      });
+
+      expect(handler.mock.calls.map(([, kline]) => kline.openTimestamp)).toEqual([1789621020000, 1789621080000]);
+    });
+
     it('normalizes a candle1m frame into a Kline with isClosed', async () => {
       const stream = createStream();
       const handler = jest.fn();

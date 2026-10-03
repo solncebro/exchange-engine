@@ -13,6 +13,7 @@ import { balanceCheck } from './exchange-live-check/balanceCheck';
 import { feeRateCheck } from './exchange-live-check/feeRateCheck';
 import { futuresTradeSymbolCheck, spotTradeSymbolCheck } from './exchange-live-check/instrumentChecks';
 import { klineCheck } from './exchange-live-check/klineCheck';
+import { leverageTierCheck } from './exchange-live-check/leverageTierCheck';
 import type { ExchangeCheckReport, LiveCheck, LiveCheckContext, LiveCheckReportEntry } from './exchange-live-check/liveCheck.types';
 import { markPriceCheck } from './exchange-live-check/markPriceCheck';
 import { orderBookCheck } from './exchange-live-check/orderBookCheck';
@@ -41,6 +42,7 @@ const CHECK_LIST: LiveCheck[] = [
   klineCheck,
   orderBookCheck,
   markPriceCheck,
+  leverageTierCheck,
   balanceCheck,
   feeRateCheck,
   positionModeCheck,

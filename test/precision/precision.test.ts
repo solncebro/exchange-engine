@@ -113,3 +113,80 @@ describe('priceToPrecision', () => {
     expect(priceToPrecision(symbol, 3456.789)).toBe(3456.79);
   });
 });
+
+describe('step rounding direction', () => {
+  const withTick = (tickSize: string) => ({
+    ...BTCUSDT_TRADE_SYMBOL,
+    filter: { ...BTCUSDT_TRADE_SYMBOL.filter, tickSize },
+  });
+  const withStep = (stepSize: string) => ({
+    ...BTCUSDT_TRADE_SYMBOL,
+    filter: { ...BTCUSDT_TRADE_SYMBOL.filter, stepSize },
+  });
+
+  it('prices: nearest, up and down differ for an off-grid value', () => {
+    const symbol = withTick('0.0001');
+
+    expect(priceToPrecision(symbol, 2.96151, 'nearest')).toBeCloseTo(2.9615, 9);
+    expect(priceToPrecision(symbol, 2.96151, 'up')).toBeCloseTo(2.9616, 9);
+    expect(priceToPrecision(symbol, 2.96151, 'down')).toBeCloseTo(2.9615, 9);
+    expect(priceToPrecision(symbol, 2.96158, 'down')).toBeCloseTo(2.9615, 9);
+    expect(priceToPrecision(symbol, 2.96158)).toBeCloseTo(2.9616, 9);
+  });
+
+  it('amounts: nearest, up and down differ for an off-grid value', () => {
+    const symbol = withStep('0.01');
+
+    expect(priceToPrecision(withTick('0.01'), 1.234, 'up')).toBeCloseTo(1.24, 9);
+    expect(amountToPrecision(symbol, 1.231, 'nearest')).toBeCloseTo(1.23, 9);
+    expect(amountToPrecision(symbol, 1.231, 'up')).toBeCloseTo(1.24, 9);
+    expect(amountToPrecision(symbol, 1.239, 'down')).toBeCloseTo(1.23, 9);
+  });
+
+  it('keeps a value already on the grid in every mode', () => {
+    const symbol = withTick('0.0001');
+
+    expect(priceToPrecision(symbol, 2.9616, 'up')).toBeCloseTo(2.9616, 9);
+    expect(priceToPrecision(symbol, 2.9616, 'down')).toBeCloseTo(2.9616, 9);
+    expect(priceToPrecision(symbol, 0.3, 'up')).toBeCloseTo(0.3, 9);
+    expect(priceToPrecision(withTick('0.1'), 0.30000000000000004, 'down')).toBeCloseTo(0.3, 9);
+    expect(priceToPrecision(withTick('0.1'), 0.3 + 1e-13, 'up')).toBeCloseTo(0.3, 9);
+  });
+
+  it('handles a sub-cent tick', () => {
+    const symbol = withTick('0.0000001');
+
+    expect(priceToPrecision(symbol, 0.00001234, 'up')).toBeCloseTo(0.0000124, 12);
+    expect(priceToPrecision(symbol, 0.00001234, 'down')).toBeCloseTo(0.0000123, 12);
+    expect(priceToPrecision(symbol, 0.0000123, 'up')).toBeCloseTo(0.0000123, 12);
+  });
+
+  it('keeps the zero-step fallbacks whatever the direction', () => {
+    expect(priceToPrecision(MISSING_FILTER_TRADE_SYMBOL, 1.123456789012, 'up')).toBe(1.12345679);
+    expect(amountToPrecision(MISSING_FILTER_TRADE_SYMBOL, 9.7, 'up')).toBe(9);
+  });
+});
+
+describe('on-grid guard at large step counts', () => {
+  const withTick = (tickSize: string) => ({
+    ...BTCUSDT_TRADE_SYMBOL,
+    filter: { ...BTCUSDT_TRADE_SYMBOL.filter, tickSize },
+  });
+
+  it('keeps on-grid values above 2^23 steps exact in both directions', () => {
+    expect(priceToPrecision(withTick('0.01'), 111848.68, 'down')).toBe(111848.68);
+    expect(priceToPrecision(withTick('0.01'), 111848.68, 'up')).toBe(111848.68);
+    expect(priceToPrecision(withTick('0.000001'), 10.238625, 'up')).toBe(10.238625);
+    expect(priceToPrecision(withTick('0.000001'), 10.238625, 'down')).toBe(10.238625);
+    expect(priceToPrecision(withTick('0.0001'), 1022.6148, 'down')).toBe(1022.6148);
+    expect(priceToPrecision(withTick('0.0001'), 1022.6148, 'up')).toBe(1022.6148);
+    expect(priceToPrecision(withTick('0.1'), 987654321.3, 'up')).toBe(987654321.3);
+    expect(priceToPrecision(withTick('0.1'), 987654321.3, 'down')).toBe(987654321.3);
+  });
+
+  it('still rounds a value just off the grid in the right direction', () => {
+    expect(priceToPrecision(withTick('0.01'), 111848.681, 'up')).toBe(111848.69);
+    expect(priceToPrecision(withTick('0.01'), 111848.681, 'down')).toBe(111848.68);
+    expect(priceToPrecision(withTick('0.01'), 111848.689, 'down')).toBe(111848.68);
+  });
+});

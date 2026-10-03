@@ -10,6 +10,8 @@
 | BinanceFuturesTwoServiceFailure.test.ts | отказ ОБЕИХ служб заявок: сбой связи условной службы выходит наружу своей причиной и попадает в журнал; обе «заявки нет» — прежний ответ обычной книги (0.25.0) |
 | BybitOrderRateLimit.test.ts | `getOrderRateLimit` после ОДИНОЧНОЙ постановки отдаёт предел из заголовка биржи (`bybit-exchange-header`); без заголовка — документированная константа; спот и linear имеют свои (0.25.0) |
 
+- `BinanceSubAccount.test.ts`, `BybitSubAccount.test.ts` — подсчёты: сборка запросов, подпись, нормализация по образцам из документации (`test/fixtures/binanceSubAccountRaw.ts`, `bybitSubAccountRaw.ts`), проверки до сети, передача кодов отказа биржи.
+
 ## Тест-файлы HTTP (дополнительно)
 
 | Файл | Покрытие |

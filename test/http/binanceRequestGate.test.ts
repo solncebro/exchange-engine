@@ -9,7 +9,7 @@ const BASE_URL = 'https://fapi.binance.com';
 const OTHER_URL = 'https://fapi.binance.com/fapi/v1';
 
 function banBody(untilMs: number): Record<string, unknown> {
-  return { code: -1003, msg: `Way too many requests; IP banned until ${untilMs}.` };
+  return { code: -1003, msg: `Way too many requests; IP(51.79.167.222) banned until ${untilMs}. Please use the websocket for live updates to avoid bans.` };
 }
 
 describe('BinanceRequestGate', () => {

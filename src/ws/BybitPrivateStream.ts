@@ -21,6 +21,8 @@ class BybitPrivateStream {
   private readonly onNotify?: (message: string) => void | Promise<void>;
   private readonly onMessageHandler: (event: Record<string, unknown>) => void;
   private readonly topicList: string[];
+  private readonly onConnectionLost?: () => void;
+  private readonly onConnectionRestored?: () => void;
 
   constructor(args: BybitPrivateStreamArgs) {
     this.logger = args.logger;
@@ -31,6 +33,8 @@ class BybitPrivateStream {
     this.onNotify = args.onNotify;
     this.onMessageHandler = args.onMessage;
     this.topicList = args.topicList ?? [];
+    this.onConnectionLost = args.onConnectionLost;
+    this.onConnectionRestored = args.onConnectionRestored;
   }
 
   connect(): void {
@@ -46,6 +50,8 @@ class BybitPrivateStream {
       onMessage: (message) => this.handleMessage(message),
       onOpen: (context) => this.authenticate(context),
       onNotify: this.onNotify,
+      onClose: () => this.onConnectionLost?.(),
+      onReconnectSuccess: () => this.onConnectionRestored?.(),
       heartbeat: BYBIT_HEARTBEAT_CONFIG,
       configuration: {
         pingInterval: BYBIT_PING_INTERVAL,

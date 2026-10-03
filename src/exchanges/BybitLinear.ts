@@ -1,5 +1,5 @@
 import type { CreateOrderWebSocketArgs, ExchangeArgs, FetchPageWithLimitArgs, SetLeverageResult } from '../types/exchange';
-import type { Position, Order, FundingRateHistory, FundingInfo, MarkPrice, OpenInterest } from '../types/common';
+import type { Position, Order, FundingRateHistory, FundingInfo, MarkPrice, OpenInterest, LeverageTier, LeverageTierListBySymbol } from '../types/common';
 import { MarginModeEnum, OrderSideEnum, OrderTypeEnum, PositionModeEnum, TimeInForceEnum } from '../types/common';
 import { ExchangeError } from '../errors/ExchangeError';
 import type { BybitPositionIdx } from './bybitTrailingStopId';
@@ -14,6 +14,7 @@ import {
   normalizeBybitFundingInfoList,
   normalizeBybitMarkPriceList,
   normalizeBybitOpenInterest,
+  normalizeBybitRiskLimitList,
 } from '../normalizers/bybitNormalizer';
 import {
   BYBIT_PUBLIC_LINEAR_WEBSOCKET_URL,
@@ -29,6 +30,8 @@ const BYBIT_TRAILING_STOP_TPSL_MODE = 'Full';
 /** Как Bybit называет режимы маржи счёта; «обычный» у него и есть кросс-маржа. */
 const BYBIT_ISOLATED_MARGIN_MODE = 'ISOLATED_MARGIN';
 const BYBIT_CROSS_MARGIN_MODE = 'REGULAR_MARGIN';
+// The settle coin of the linear USDT contracts whose position mode is switched as one.
+const BYBIT_POSITION_MODE_SETTLE_COIN = 'USDT';
 
 interface BuildBybitTrailingStopOrderArgs {
   symbol: string;
@@ -335,6 +338,18 @@ class BybitLinear extends BybitBaseClient {
     return { confirmedLeverage: leverage };
   }
 
+  async fetchLeverageTierList(symbol: string): Promise<LeverageTier[]> {
+    const rawList = await this.httpClient.fetchRiskLimitList('linear', symbol);
+
+    return normalizeBybitRiskLimitList(rawList).get(symbol) ?? [];
+  }
+
+  async fetchAllLeverageTierList(): Promise<LeverageTierListBySymbol> {
+    const rawList = await this.httpClient.fetchRiskLimitList('linear');
+
+    return normalizeBybitRiskLimitList(rawList);
+  }
+
   /**
    * На едином счёте Bybit режим маржи — свойство ВСЕГО счёта, а не отдельного символа
    * (проверено живым чтением 08.08.2026). Раньше метод просто писал строчку в журнал: у
@@ -385,7 +400,8 @@ class BybitLinear extends BybitBaseClient {
     const bybitMode = mode === PositionModeEnum.Hedge ? 3 : 0;
 
     try {
-      await this.httpClient.setPositionMode(this.category, bybitMode);
+      // Bybit needs a symbol or a coin: the coin switches every USDT contract without a position or an open order.
+      await this.httpClient.setPositionMode(this.category, bybitMode, BYBIT_POSITION_MODE_SETTLE_COIN);
     } catch (error) {
       if (error instanceof ExchangeError && error.code === 110025) {
         return;

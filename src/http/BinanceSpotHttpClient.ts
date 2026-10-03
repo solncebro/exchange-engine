@@ -23,4 +23,9 @@ export class BinanceSpotHttpClient extends BinanceBaseHttpClient {
   protected override get errorExchangeLabel(): string {
     return 'binance';
   }
+
+  /** Снимает и заявки из связок (OCO и подобные): так устроен сам вход биржи. */
+  async cancelAllOrders(symbol: string): Promise<Array<Record<string, unknown>>> {
+    return this.signedDelete<Array<Record<string, unknown>>>(this.endpoints.openOrders, { symbol });
+  }
 }

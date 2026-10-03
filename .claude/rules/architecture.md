@@ -112,11 +112,19 @@ Exchange (фабрика)
 const exchange = new Exchange(ExchangeNameEnum.Binance, { config, logger });
 exchange.futures  // → BinanceFutures (ExchangeClient)
 exchange.spot     // → BinanceSpot (ExchangeClient)
+exchange.subAccount // → BinanceSubAccount (SubAccountClient): подсчёты главного счёта
 exchange.getWebSocketConnectionInfoList()  // → все WS-соединения (futures + spot)
 exchange.close()  // → закрывает оба
 ```
 
 При `ExchangeNameEnum.Bybit` создаёт `BybitLinear` + `BybitSpot`.
+
+`subAccount` — уровень СЧЁТА, отдельный от рынков (0.26.0): `BinanceSubAccount` (HTTP —
+`BinanceSubAccountHttpClient extends BinanceSpotHttpClient`, тот же адрес api.binance.com, подпись и
+сторож запросов) и `BybitSubAccount` (`BybitSubAccountHttpClient extends BybitHttpClient`). В
+демо-режиме и на OKX — `UnsupportedSubAccount`: каждый метод бросает
+`ExchangeError('SUB_ACCOUNT_NOT_SUPPORTED')` без выхода в сеть. Методов `ExchangeClient` это не
+трогает — рыночные клиенты о подсчётах не знают.
 При `ExchangeNameEnum.Okx` создаёт `OkxSwap` + `OkxSpot`; кодовая фраза (`ExchangeConfig.passphrase`) обязательна — без неё конструктор сразу бросает `ExchangeError('OKX_PASSPHRASE_REQUIRED')`.
 
 ## Subpath-экспорт `./public` (src/public.ts, 0.16.0)

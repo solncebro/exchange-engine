@@ -45,6 +45,8 @@ class OkxPrivateStream {
   private readonly onMessageHandler: (message: OkxWebSocketMessage) => void;
   private readonly subscriptionArgList: OkxSubscriptionArg[];
   private readonly refusedSubscriptionLabelSet: Set<string> = new Set();
+  private readonly onConnectionLost?: () => void;
+  private readonly onConnectionRestored?: () => void;
   private webSocket: ReliableWebSocket<OkxWebSocketMessage> | null = null;
 
   constructor(args: OkxPrivateStreamArgs) {
@@ -57,6 +59,8 @@ class OkxPrivateStream {
     this.onNotify = args.onNotify;
     this.onMessageHandler = args.onMessage;
     this.subscriptionArgList = args.subscriptionArgList;
+    this.onConnectionLost = args.onConnectionLost;
+    this.onConnectionRestored = args.onConnectionRestored;
   }
 
   connect(): void {
@@ -72,6 +76,8 @@ class OkxPrivateStream {
       onMessage: (message) => this.handleMessage(message),
       onOpen: (context) => this.authenticate(context),
       onNotify: this.onNotify,
+      onClose: () => this.onConnectionLost?.(),
+      onReconnectSuccess: () => this.onConnectionRestored?.(),
       heartbeat: OKX_HEARTBEAT_CONFIG,
       configuration: OKX_WEBSOCKET_CONFIGURATION,
     });

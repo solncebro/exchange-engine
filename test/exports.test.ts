@@ -18,6 +18,10 @@ describe('export contract', () => {
     expect(api.MarketUnitEnum).toBeDefined();
     expect(api.MarketTypeEnum).toBeDefined();
     expect(api.WebSocketConnectionTypeEnum).toBeDefined();
+    expect(api.WalletTypeEnum).toBeDefined();
+    expect(api.SubAccountStatusEnum).toBeDefined();
+    expect(api.SubAccountTransferDirectionEnum).toBeDefined();
+    expect(api.SubAccountTransferStatusEnum).toBeDefined();
     expect(api.formatWebSocketConnectionsReport).toBeDefined();
     expect(api.parseBybitOrderbookRawFrame).toBeDefined();
     expect(api.parseOkxOrderbookRawFrame).toBeDefined();

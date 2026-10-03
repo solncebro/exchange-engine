@@ -27,6 +27,8 @@ export interface SymbolLimitFilterArgs {
   /** Границы времени: история заявок и итоги закрытия их принимают и уважают. */
   startTime?: number;
   endTime?: number;
+  /** Курсор страницы — обход открытых заявок листает им, как журнал операций. */
+  cursor?: string;
 }
 
 export interface PeriodFilterArgs {
@@ -70,7 +72,8 @@ export interface SwitchBybitIsolatedArgs {
 
 export interface BybitListResult<T> {
   list: T[];
-  nextPageCursor?: string;
+  /** null — последняя страница (так отвечает биржа); отсутствие поля и пустая строка — тоже конец. */
+  nextPageCursor?: string | null;
 }
 
 export interface BybitListResponse<T> {

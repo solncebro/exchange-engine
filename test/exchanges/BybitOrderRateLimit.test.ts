@@ -67,6 +67,40 @@ describe('Bybit — the order rate limit named by the exchange itself', () => {
     jest.clearAllMocks();
   });
 
+  // Verbatim production answers, 17.09.2026 (one BTCUSDT limit at half the market, cancelled at once).
+  it('reads the limit from the LIVE order.create header', async () => {
+    const client = createLinear();
+    replaySingleOrderResponse(client, {
+      'X-Bapi-Limit': '10',
+      'X-Bapi-Limit-Status': '9',
+      'X-Bapi-Limit-Reset-Timestamp': '1789625407001',
+      Traceid: '05ace6f48cf92466532f0f0f468b69ca',
+      Timenow: '1789625407046',
+    });
+
+    await expect(client.getOrderRateLimit()).resolves.toEqual({ writeRequestsPerSecond: 10, source: 'bybit-exchange-header' });
+  });
+
+  it('keeps the documented limit when a live refusal carries only Traceid and Timenow', async () => {
+    const client = createLinear();
+    const tradeStream = (client as any).tradeStream;
+    const reject = jest.fn();
+
+    tradeStream.pendingRequestByRequestId.set('refused-req', { kind: PendingRequestKind.SingleOrder, resolve: jest.fn(), reject, timeout: setTimeout(() => {}, 0) });
+    tradeStream.handleMessage({
+      reqId: 'refused-req',
+      retCode: 10010,
+      retMsg: "Unmatched IP, please check your API key's bound IP addresses.",
+      op: 'order.create',
+      data: {},
+      retExtInfo: {},
+      header: { Traceid: '2a84eb8c07b43a52045c6379a0632924', Timenow: '1789625381957' },
+    });
+
+    expect(reject).toHaveBeenCalledTimes(1);
+    await expect(client.getOrderRateLimit()).resolves.toEqual({ writeRequestsPerSecond: 10, source: 'bybit-documented' });
+  });
+
   it('reports the limit from the single-order response header, not the documented constant', async () => {
     const client = createLinear();
     replaySingleOrderResponse(client, BYBIT_SINGLE_ORDER_RESPONSE_HEADER);

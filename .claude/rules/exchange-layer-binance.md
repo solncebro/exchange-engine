@@ -100,3 +100,10 @@
 - `marketLabel = 'spot'`, `klineLimit = 1000`
 - Фьючерсные методы → `throw new Error('Not supported for spot market')`
 - HTTP: `BinanceSpotHttpClient`, WS: `BinanceSpotPublicStream`
+- `cancelAllOrders(symbol)` (0.26.0) → один `DELETE /api/v3/openOrders`: условные заявки спота (`STOP_LOSS`, `STOP_LOSS_LIMIT`, `TAKE_PROFIT_LIMIT`) живут в той же книге, второй службы, как у фьючерсов, нет
+
+### BinanceSubAccount (0.26.0, `SubAccountClient`, поле `Exchange.subAccount`)
+- Не наследник `BaseExchangeClient`: уровень счёта, не рынка. HTTP — `BinanceSubAccountHttpClient` на `BINANCE_SPOT_BASE_URL`
+- Кошельки: `Spot` → `SPOT`, `UsdtFutures` → `USDT_FUTURE`, `Funding` → отказ `WALLET_TYPE_NOT_SUPPORTED` до сети
+- Главная сторона перевода — без почты (биржа по умолчанию берёт главный счёт); подсчёт — `toEmail` (MasterToSub) или `fromEmail` (SubToMaster); номер вызывающего — `clientTranId`
+- Список подсчётов — страницами по 200 до короткой страницы, потолок 50 страниц

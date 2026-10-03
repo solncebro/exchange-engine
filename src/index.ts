@@ -15,5 +15,6 @@ export type { FormatWebSocketConnectionsReportArgs } from './utils/formatWebSock
 // библиотеке — восемь выпусков за пять месяцев, один из них в тот же день, что и предыдущий).
 // Сквозной реэкспорт делает такую потерю невозможной: новый тип в этих файлах виден снаружи сам.
 // Имена двух файлов не пересекаются — проверено; сторож-тест держит это правило.
+export type { StepRounding } from './precision/precision';
 export * from './types/common';
 export * from './types/exchange';

@@ -154,6 +154,18 @@ describe('BinanceSpot', () => {
     await expect(client.setLeverage(10, 'BTCUSDT')).rejects.toThrow('Not supported for spot market');
   });
 
+  it('throws "Not supported" for fetchLeverageTierList', async () => {
+    const { client } = createClient();
+
+    await expect(client.fetchLeverageTierList('BTCUSDT')).rejects.toThrow('Not supported for spot market');
+  });
+
+  it('throws "Not supported" for fetchAllLeverageTierList', async () => {
+    const { client } = createClient();
+
+    await expect(client.fetchAllLeverageTierList()).rejects.toThrow('Not supported for spot market');
+  });
+
   it('throws "Not supported" for setMarginMode', async () => {
     const { client } = createClient();
 
@@ -257,6 +269,21 @@ describe('BinanceSpot', () => {
         balanceList: [{ asset: 'USDT', free: 100.5, locked: 0.5, total: null }],
         timestamp: 1700000000000,
       });
+    });
+  });
+
+  describe('cancelAllOrders', () => {
+    it('cancels every open spot order of the symbol with one signed DELETE /api/v3/openOrders', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.delete.mockResolvedValue({ data: [BINANCE_RAW_ORDER_RESPONSE] });
+
+      await expect(client.cancelAllOrders('BTCUSDT')).resolves.toBeUndefined();
+
+      expect(mockInstance.delete).toHaveBeenCalledTimes(1);
+      const [url, options] = mockInstance.delete.mock.calls[0];
+      expect(url).toBe('/api/v3/openOrders');
+      expect(options.params.symbol).toBe('BTCUSDT');
+      expect(options.params.signature).toEqual(expect.any(String));
     });
   });
 });

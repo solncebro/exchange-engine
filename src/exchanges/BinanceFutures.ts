@@ -11,7 +11,7 @@ import type {
   ModifyOrderArgs,
   SetLeverageResult,
 } from '../types/exchange';
-import type { Position, Order, FundingRateHistory, FundingInfo, AccountBalances, MarkPrice, OpenInterest, FeeRate, Income, ClosedPnl } from '../types/common';
+import type { Position, Order, FundingRateHistory, FundingInfo, AccountBalances, MarkPrice, OpenInterest, FeeRate, Income, ClosedPnl, LeverageTier, LeverageTierListBySymbol } from '../types/common';
 import { MarginModeEnum, PositionModeEnum, OrderTypeEnum, TimeInForceEnum, TriggerByEnum } from '../types/common';
 import { ExchangeError } from '../errors/ExchangeError';
 import { isConditionalOrderType } from '../constants/orderTypes';
@@ -33,6 +33,7 @@ import {
   normalizeBinanceCommissionRate,
   normalizeBinanceIncomeList,
   normalizeBinanceAlgoOrder,
+  normalizeBinanceLeverageBracketList,
   buildBinanceClosedPnlList,
   mergeBinanceTriggeredOrder,
   isBinanceAlgoOrderRaw,
@@ -657,6 +658,20 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
 
     // Плечо всегда ≥ 1: Number(null) даёт 0, и без нижней границы пустое поле сошло бы за факт.
     return { confirmedLeverage: Number.isFinite(confirmed) && confirmed >= 1 ? confirmed : null };
+  }
+
+  async fetchLeverageTierList(symbol: string): Promise<LeverageTier[]> {
+    this.logger.debug(`[Binance] Fetching leverage tiers for ${symbol}`);
+    const rawList = await this.httpClient.fetchLeverageBracket(symbol);
+
+    return normalizeBinanceLeverageBracketList(rawList).get(symbol) ?? [];
+  }
+
+  async fetchAllLeverageTierList(): Promise<LeverageTierListBySymbol> {
+    this.logger.debug('[Binance] Fetching leverage tiers for all symbols');
+    const rawList = await this.httpClient.fetchLeverageBracket();
+
+    return normalizeBinanceLeverageBracketList(rawList);
   }
 
   async setMarginMode(marginMode: MarginModeEnum, symbol: string): Promise<void> {

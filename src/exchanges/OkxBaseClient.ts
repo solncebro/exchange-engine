@@ -129,6 +129,7 @@ import type {
   OkxTwoServiceFailure,
 } from './OkxBaseClient.types';
 import type { OkxInstrumentType } from '../http/OkxHttpClient.types';
+import type { StepRounding } from '../precision/precision';
 
 /**
  * Приближение для расчёта окна `after` у месячных свечей (`1M`), у которых нет постоянной
@@ -406,19 +407,19 @@ abstract class OkxBaseClient extends BaseExchangeClient {
    * монеты «0.02», тогда как уходило 0.01. Проверка объёма снаружи и отправка обязаны давать
    * одно и то же число, иначе вызывающий проверяет одну заявку, а ставит другую.
    */
-  amountToPrecision(symbol: string, amount: number): number {
+  amountToPrecision(symbol: string, amount: number, rounding: StepRounding = 'nearest'): number {
     if (!this.isSwap) {
-      return super.amountToPrecision(symbol, amount);
+      return super.amountToPrecision(symbol, amount, rounding);
     }
 
     const contractValue = this.contractValueBySymbol.get(symbol);
     const lotSize = this.lotSizeBySymbol.get(symbol);
 
     if (contractValue === undefined || lotSize === undefined) {
-      return super.amountToPrecision(symbol, amount);
+      return super.amountToPrecision(symbol, amount, rounding);
     }
 
-    return convertContractsToCoins(convertCoinsToContracts({ amount, contractValue, lotSize }), contractValue);
+    return convertContractsToCoins(convertCoinsToContracts({ amount, contractValue, lotSize, rounding }), contractValue);
   }
 
   /**
@@ -2163,6 +2164,8 @@ abstract class OkxBaseClient extends BaseExchangeClient {
       onNotify: this.onNotify,
       subscriptionArgList: this.buildPrivateSubscriptionArgList(),
       onMessage: (message) => this.handlePrivateMessage(message, handler),
+      onConnectionLost: () => handler.onConnectionLost?.(),
+      onConnectionRestored: () => handler.onConnectionRestored?.(),
     });
 
     this.algoPrivateStream = new OkxPrivateStream({

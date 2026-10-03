@@ -16,6 +16,7 @@ import {
   normalizeBinanceOpenInterest,
   normalizeBinanceCommissionRate,
   normalizeBinanceIncomeList,
+  normalizeBinanceLeverageBracketList,
   parseBinanceOrderRateLimit,
 } from '../../src/normalizers/binanceNormalizer';
 import { TradeSymbolTypeEnum, PositionSideEnum, MarginModeEnum } from '../../src/types/common';
@@ -38,6 +39,7 @@ import {
   BINANCE_RAW_PUBLIC_TRADE_LIST,
   BINANCE_RAW_MARK_PRICE_LIST,
   BINANCE_RAW_OPEN_INTEREST,
+  BINANCE_RAW_LEVERAGE_BRACKET_LIST,
   BINANCE_RAW_COMMISSION_RATE,
   BINANCE_RAW_INCOME_LIST,
 } from '../fixtures/binanceRaw';
@@ -1193,5 +1195,57 @@ describe('parseBinanceOrderRateLimit', () => {
         ],
       }),
     ).toThrow('Unsupported Binance rate-limit interval: YEAR');
+  });
+});
+
+describe('normalizeBinanceLeverageBracketList', () => {
+  it('keys the map by symbol', () => {
+    const result = normalizeBinanceLeverageBracketList(BINANCE_RAW_LEVERAGE_BRACKET_LIST);
+
+    expect(result.has('AVAUSDT')).toBe(true);
+  });
+
+  it('returns all 8 tiers', () => {
+    const result = normalizeBinanceLeverageBracketList(BINANCE_RAW_LEVERAGE_BRACKET_LIST);
+
+    expect(result.get('AVAUSDT')).toHaveLength(8);
+  });
+
+  it('normalizes the first tier', () => {
+    const result = normalizeBinanceLeverageBracketList(BINANCE_RAW_LEVERAGE_BRACKET_LIST);
+    const tier = result.get('AVAUSDT')?.[0];
+
+    expect(tier?.maxLeverage).toBe(25);
+    expect(tier?.maxNotional).toBe(5000);
+    expect(tier?.maxBaseAmount).toBeNull();
+    expect(tier?.initialMarginRate).toBeCloseTo(0.04, 9);
+    expect(tier?.maintenanceMarginRate).toBeCloseTo(0.02, 9);
+  });
+
+  it('sorts caps strictly ascending', () => {
+    const result = normalizeBinanceLeverageBracketList(BINANCE_RAW_LEVERAGE_BRACKET_LIST);
+    const tierList = result.get('AVAUSDT') ?? [];
+    const capList = tierList.map((tier) => tier.maxNotional);
+
+    for (let i = 1; i < capList.length; i++) {
+      expect(capList[i]!).toBeGreaterThan(capList[i - 1]!);
+    }
+  });
+
+  it('sorts leverages strictly descending', () => {
+    const result = normalizeBinanceLeverageBracketList(BINANCE_RAW_LEVERAGE_BRACKET_LIST);
+    const tierList = result.get('AVAUSDT') ?? [];
+
+    for (let i = 1; i < tierList.length; i++) {
+      expect(tierList[i]!.maxLeverage).toBeLessThan(tierList[i - 1]!.maxLeverage);
+    }
+  });
+
+  it('matches the tier with maxLeverage 5 to maxNotional 50000', () => {
+    const result = normalizeBinanceLeverageBracketList(BINANCE_RAW_LEVERAGE_BRACKET_LIST);
+    const tierList = result.get('AVAUSDT') ?? [];
+    const tier = tierList.find((item) => item.maxLeverage === 5);
+
+    expect(tier?.maxNotional).toBe(50000);
   });
 });

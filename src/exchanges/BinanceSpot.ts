@@ -70,6 +70,12 @@ class BinanceSpot extends BinanceBaseClient<BinanceSpotHttpClient> {
     this.userDataWebSocketApiUrl = tradeWebSocketUrl;
   }
 
+  async cancelAllOrders(symbol: string): Promise<void> {
+    this.logger.debug(`[Binance] Cancelling all spot orders for ${symbol}`);
+    // На споте условные заявки живут в той же книге, отдельной службы нет — одной отмены хватает.
+    await this.httpClient.cancelAllOrders(symbol);
+  }
+
   async connectUserDataStream(handler: UserDataStreamHandlerArgs): Promise<void> {
     if (this.spotUserDataStream !== null || this.spotUserDataStreamConnecting) {
       return;

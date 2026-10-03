@@ -7,4 +7,6 @@ export interface BinanceUserDataStreamArgs {
   logger: ExchangeLogger;
   onNotify?: (message: string) => void | Promise<void>;
   onMessage: (event: Record<string, unknown>) => void;
+  onConnectionLost?: () => void;
+  onConnectionRestored?: () => void;
 }

@@ -67,6 +67,14 @@ export const BYBIT_TRANSACTION_LOG_MAX_LIMIT = 50;
 export const BYBIT_TRANSACTION_LOG_MAX_PAGE_COUNT = 200;
 
 /**
+ * Пауза между страницами журнала операций. Биржа пускает этот запрос не чаще 25 раз в секунду на
+ * счёт (заголовок `X-Bapi-Limit: 25`, 17.09.2026), а следующая страница отвечает за ~25 мс — без
+ * паузы длинное окно само выбивает лимит и оставляет без чтений остальные пути бота. 60 мс держат
+ * листание ниже 17 запросов в секунду.
+ */
+export const BYBIT_TRANSACTION_LOG_PAGE_INTERVAL_MS = 60;
+
+/**
  * Записи журнала операций, несущие начисление фандинга. У них нулевой денежный поток, а
  * сама сумма лежит в поле `funding` (живой счёт 02.09.2026, FLOCKUSDT: `cashFlow=0`,
  * `funding=-2.3156522`). Один список на клиент и нормализатор — чтобы фильтр и чтение суммы
@@ -81,3 +89,38 @@ export const BYBIT_FUNDING_INCOME_TYPE_SET = new Set(['FUNDING', 'SETTLEMENT']);
  * вечно: у обеих соседних бирж такой предохранитель есть, здесь он был потерян.
  */
 export const BYBIT_INSTRUMENTS_MAX_PAGE_COUNT = 20;
+
+/**
+ * Потолок страниц при обходе ступеней риска по курсору. Страница — 15 символов, у linear
+ * ~450 символов.
+ */
+export const BYBIT_RISK_LIMIT_MAX_PAGE_COUNT = 100;
+
+/**
+ * Пауза между страницами ступеней риска — тот же лимит запросов, что у листания журнала
+ * операций (`BYBIT_TRANSACTION_LOG_PAGE_INTERVAL_MS`).
+ */
+export const BYBIT_RISK_LIMIT_PAGE_INTERVAL_MS = 60;
+
+/** Максимум страницы `/v5/order/realtime` — без него ответ молча режется до 20 заявок. */
+export const BYBIT_OPEN_ORDERS_PAGE_LIMIT = 50;
+
+/** Пауза между страницами открытых заявок — тот же лимит запросов, что у журнала операций. */
+export const BYBIT_OPEN_ORDERS_PAGE_INTERVAL_MS = 60;
+
+/**
+ * Потолок страниц при обходе открытых заявок по курсору. 2000 заявок с запасом — дальше отказ,
+ * а не неполный список (незамеченная своя заявка живёт на бирже без учёта ботом).
+ */
+export const BYBIT_OPEN_ORDERS_MAX_PAGE_COUNT = 40;
+
+/** Валюта расчётов линейных фьючерсов Bybit — единственная на счёте USDT-перпетуалов. */
+export const BYBIT_LINEAR_SETTLE_COIN = 'USDT';
+
+// Подсчёты главного счёта. Демо-служба этих путей не обслуживает — их нет в её списке доступных
+// входов (https://bybit-exchange.github.io/docs/v5/demo).
+export const BYBIT_SUB_MEMBER_LIST_PATH = '/v5/user/query-sub-members';
+export const BYBIT_API_KEY_INFO_PATH = '/v5/user/query-api';
+export const BYBIT_UNIVERSAL_TRANSFER_PATH = '/v5/asset/transfer/universal-transfer';
+export const BYBIT_UNIVERSAL_TRANSFER_LIST_PATH = '/v5/asset/transfer/query-universal-transfer-list';
+export const BYBIT_ACCOUNT_COINS_BALANCE_PATH = '/v5/asset/transfer/query-account-coins-balance';

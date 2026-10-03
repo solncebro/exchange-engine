@@ -14,4 +14,6 @@ export interface BybitPrivateStreamArgs {
   onNotify?: (message: string) => void | Promise<void>;
   onMessage: (event: Record<string, unknown>) => void;
   topicList?: string[];
+  onConnectionLost?: () => void;
+  onConnectionRestored?: () => void;
 }

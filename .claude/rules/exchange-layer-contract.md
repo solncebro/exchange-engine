@@ -69,12 +69,14 @@ User Data Stream:
 
 Настройки:
   setLeverage(leverage, symbol): Promise<SetLeverageResult>  // { confirmedLeverage: number | null } — то, что биржа реально подтвердила
+  fetchLeverageTierList(symbol): Promise<LeverageTier[]>
+  fetchAllLeverageTierList(): Promise<LeverageTierListBySymbol>
   setMarginMode(mode, symbol): Promise<void>
   setPositionMode(mode): Promise<void>
 
 Precision:
-  amountToPrecision(symbol, amount): number
-  priceToPrecision(symbol, price): number
+  amountToPrecision(symbol, amount, rounding?: StepRounding): number   // 'nearest' (по умолчанию) | 'up' | 'down'
+  priceToPrecision(symbol, price, rounding?: StepRounding): number
   getMinOrderQty(symbol): number
   getMinNotional(symbol): number
   getMaxOrderQty(symbol): number
@@ -171,3 +173,17 @@ WebSocket Registry:
 - `handler: PublicTradeHandler` — `(symbol, tradeList: PublicTrade[]) => void`
 
 Поддерживается Bybit (linear и spot) и Binance Futures (через `@aggTrade`, см. `websocket-layer.md`); Binance Spot — нет. На Bybit сосуществует с `subscribeKlines(symbol, '1s', ...)` (`TradeToKlineAggregator`) на одном topic `publicTrade.{symbol}` — оба consumer'а получают сообщения независимо.
+
+## SubAccountClient (src/types/exchange.ts, 0.26.0)
+
+Не часть `ExchangeClient`: живёт в `Exchange.subAccount`. Методы: `fetchSubAccountList()`,
+`transferSubAccountAsset(SubAccountTransferArgs)`, `fetchSubAccountTransfer(FetchSubAccountTransferArgs)`
+(null — перевода не нашлось), `fetchSubAccountBalances(FetchSubAccountBalancesArgs)`.
+
+- `SubAccountTransferArgs`: `subAccountId`, `direction: SubAccountTransferDirectionEnum`, `asset`,
+  `amount: number`, `fromWalletType`/`toWalletType: WalletTypeEnum`, `transferId` (номер вызывающего).
+- `FetchSubAccountTransferArgs`: `subAccountId`, `direction`, `transferId`, необязательные `amount`, `asset`, `sinceMs`. Binance при заданных сумме и времени ищет отсутствующий в универсальной истории перевод в истории фьючерсных переводов; несколько совпадений — `TRANSFER_MATCH_AMBIGUOUS`. Доказательство: `src/exchanges/BinanceSubAccount.ts:111`.
+- `FetchSubAccountBalancesArgs`: `subAccountId`, `walletType`, необязательный `assetList`. Bybit читает не больше десяти монет, у единого счёта по умолчанию USDT; Binance список не использует. Доказательство: `src/exchanges/BybitSubAccount.ts:100`, `src/exchanges/BinanceSubAccount.ts:152`.
+- Проверки до сети (`src/exchanges/subAccountTransferValidation.ts`): сумма конечная и больше нуля
+  (`INVALID_TRANSFER_AMOUNT`), непустые номер перевода и подсчёта (`INVALID_TRANSFER_ID`,
+  `INVALID_SUB_ACCOUNT_ID`); у Bybit ещё UUID и числовой номер пользователя.

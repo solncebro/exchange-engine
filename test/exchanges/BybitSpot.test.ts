@@ -731,4 +731,19 @@ describe('BybitSpot', () => {
       expect(mockInstance.post).not.toHaveBeenCalled();
     });
   });
+
+  describe('fetchOpenConditionalOrders', () => {
+    it('asks for spot conditional orders without a settle coin, which spot does not accept', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: { retCode: 0, retMsg: 'OK', result: { list: [], nextPageCursor: '' } } });
+
+      await client.fetchOpenConditionalOrders('USDT');
+
+      const [url, options] = mockInstance.get.mock.calls[0];
+      expect(url).toBe('/v5/order/realtime');
+      expect(options.params.category).toBe('spot');
+      expect(options.params.orderFilter).toBe('StopOrder');
+      expect(options.params.settleCoin).toBeUndefined();
+    });
+  });
 });

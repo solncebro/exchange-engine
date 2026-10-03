@@ -63,6 +63,7 @@ import {
   BYBIT_DEMO_PRIVATE_WEBSOCKET_URL,
   BYBIT_TRANSACTION_LOG_MAX_LIMIT,
   BYBIT_FUNDING_INCOME_TYPE_SET,
+  BYBIT_LINEAR_SETTLE_COIN,
 } from '../constants/bybit';
 import { BYBIT_ORDER_STATUS, BYBIT_WORKING_TYPE_TRIGGER_BY } from '../constants/mappings';
 import { chunkList as chunkListUtil } from '../utils/chunkList';
@@ -394,18 +395,32 @@ abstract class BybitBaseClient extends BaseExchangeClient {
     throw new Error(`Order with client id ${clientOrderId} not found for ${symbol}`);
   }
 
+  /** Без символа фьючерсам Bybit обязательно нужна валюта расчётов — иначе биржа отвечает 10001 (живой ответ 18.09.2026). */
+  private openOrdersScope(symbol?: string): { symbol: string } | { settleCoin: string } | Record<string, never> {
+    if (symbol !== undefined) {
+      return { symbol };
+    }
+
+    return this.category === 'linear' ? { settleCoin: BYBIT_LINEAR_SETTLE_COIN } : {};
+  }
+
   async fetchOpenOrders(symbol?: string): Promise<Order[]> {
     this.logger.debug('[Bybit] Fetching open orders');
-    const raw = await this.httpClient.getOpenOrders(this.category, { symbol });
+    const rawList = await this.httpClient.fetchAllOpenOrders(this.category, this.openOrdersScope(symbol));
 
-    return raw.result.list.map(normalizeBybitOrder);
+    return rawList.map(normalizeBybitOrder);
   }
 
   async fetchOpenConditionalOrders(settleCoin: string): Promise<Order[]> {
     this.logger.debug('[Bybit] Fetching open conditional (stop) orders');
-    const raw = await this.httpClient.getOpenOrders(this.category, { settleCoin, orderFilter: OrderFilterEnum.StopOrder });
+    // У спота вход списка заявок монету расчёта не принимает (документация open-order: «spot: not
+    // supported») — там фильтр по условным заявкам идёт без неё.
+    const scope = this.category === 'spot'
+      ? { orderFilter: OrderFilterEnum.StopOrder }
+      : { settleCoin, orderFilter: OrderFilterEnum.StopOrder };
+    const rawList = await this.httpClient.fetchAllOpenOrders(this.category, scope);
 
-    return raw.result.list.map(normalizeBybitOrder);
+    return rawList.map(normalizeBybitOrder);
   }
 
   async fetchOrderBook(symbol: string, limit?: number): Promise<OrderBook> {
@@ -737,6 +752,8 @@ abstract class BybitBaseClient extends BaseExchangeClient {
       onNotify: this.onNotify,
       topicList: ['order', 'position', 'wallet'],
       onMessage: (event) => this.handlePrivateMessage(event, handler),
+      onConnectionLost: () => handler.onConnectionLost?.(),
+      onConnectionRestored: () => handler.onConnectionRestored?.(),
     });
 
     this.privateStream.connect();
