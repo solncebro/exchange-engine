@@ -32,4 +32,13 @@ describe('parseWebSocketMessage', () => {
 
     expect(() => parseWebSocketMessage(invalidJson)).toThrow('Failed to parse WebSocket message: not valid json');
   });
+
+  it('preserves a large numeric Binance order identity', () => {
+    const result = parseWebSocketMessage<{ o: { i: string }; result: { algoId: string } }>(
+      Buffer.from('{"o":{"i":633327759348341108},"result":{"algoId":633327759348341108}}'),
+    );
+
+    expect(result.o.i).toBe('633327759348341108');
+    expect(result.result.algoId).toBe('633327759348341108');
+  });
 });

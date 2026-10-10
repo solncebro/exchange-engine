@@ -1375,6 +1375,29 @@ describe('BinanceFutures', () => {
       expect(row.quantity).toBe(1005);
     });
 
+    it('uses exact large execution IDs for pagination and deduplication', async () => {
+      const { client, mockInstance } = createClient();
+      const firstId = 633327759348341108n;
+      const firstPageList = buildClosingPage(1, 1000, 20).map((raw, index) => ({
+        ...raw,
+        id: String(firstId + BigInt(index)),
+        orderId: '633327759349180586',
+      }));
+      const repeatedLast = firstPageList.at(-1);
+      const next = { ...firstPageList[0], id: String(firstId + 1000n) };
+
+      mockInstance.get
+        .mockResolvedValueOnce({ data: firstPageList })
+        .mockResolvedValueOnce({ data: [repeatedLast, next] });
+
+      const [row] = await client.fetchClosedPnl('BTCUSDT', { startTime: 1000 });
+      const [, secondConfig] = mockInstance.get.mock.calls[1];
+
+      expect(secondConfig.params.fromId).toBe(String(firstId + 1000n));
+      expect(row.quantity).toBe(1001);
+      expect(row.orderId).toBe('633327759349180586');
+    });
+
     it('stops paging once the executions pass the end of the window', async () => {
       const { client, mockInstance } = createClient();
 

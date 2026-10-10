@@ -1055,8 +1055,8 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
     }
 
     const collectedList: BinanceUserTradeRaw[] = [];
-    const seenIdSet = new Set<number>();
-    let fromId: number | undefined;
+    const seenIdSet = new Set<string>();
+    let fromId: number | string | undefined;
 
     for (let pageIndex = 0; pageIndex < USER_TRADE_MAX_PAGE_COUNT; pageIndex++) {
       const pageList = await this.httpClient.fetchUserTrades(
@@ -1075,12 +1075,14 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
         }
 
         // Страницы стыкуются по номеру, и повтор на стыке дублировал бы исполнение в итоге.
-        if (Number.isFinite(raw.id)) {
-          if (seenIdSet.has(raw.id)) {
+        const id = String(raw.id);
+
+        if (/^\d+$/.test(id)) {
+          if (seenIdSet.has(id)) {
             continue;
           }
 
-          seenIdSet.add(raw.id);
+          seenIdSet.add(id);
         }
 
         collectedList.push(raw);
@@ -1092,14 +1094,25 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
         return collectedList;
       }
 
-      const lastId = pageList.reduce((latest, raw) => Math.max(latest, raw.id), 0);
+      const lastId = pageList.reduce((latest, raw) => {
+        const id = String(raw.id);
+
+        if (!/^\d+$/.test(id)) {
+          return latest;
+        }
+
+        const candidate = BigInt(id);
+
+        return candidate > latest ? candidate : latest;
+      }, 0n);
 
       // Без номера следующую страницу не адресовать — дальше идти нечем, отдаём собранное.
-      if (!Number.isFinite(lastId) || lastId <= 0) {
+      if (lastId <= 0n) {
         return collectedList;
       }
 
-      fromId = lastId + 1;
+      const nextId = lastId + 1n;
+      fromId = nextId <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(nextId) : String(nextId);
     }
 
     this.logger.warn(

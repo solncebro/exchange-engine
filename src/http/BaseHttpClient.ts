@@ -6,6 +6,7 @@ import { ExchangeError } from '../errors/ExchangeError';
 import { serializeQueryParams } from '../utils/serializeQueryParams';
 import { toWireErrorCode } from '../utils/wireErrorCode';
 import { sleep } from '../utils/sleep';
+import { parseJsonPreservingLargeIntegers } from '../utils/parseJsonPreservingLargeIntegers';
 import type {
   BaseHttpClientArgs,
   HttpErrorResponseData,
@@ -125,6 +126,18 @@ function parseBinanceNoopHttpErrorMessage(data: unknown): string | null {
   return message;
 }
 
+function transformResponseData(data: unknown): unknown {
+  if (typeof data !== 'string' || data.length === 0) {
+    return data;
+  }
+
+  try {
+    return parseJsonPreservingLargeIntegers(data);
+  } catch {
+    return data;
+  }
+}
+
 abstract class BaseHttpClient {
   protected readonly axiosInstance: AxiosInstance;
   protected readonly logger: ExchangeLogger;
@@ -137,6 +150,7 @@ abstract class BaseHttpClient {
       baseURL: args.baseUrl,
       timeout: args.timeout ?? 30000,
       httpsAgent: args.httpsAgent ?? DEFAULT_HTTPS_AGENT,
+      transformResponse: transformResponseData,
       paramsSerializer: {
         serialize: serializeQueryParams,
       },

@@ -276,7 +276,7 @@ export interface BinancePositionRiskRaw {
 }
 
 export interface BinanceOrderResponseRaw {
-  orderId: number;
+  orderId: number | string;
   clientOrderId: string;
   symbol: string;
   side: string;
@@ -300,7 +300,7 @@ export interface BinanceOrderResponseRaw {
  * Замерено на живом ответе биржи 07.08.2026.
  */
 export interface BinanceAlgoOrderRaw {
-  algoId: number;
+  algoId: number | string;
   clientAlgoId: string;
   algoType: string;
   orderType: string;
@@ -738,7 +738,7 @@ export function isBinanceOrderResponseRaw(value: unknown): value is BinanceOrder
 
   const candidate = value as Partial<BinanceOrderResponseRaw>;
 
-  return typeof candidate.orderId === 'number' && typeof candidate.type === 'string';
+  return isBinanceNumericId(candidate.orderId) && typeof candidate.type === 'string';
 }
 
 export function isBinanceAlgoOrderRaw(value: unknown): value is BinanceAlgoOrderRaw {
@@ -748,7 +748,11 @@ export function isBinanceAlgoOrderRaw(value: unknown): value is BinanceAlgoOrder
 
   const candidate = value as Partial<BinanceAlgoOrderRaw>;
 
-  return typeof candidate.algoId === 'number' && typeof candidate.orderType === 'string';
+  return isBinanceNumericId(candidate.algoId) && typeof candidate.orderType === 'string';
+}
+
+function isBinanceNumericId(value: unknown): value is number | string {
+  return typeof value === 'number' || (typeof value === 'string' && /^\d+$/.test(value));
 }
 
 export function normalizeBinanceAlgoOrder(raw: BinanceAlgoOrderRaw): Order {
@@ -937,7 +941,7 @@ export interface BinanceOrderBookRaw {
 }
 
 export interface BinancePublicTradeRaw {
-  id: number;
+  id: number | string;
   price: string;
   qty: string;
   quoteQty: string;
@@ -998,13 +1002,13 @@ export interface BinanceIncomeRaw {
   asset: string;
   time: number;
   info: string;
-  tranId: number;
+  tranId: number | string;
   tradeId: string;
 }
 
 export interface BinanceUserTradeRaw {
-  id: number;
-  orderId: number;
+  id: number | string;
+  orderId: number | string;
   symbol: string;
   side: string;
   positionSide: string;
@@ -1047,7 +1051,33 @@ export function buildBinanceClosedPnlList(rawList: BinanceUserTradeRaw[]): Close
   let openingCommissionPool = 0;
   let openQuantityPool = 0;
 
-  const chronologicalList = [...rawList].sort((left, right) => left.time - right.time || left.id - right.id);
+  const chronologicalList = [...rawList].sort((left, right) => {
+    const timeDifference = left.time - right.time;
+
+    if (timeDifference !== 0) {
+      return timeDifference;
+    }
+
+    const leftIdText = String(left.id);
+    const rightIdText = String(right.id);
+
+    if (!/^\d+$/.test(leftIdText) || !/^\d+$/.test(rightIdText)) {
+      return 0;
+    }
+
+    const leftId = BigInt(leftIdText);
+    const rightId = BigInt(rightIdText);
+
+    if (leftId < rightId) {
+      return -1;
+    }
+
+    if (leftId > rightId) {
+      return 1;
+    }
+
+    return 0;
+  });
 
   for (const raw of chronologicalList) {
     const quantity = parseFloat(raw.qty);

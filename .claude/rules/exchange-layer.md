@@ -139,7 +139,7 @@ ExchangeLogger поддерживает overloaded signatures:
 
 ## Lazy orderbook parse (opt-in, `ExchangeConfig.lazyOrderbookParse`)
 
-Default `false` (или поле отсутствует) → поведение без изменений: каждый WS-кадр полностью парсится (`parseWebSocketMessage` → `JSON.parse`) до маршрутизации. Включается только когда public-WS становится слишком тяжёлым для парсинга на одном Node-потоке (у coin-listing orderbook ~4650 кадров/с × ~322µs = ~1.5 ядра только на парсинг → отставание стакана). **Действует ТОЛЬКО на orderbook-топики**; tickers/klines/publicTrade не затрагиваются.
+Default `false` (или поле отсутствует) → каждый WS-кадр полностью разбирается через `parseWebSocketMessage` до маршрутизации; большие целые идентификаторы сохраняются точными строками. Включается только когда public-WS становится слишком тяжёлым для парсинга на одном Node-потоке (у coin-listing orderbook ~4650 кадров/с × ~322µs = ~1.5 ядра только на парсинг → отставание стакана). **Действует ТОЛЬКО на orderbook-топики**; tickers/klines/publicTrade не затрагиваются.
 
 При `true` (только `BybitPublicStream`):
 - `resolveBybitMessage` (новый `parseMessage`-колбэк) дёшево достаёт символ из первых ~200 байт сырого кадра через `ORDERBOOK_TOPIC_HEAD_REGEX` — **без** `JSON.parse` тела. Для orderbook-кадра символа **не из** `liveOrderbookSymbolSet` возвращает лёгкий sentinel `{ topic, __rawOrderbook: { symbol, raw, receivedTimestamp } }`. Если topic не в голове кадра — fallback на полный парс (корректность сохранена, экономии для этого кадра нет). Не-orderbook топики всегда парсятся полностью.

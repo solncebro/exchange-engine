@@ -2,6 +2,8 @@ import axios from 'axios';
 import { BaseHttpClient } from '../../src/http/BaseHttpClient';
 import { ExchangeError } from '../../src/errors/ExchangeError';
 import { createMockLogger } from '../fixtures/mockLogger';
+import { BINANCE_RAW_ORDER_RESPONSE } from '../fixtures/binanceRaw';
+import { isBinanceOrderResponseRaw, normalizeBinanceOrder } from '../../src/normalizers/binanceNormalizer';
 
 const actualAxios = jest.requireActual<typeof import('axios')>('axios');
 const { AxiosError, AxiosHeaders } = actualAxios;
@@ -86,6 +88,16 @@ function createNetworkError() {
   return error;
 }
 
+function transformMockResponse(data: unknown, status = 200): unknown {
+  const transformResponse = mockedAxios.create.mock.calls[0]?.[0]?.transformResponse;
+
+  if (typeof transformResponse !== 'function') {
+    throw new Error('HTTP response parser is missing');
+  }
+
+  return Reflect.apply(transformResponse, {}, [data, new AxiosHeaders(), status]);
+}
+
 describe('BaseHttpClient', () => {
   let client: TestHttpClient;
   let mockInstance: jest.Mocked<ReturnType<typeof axios.create>>;
@@ -96,6 +108,52 @@ describe('BaseHttpClient', () => {
     mockInstance = createMockAxiosInstance();
     mockedAxios.create.mockReturnValue(mockInstance);
     client = new TestHttpClient({ baseUrl: 'https://api.test.com', apiKey: 'key', logger });
+  });
+
+  it('installs a response parser that preserves large integer identities and existing non-JSON behavior', () => {
+    expect(transformMockResponse('{"orderId":633327759348341108,"price":0.00175}')).toEqual({ orderId: '633327759348341108', price: 0.00175 });
+    expect(transformMockResponse('{"code":-2013,"msg":"Unknown order"}', 400)).toEqual({ code: -2013, msg: 'Unknown order' });
+    expect(transformMockResponse('')).toBe('');
+    expect(transformMockResponse('not json')).toBe('not json');
+    expect(transformMockResponse({ orderId: 'already parsed' })).toEqual({ orderId: 'already parsed' });
+  });
+
+  it.each(['create', 'read', 'list', 'cancel'])('keeps the exact Binance order ID through the %s response', (operation) => {
+    const orderText = JSON.stringify({ ...BINANCE_RAW_ORDER_RESPONSE, orderId: 0 }).replace('"orderId":0', '"orderId":633327759348341108');
+    const responseText = operation === 'list' ? `[${orderText}]` : orderText;
+    const response = transformMockResponse(responseText);
+    const rawOrder = Array.isArray(response) ? response[0] : response;
+
+    expect(isBinanceOrderResponseRaw(rawOrder)).toBe(true);
+
+    if (!isBinanceOrderResponseRaw(rawOrder)) {
+      throw new Error('Binance order was not recognized');
+    }
+
+    expect(normalizeBinanceOrder(rawOrder).id).toBe('633327759348341108');
+  });
+
+  it('keeps four distinct open-order identities that would round to the same number', () => {
+    const orderIdList = ['633327759349180586', '633327759349180587', '633327759349180588', '633327759349180590'];
+    const responseText = `[${orderIdList.map((orderId) => JSON.stringify({ ...BINANCE_RAW_ORDER_RESPONSE, orderId: 0 }).replace('"orderId":0', `"orderId":${orderId}`)).join(',')}]`;
+    const response = transformMockResponse(responseText);
+
+    expect(Array.isArray(response)).toBe(true);
+
+    if (!Array.isArray(response)) {
+      throw new Error('Expected an order list');
+    }
+
+    const normalizedIdList = response.map((rawOrder: unknown) => {
+      if (!isBinanceOrderResponseRaw(rawOrder)) {
+        throw new Error('Binance order was not recognized');
+      }
+
+      return normalizeBinanceOrder(rawOrder).id;
+    });
+
+    expect(normalizedIdList).toEqual(orderIdList);
+    expect(new Set(normalizedIdList).size).toBe(4);
   });
 
   describe('get', () => {

@@ -47,7 +47,7 @@
   - Сохраняет raw в `info`
 - `normalizeBinanceOrder(raw)` → `Order`
   - Маппинг через `BINANCE_ORDER_SIDE`, `BINANCE_ORDER_TYPE` и `BINANCE_ORDER_STATUS` (константы из `src/constants/mappings.ts`); `side` с fallback `?? OrderSideEnum.Buy` (не утекает `undefined` в non-optional поле)
-  - `orderId` number → string
+  - `orderId` number или точная строка большого целого числа → string
 - `normalizeBinanceBalances(raw)` → `BalanceByAsset` (Map)
   - Пропускает нулевые балансы (`free + locked === 0`) и невалидные (`NaN` в `free`/`locked` → `continue`)
 - `normalizeBinanceFuturesBalances(raw)` → `AccountBalances`

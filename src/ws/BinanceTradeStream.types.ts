@@ -5,7 +5,7 @@ import type { BinanceOrderResponseRaw, BinanceAlgoOrderRaw } from '../normalizer
  * отмены. Успех подтверждается ВЛОЖЕННЫМ полем code (строка "200"), внешнего status мало.
  */
 export interface BinanceAlgoOrderCancelAckRaw {
-  algoId: number;
+  algoId: number | string;
   clientAlgoId: string;
   code: string;
   msg: string;

@@ -100,6 +100,7 @@ Generic JSON parser, используется всеми WebSocket стрима�
 function parseWebSocketMessage<T>(rawData: RawData): T
 ```
 Заменяет 7 ранее идентичных parse-функций. Каждый стрим вызывает через inline arrow: `(rawData) => parseWebSocketMessage<SpecificType>(rawData)`.
+Для числовых идентификаторов вне безопасного диапазона использует тот же разбор, что HTTP-клиент: исходные цифры сохраняются строкой, в том числе у Binance `o.i` в событии заявки и `algoId` в ответе торгового потока.
 
 ## Error Protection
 

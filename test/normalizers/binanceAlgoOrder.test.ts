@@ -1,4 +1,4 @@
-import { normalizeBinanceAlgoOrder, mergeBinanceTriggeredOrder } from '../../src/normalizers/binanceNormalizer';
+import { normalizeBinanceAlgoOrder, mergeBinanceTriggeredOrder, isBinanceAlgoOrderRaw } from '../../src/normalizers/binanceNormalizer';
 import type { BinanceAlgoOrderRaw, BinanceOrderResponseRaw } from '../../src/normalizers/binanceNormalizer';
 import { OrderSideEnum, OrderTypeEnum, TimeInForceEnum } from '../../src/types/common';
 
@@ -33,6 +33,15 @@ const RAW_UNTRIGGERED: BinanceAlgoOrderRaw = {
 };
 
 describe('normalizeBinanceAlgoOrder', () => {
+  it('accepts an exact large numeric ID preserved as a string', () => {
+    const raw = { ...RAW_UNTRIGGERED, algoId: '633327759348341108' };
+
+    expect(isBinanceAlgoOrderRaw(raw)).toBe(true);
+    expect(normalizeBinanceAlgoOrder(raw).id).toBe('633327759348341108');
+    expect(isBinanceAlgoOrderRaw({ ...raw, algoId: '' })).toBe(false);
+    expect(isBinanceAlgoOrderRaw({ ...raw, algoId: '12x' })).toBe(false);
+  });
+
   it('maps the algo identity onto the unified order shape', () => {
     const order = normalizeBinanceAlgoOrder(RAW_UNTRIGGERED);
 
