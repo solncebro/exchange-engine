@@ -62,6 +62,42 @@ describe('OkxHttpClient', () => {
     });
   });
 
+  describe('public-only credentials', () => {
+    it('accepts empty credentials and sends an unsigned public request', async () => {
+      const publicClient = new OkxHttpClient({
+        baseUrl: 'https://www.okx.com', apiKey: '', secret: '', passphrase: '', isDemoMode: false, logger,
+      });
+      mockInstance.get.mockResolvedValue(okxSuccess([{ instId: 'BTC-USDT-SWAP' }]));
+
+      await expect(publicClient.fetchInstruments('SWAP')).resolves.toEqual([{ instId: 'BTC-USDT-SWAP' }]);
+      expect(mockInstance.get.mock.calls[0][1].headers).toEqual({});
+    });
+
+    it.each([
+      { apiKey: 'testKey', secret: '' },
+      { apiKey: '', secret: 'testSecret' },
+    ])('rejects partial credentials without a passphrase: %p', (credentials) => {
+      expect(() => new OkxHttpClient({
+        baseUrl: 'https://www.okx.com', ...credentials, passphrase: '', isDemoMode: false, logger,
+      })).toThrow(expect.objectContaining({ code: 'OKX_PASSPHRASE_REQUIRED' }));
+    });
+
+    it.each([
+      { apiKey: '', secret: '', passphrase: '' },
+      { apiKey: '', secret: 'testSecret', passphrase: 'testPassphrase' },
+      { apiKey: 'testKey', secret: '', passphrase: 'testPassphrase' },
+    ])('rejects private requests before HTTP when credentials are incomplete: %p', async (credentials) => {
+      const publicClient = new OkxHttpClient({
+        baseUrl: 'https://www.okx.com', ...credentials, isDemoMode: false, logger,
+      });
+
+      await expect(publicClient.placeOrder({ instId: 'BTC-USDT-SWAP' })).rejects.toMatchObject({ code: 'OKX_CREDENTIALS_REQUIRED' });
+      await expect(publicClient.fetchBalance()).rejects.toMatchObject({ code: 'OKX_CREDENTIALS_REQUIRED' });
+      expect(mockInstance.post).not.toHaveBeenCalled();
+      expect(mockInstance.get).not.toHaveBeenCalled();
+    });
+  });
+
   describe('responses without a data field', () => {
     it('fetchInstruments returns an empty list instead of throwing', async () => {
       mockInstance.get.mockResolvedValue({ data: { code: '0', msg: '' } });

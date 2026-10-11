@@ -1,6 +1,6 @@
 {
   "name": "@solncebro/exchange-engine",
-  "version": "0.26.0",
+  "version": "0.26.1",
   "description": "Universal TypeScript client library for Binance, Bybit and OKX with unified API, type safety, and WebSocket support",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

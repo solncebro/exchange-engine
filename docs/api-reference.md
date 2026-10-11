@@ -39,9 +39,12 @@ class Exchange {
 
 При `ExchangeNameEnum.Binance` создает `BinanceFutures` + `BinanceSpot`.
 При `ExchangeNameEnum.Bybit` создает `BybitLinear` + `BybitSpot`.
-При `ExchangeNameEnum.Okx` создает `OkxSwap` + `OkxSpot`. Для OKX обязательна кодовая фраза
-(`ExchangeConfig.passphrase`): без неё конструктор `Exchange` сразу выбрасывает `ExchangeError`
-с кодом `OKX_PASSPHRASE_REQUIRED`.
+При `ExchangeNameEnum.Okx` создает `OkxSwap` + `OkxSpot`. Для публичного чтения OKX ключ,
+секрет и кодовую фразу можно оставить пустыми. Если ключ или секрет заданы без кодовой фразы
+(`ExchangeConfig.passphrase`), создание клиента отклоняется с `OKX_PASSPHRASE_REQUIRED`.
+Закрытый HTTP-запрос без полного набора реквизитов отклоняется до отправки с
+`OKX_CREDENTIALS_REQUIRED`. Доказательство: `src/http/OkxHttpClient.ts:103` и
+`src/http/OkxHttpClient.ts:124`.
 
 ### Подсчёты главного счёта — `exchange.subAccount` (0.26.0)
 
@@ -276,9 +279,11 @@ interface FetchSubAccountBalancesArgs {
 
 ### Кодовая фраза
 
-OKX подписывает каждый запрос тройкой «ключ, секрет, кодовая фраза». Поэтому
-`ExchangeConfig.passphrase` для OKX обязателен, и клиент отказывается создаваться без неё —
-сразу, в конструкторе, а не при первом запросе.
+Закрытые HTTP-запросы OKX подписываются тройкой «ключ, секрет, кодовая фраза».
+При пустом наборе реквизитов доступны публичные данные. Если ключ или секрет указаны,
+но кодовая фраза отсутствует, создание клиента отклоняется с `OKX_PASSPHRASE_REQUIRED`.
+Неполный набор реквизитов при закрытом HTTP-запросе даёт `OKX_CREDENTIALS_REQUIRED`
+до отправки. Доказательство: `src/http/OkxHttpClient.ts:103` и `src/http/OkxHttpClient.ts:124`.
 
 ### Условные заявки идут через отдельную службу биржи
 
@@ -2342,6 +2347,12 @@ interface Position {
 ```
 
 #### `Order`
+
+Номера заявок передаются строками. Большие целые номера из ответов HTTP и сообщений
+WebSocket сохраняют исходные цифры без округления; не преобразовывайте их в обычное число.
+То же правило действует при постраничном чтении исполнений Binance.
+Доказательство: `src/utils/parseJsonPreservingLargeIntegers.ts:5`,
+`src/normalizers/binanceNormalizer.ts:734`, `src/exchanges/BinanceFutures.ts:1097`.
 
 ```typescript
 interface Order {

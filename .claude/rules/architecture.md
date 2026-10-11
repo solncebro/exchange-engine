@@ -80,6 +80,7 @@ Exchange (фабрика)
 ├── Утилиты (src/utils/, src/precision/, src/constants/)
 │   ├── precision.ts — roundToStep для amount/price
 │   ├── decimalString.ts — точный перевод монет в контракты и обратно (OKX)
+│   ├── parseJsonPreservingLargeIntegers.ts — общий разбор HTTP/WS с сохранением больших целых чисел точными строками
 │   ├── klineLoader.ts — параллельная загрузка klines чанками
 │   ├── httpParams.ts — applyTimeRangeOptions, buildOptionalParams
 │   ├── crypto.ts — hmacSha256
@@ -125,7 +126,7 @@ exchange.close()  // → закрывает оба
 демо-режиме и на OKX — `UnsupportedSubAccount`: каждый метод бросает
 `ExchangeError('SUB_ACCOUNT_NOT_SUPPORTED')` без выхода в сеть. Методов `ExchangeClient` это не
 трогает — рыночные клиенты о подсчётах не знают.
-При `ExchangeNameEnum.Okx` создаёт `OkxSwap` + `OkxSpot`; кодовая фраза (`ExchangeConfig.passphrase`) обязательна — без неё конструктор сразу бросает `ExchangeError('OKX_PASSPHRASE_REQUIRED')`.
+При `ExchangeNameEnum.Okx` создаёт `OkxSwap` + `OkxSpot`. Полностью пустые реквизиты допустимы для публичного чтения; ключ или секрет без кодовой фразы (`ExchangeConfig.passphrase`) отклоняются при создании с `OKX_PASSPHRASE_REQUIRED`. Закрытые HTTP-запросы требуют всех трёх реквизитов и при неполном наборе отклоняются до отправки с `OKX_CREDENTIALS_REQUIRED`. Доказательство: `src/http/OkxHttpClient.ts:103` и `src/http/OkxHttpClient.ts:124`.
 
 ## Subpath-экспорт `./public` (src/public.ts, 0.16.0)
 

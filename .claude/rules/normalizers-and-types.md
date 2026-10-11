@@ -64,7 +64,7 @@ BinanceTicker24hrRaw { symbol, lastPrice: string, priceChangePercent: string, ti
 - `OrderRateLimitSource` (`types/exchange.ts`) — `'binance-exchange-info' | 'bybit-exchange-header' | 'bybit-documented' | 'okx-documented' | 'fallback'`
 
 ### Конфигурация:
-- `ExchangeConfig` — `{ apiKey, secret, passphrase?, recvWindow?, isDemoMode?, httpsAgent?, publicStreamConnectionPacking?, lazyOrderbookParse? }`. `passphrase` читает ТОЛЬКО OKX, и для него оно обязательно: пустое значение — `ExchangeError('OKX_PASSPHRASE_REQUIRED')` в конструкторе клиента
+- `ExchangeConfig` — `{ apiKey, secret, passphrase?, recvWindow?, isDemoMode?, httpsAgent?, publicStreamConnectionPacking?, lazyOrderbookParse? }`. `passphrase` читает только OKX: для публичного чтения все три реквизита могут быть пустыми; ключ или секрет без кодовой фразы дают `OKX_PASSPHRASE_REQUIRED` при создании, закрытый HTTP-запрос без полного набора даёт `OKX_CREDENTIALS_REQUIRED` до отправки. Доказательство: `src/http/OkxHttpClient.ts:103` и `src/http/OkxHttpClient.ts:124`.
 
 ### Интерфейсы:
 - `Ticker` — `{ symbol, lastPrice, openPrice, highPrice, lowPrice, priceChangePercent, volume, quoteVolume, timestamp, markPrice?, indexPrice?, bid1Price?, bid1Size?, ask1Price?, ask1Size?, fundingRate?, nextFundingTime? }` (последние 8 полей заполняются Bybit tickers, когда биржа их прислала)

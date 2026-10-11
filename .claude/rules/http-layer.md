@@ -134,8 +134,10 @@ Rate limiting в `BaseHttpClient` — **только реактивный** (н�
 
 Независимый от Binance и Bybit — наследует `BaseHttpClient` напрямую. Один клиент на оба рынка: инструмент задаётся параметром `instType` (`'SWAP' | 'SPOT'`).
 
+Конструктор допускает полностью пустые реквизиты для публичного чтения. Если ключ или секрет заданы без кодовой фразы, создание отклоняется с `OKX_PASSPHRASE_REQUIRED`. Перед подписью любого закрытого запроса проверяются все три реквизита: отсутствие хотя бы одного даёт `OKX_CREDENTIALS_REQUIRED` до отправки запроса. Публичные заголовки и публичное чтение не требуют реквизитов.
+
 ### Кодовая фраза
-Конструктор бросает `ExchangeError('OKX API requires a passphrase (ExchangeConfig.passphrase)', 'OKX_PASSPHRASE_REQUIRED', 'OKX')` при пустой строке. Это и есть точка, где `new Exchange(ExchangeNameEnum.Okx, ...)` отказывает без кодовой фразы.
+Конструктор бросает `ExchangeError('OKX API requires a passphrase (ExchangeConfig.passphrase)', 'OKX_PASSPHRASE_REQUIRED', 'OKX')` при пустой кодовой фразе, только если ключ или секрет непустые. Полностью пустой набор реквизитов допускается. Доказательство: `src/http/OkxHttpClient.ts:103`.
 
 ### OKX signing (src/auth/okxAuth.ts):
 1. Строка для подписи: `${timestamp}${method}${requestPath}${body}` — путь берётся ВМЕСТЕ с параметрами запроса (`buildRequestPath` сериализует их тем же `serializeQueryParams`, что и axios: подписанная и отправленная строки байт-в-байт совпадают).

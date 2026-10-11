@@ -100,7 +100,7 @@ class OkxHttpClient extends BaseHttpClient {
   constructor(args: OkxHttpClientArgs) {
     super({ baseUrl: args.baseUrl, apiKey: args.apiKey, logger: args.logger, timeout: OKX_REQUEST_TIMEOUT, httpsAgent: args.httpsAgent });
 
-    if (args.passphrase === '') {
+    if (args.passphrase === '' && (args.apiKey !== '' || args.secret !== '')) {
       throw new ExchangeError('OKX API requires a passphrase (ExchangeConfig.passphrase)', 'OKX_PASSPHRASE_REQUIRED', 'OKX');
     }
 
@@ -122,6 +122,10 @@ class OkxHttpClient extends BaseHttpClient {
   }
 
   private buildSignedHeaders(method: 'GET' | 'POST', requestPath: string, body: string): Record<string, string> {
+    if (this.apiKey === '' || this.secret === '' || this.passphrase === '') {
+      throw new ExchangeError('OKX private requests require complete credentials', 'OKX_CREDENTIALS_REQUIRED', 'OKX');
+    }
+
     const headers = buildOkxAuthHeaders({
       apiKey: this.apiKey,
       secret: this.secret,

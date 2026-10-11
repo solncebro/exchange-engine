@@ -66,6 +66,8 @@
 - `setMarginMode(mode, symbol)` для Binance futures: код Binance `-4046` (`No need to change margin type.`) обрабатывается как no-op без throw (логируется на HTTP-слое)
 - HTTP: `BinanceFuturesHttpClient`, WS: `BinanceFuturesPublicStream`
 
+При чтении истории исполнений `fetchUserTradeHistory()` удаляет повторы по точной строке номера. Следующий `fromId` вычисляется через `BigInt` и передаётся строкой, если выходит за безопасный числовой диапазон; порядок исполнений с одинаковым временем также сравнивает точные номера через `BigInt`. Доказательство: `src/exchanges/BinanceFutures.ts:1078`, `src/exchanges/BinanceFutures.ts:1097`, `src/normalizers/binanceNormalizer.ts:1054`.
+
 ### Отказ обеих служб: «спросить не удалось» ≠ «заявки нет» (0.25.0)
 
 Чтение (`readOrderFromOwningService`) и отмена (`cancelOrder`) заявки неизвестного происхождения

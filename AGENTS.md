@@ -47,7 +47,9 @@ Exchange (фабрика) → ExchangeClient (интерфейс)
   │   ├── User data стримы (BinanceUserDataStream, BybitPrivateStream, OkxPrivateStream ×2)
   │   ├── bybitWebSocketAuth — authenticateBybitWebSocket
   │   ├── okxWebSocketAuth — authenticateOkxWebSocket; OkxSilenceWatchdog — сторож тишины по рыночным данным у публичного потока OKX (текстовый ping/pong и разрыв немого сокета — дело движка соединений)
-  │   └── parseWebSocketMessage — generic WS parser
+  │   └── parseWebSocketMessage — общий разбор сообщений с сохранением больших целых номеров
+  │
+  ├── src/utils/parseJsonPreservingLargeIntegers.ts — общий разбор HTTP/WS: большие целые числа сохраняются точными строками
   │
   └── src/public.ts — subpath-точка входа `./public`: только публичные стримы, без HTTP/trade/user-data
 ```
@@ -60,7 +62,9 @@ Exchange (фабрика) → ExchangeClient (интерфейс)
 
 **Паритет spot/futures**: spot-классы выбрасывают `"Not supported for spot market"` для фьючерсных методов.
 
-**Единицы OKX**: бессрочный контракт OKX меряется штуками, поэтому объёмы переводятся в монеты и обратно внутри клиента (`src/utils/decimalString.ts`) — наружу все величины в монетах, как у соседей. Кодовая фраза (`ExchangeConfig.passphrase`) для OKX обязательна.
+**Единицы OKX**: бессрочный контракт OKX меряется штуками, поэтому объёмы переводятся в монеты и обратно внутри клиента (`src/utils/decimalString.ts`) — наружу все величины в монетах, как у соседей.
+
+**Реквизиты OKX**: для публичного чтения ключ, секрет и кодовую фразу можно оставить пустыми. Ключ или секрет без кодовой фразы отклоняются при создании клиента; закрытые HTTP-запросы требуют всех трёх реквизитов. Доказательство: `src/http/OkxHttpClient.ts:103` и `src/http/OkxHttpClient.ts:124`.
 
 ### Тесты
 

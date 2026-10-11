@@ -7,6 +7,7 @@
 | Файл | Покрытие |
 |------|----------|
 | BaseExchangeClient.test.ts | createNotifyHandler: проксирование обычных и CRITICAL сообщений, отсутствие `process.exit` в обоих случаях, async onNotify, error safety |
+| BinanceFutures.test.ts | точные большие номера исполнений при переходе между страницами и удалении повторов; сохранение номера закрывающей заявки |
 | BinanceFuturesTwoServiceFailure.test.ts | отказ ОБЕИХ служб заявок: сбой связи условной службы выходит наружу своей причиной и попадает в журнал; обе «заявки нет» — прежний ответ обычной книги (0.25.0) |
 | BybitOrderRateLimit.test.ts | `getOrderRateLimit` после ОДИНОЧНОЙ постановки отдаёт предел из заголовка биржи (`bybit-exchange-header`); без заголовка — документированная константа; спот и linear имеют свои (0.25.0) |
 
@@ -17,6 +18,7 @@
 | Файл | Покрытие |
 |------|----------|
 | BybitInstrumentsPaging.test.ts | потолок страниц обхода списка инструментов: бесконечный курсор останавливается на `BYBIT_INSTRUMENTS_MAX_PAGE_COUNT`, честное предупреждение о неполноте, обычный обход в две страницы проходит целиком и молча (0.25.0) |
+| BaseHttpClient.test.ts | разбор больших целых номеров без округления, разные номера открытых заявок, прежний разбор пустых ответов и ошибок |
 
 ## Тест-файлы WebSocket
 
@@ -34,7 +36,7 @@
 | BybitTradeStream.initConnection.test.ts | connection with auth, buildOrderRequest format |
 | BybitTradeStream.batch.test.ts | три WS batch-метода (`createBatchOrders`/`modifyBatchOrders`/`cancelBatchOrders`), top-level errors, timeout, orphan context cleanup, kind mismatch protection |
 | TradeToKlineAggregator.test.ts | processTrade aggregation, forceEmit, clearSymbol, first-trade skip |
-| parseWebSocketMessage.test.ts | JSON parsing, error handling |
+| parseWebSocketMessage.test.ts | разбор сообщений, ошибки синтаксиса, точные большие номера обычных и условных заявок Binance |
 | bybitWebSocketUtils.test.ts | pong detection (heartbeat only — HMAC-аутентификация вынесена в bybitWebSocketAuth.test.ts) |
 | bybitWebSocketAuth.test.ts | authenticateBybitWebSocket: HMAC-подпись, ожидание `auth`-ответа, ошибки |
 | OkxPublicStream.test.ts | три набора соединений (глубокий стакан отдельно, потолок 29), темы и их досыпка пачками, ленивый разбор, переподписка и пересоздание, `close`; стакан: кадр с разрывом не отдаётся, приращения молчат до снимка, все три ступени лечения; соединение без тем закрывается и исчезает из реестра; уведомление о плановом разрыве переоткрывает соединение; бюджет 480 операций в час; сторож: `pong` — ответ, но не данные, немое соединение с темами переподписывается без разрыва; отказ снимающей отправки не выходит из микрозадачи; отвергнутая подписка снова отправляется; потерянная тема возвращается в работу |
@@ -58,7 +60,7 @@
 | test/exchanges/okxConditionalParity.test.ts | сквозные обещания условных заявок OKX наравне с соседями |
 | test/exchanges/okxSymbol.test.ts | разбор `instId`, запасной разбор имени, отказ на чужом рынке |
 | test/exchanges/ConditionalOrderRegistry.test.ts | запись, чтение, вытеснение по размеру, устаревание по времени |
-| test/http/OkxHttpClient.test.ts | подпись и демо-заголовок, проверка ответов (в т.ч. поэлементных и пакетных), повтор при 50011, пересдача при 50102, постраничное дочитывание |
+| test/http/OkxHttpClient.test.ts | подпись и демо-заголовок, проверка ответов (в т.ч. поэлементных и пакетных), повтор при 50011, пересдача при 50102, постраничное дочитывание; публичное чтение без реквизитов и отказ закрытого HTTP-запроса при неполном наборе до отправки |
 | test/http/okxTimestampError.test.ts | распознавание кода 50102 в разных формах ошибки |
 | test/normalizers/okxNormalizer.test.ts | все функции нормализации |
 | test/utils/decimalString.test.ts | перевод монет в контракты и обратно, точная арифметика, показательная запись |
@@ -66,6 +68,10 @@
 | test/constants/okx.test.ts | карты интервалов и их обратимость |
 
 Мокирование `authenticateBybitWebSocket` в тестах `BybitPrivateStream`/`BybitTradeStream` теперь идёт по новому пути: `jest.mock('../../src/ws/bybitWebSocketAuth', () => ({ authenticateBybitWebSocket: jest.fn().mockResolvedValue(undefined) }))` (раньше — `jest.mock('../../src/ws/bybitWebSocketUtils', ...)` с `requireActual` + override).
+
+## Общий разбор больших целых чисел
+
+`test/utils/parseJsonPreservingLargeIntegers.test.ts` проверяет точные строки больших положительных и отрицательных целых чисел, сохранение обычных чисел, дробной и показательной записи, строк и экранированного содержимого, а также ошибки синтаксиса. Реализация — `src/utils/parseJsonPreservingLargeIntegers.ts:5`.
 
 ## Живые проверки: что где лежит
 

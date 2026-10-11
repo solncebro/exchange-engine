@@ -4,7 +4,15 @@ Universal TypeScript client library for cryptocurrency trading on Binance, Bybit
 
 ## Latest Release
 
-Текущая версия: `0.26.0`
+Текущая версия: `0.26.1`
+
+- **Точные номера заявок и сделок:** большие целые номера в ответах HTTP и сообщениях WebSocket сохраняются строками без округления.
+- **История исполнений Binance:** переход между страницами, удаление повторов и порядок сделок с одинаковым временем учитывают точные большие номера.
+- **Публичное чтение OKX без ключей:** можно оставить ключ, секрет и кодовую фразу пустыми. Для закрытых HTTP-запросов нужен полный набор реквизитов; проверка выполняется до отправки.
+
+Доказательство: `src/utils/parseJsonPreservingLargeIntegers.ts:5`, `src/exchanges/BinanceFutures.ts:1078`, `src/exchanges/BinanceFutures.ts:1097`, `src/http/OkxHttpClient.ts:103` и `src/http/OkxHttpClient.ts:124`.
+
+Предыдущий выпуск: `0.26.0`.
 
 - **Округление по шагу инструмента:** направление можно выбрать — к ближайшему значению, вверх или вниз.
 - **Ступени плеча:** единое чтение ограничений позиции и требований к марже на Binance, Bybit и OKX.
@@ -12,9 +20,9 @@ Universal TypeScript client library for cryptocurrency trading on Binance, Bybit
 - **Исправления биржевых клиентов:** чтение страниц Bybit, ограничения запросов Binance, порядок свечей OKX и отмена всех заявок Binance Spot.
 - **Совместимость соединений:** требуется `@solncebro/websocket-engine` версии не ниже 0.6.1 и ниже 1.0.0; эта версия разрешает текстовую проверку живости OKX.
 
-Предыдущий выпуск: `0.25.0`.
+Ранее в `0.25.0`:
 
-- **OKX support** — a third exchange behind the same `ExchangeClient` interface: `new Exchange('okx', …)` returns USDT/USDC-settled linear perpetuals (`exchange.futures`) and spot (`exchange.spot`). Symbols stay unified (`BTCUSDT`) and sizes stay in coins — the contract↔coin conversion, the instrument-id translation and OKX's separate conditional-order service are handled inside the client. OKX requires `ExchangeConfig.passphrase` (the client refuses to construct without it), and a client order id must be 1–32 letters or digits. See [docs/api-reference.md](https://github.com/solncebro/exchange-engine/blob/main/docs/api-reference.md#особенности-okx) for the exchange quirks a consumer has to know (quote volume on perpetuals is an estimate, `triggerDirection` is ignored, margin mode is remembered client-side, no index price in the mark-price stream).
+- **Поддержка OKX:** третья биржа с единым договором клиента — бессрочные линейные контракты с расчётами в USDT/USDC и спот. Обозначения инструментов остаются общими (`BTCUSDT`), объёмы — в монетах. Перевод контрактов в монеты, обозначений инструментов и работа с отдельной службой условных заявок выполняются внутри библиотеки. Пользовательский номер заявки должен содержать от 1 до 32 букв или цифр. Объём контрактов в котируемой валюте вычисляется приближённо, направление срабатывания условия не используется, режим маржи хранится в клиенте, а поток цены маркировки не содержит индексную цену. Доказательство и условия использования реквизитов: [справка по OKX](https://github.com/solncebro/exchange-engine/blob/main/docs/api-reference.md#особенности-okx).
 
 Previously in `0.24.0`:
 
@@ -65,7 +73,6 @@ const exchange = new Exchange('binance', {
   onNotify: (msg) => telegramBot.send(msg), // optional notifications
 });
 
-// OKX also needs a passphrase — without it the constructor throws right away
 const okx = new Exchange('okx', {
   config: {
     apiKey: process.env.OKX_API_KEY,
@@ -124,8 +131,6 @@ const exchange = new Exchange('binance' | 'bybit' | 'okx', {
   logger: ExchangeLogger;
   onNotify?: (message: string) => void | Promise<void>;
 });
-
-// `passphrase` is required for OKX only — Binance and Bybit ignore it
 
 // Access exchange clients
 exchange.futures   // BinanceFutures | BybitLinear | OkxSwap
@@ -353,7 +358,7 @@ const exchange = new Exchange('binance', {
 
 - **Binance**: Read, Trade, Withdraw permissions (for different features)
 - **Bybit**: Single API key handles all
-- **OKX**: key + secret + **passphrase**; the passphrase goes into `ExchangeConfig.passphrase`
+- **OKX:** для закрытых HTTP-запросов нужны ключ, секрет и кодовая фраза (`ExchangeConfig.passphrase`). Для публичного чтения все три значения можно оставить пустыми. Ключ или секрет без кодовой фразы отклоняются при создании клиента. Доказательство: `src/http/OkxHttpClient.ts:103` и `src/http/OkxHttpClient.ts:124`.
 
 ### Order Placement
 

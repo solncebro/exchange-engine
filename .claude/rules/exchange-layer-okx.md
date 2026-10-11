@@ -10,7 +10,7 @@
 
 Поля: `instType`, `isSwap`, `symbolMap: OkxSymbolMap`, `contractValueBySymbol`, `lotSizeBySymbol`, `groupIdBySymbol`, `conditionalOrderRegistry`, `publicStream`, `tradeStream`, `privateStream`/`algoPrivateStream` (оба `null` до `connectUserDataStream`), `accountConfig` (ленивый кеш `/api/v5/account/config`).
 
-Конструктор: кодовая фраза берётся из `config.passphrase ?? ''` и передаётся в `OkxHttpClient`, который при пустом значении бросает `ExchangeError('OKX API requires a passphrase (ExchangeConfig.passphrase)', 'OKX_PASSPHRASE_REQUIRED', 'OKX')`. **Отказ происходит в конструкторе клиента**, то есть и в `new Exchange(ExchangeNameEnum.Okx, ...)` — потребитель узнаёт сразу, а не при первом запросе. Сторож — `test/exchanges/Exchange.test.ts`, случай «rejects okx without a passphrase right at construction».
+Конструктор: кодовая фраза берётся из `config.passphrase ?? ''` и передаётся в `OkxHttpClient`. Полностью пустые ключ, секрет и кодовая фраза допустимы для публичного чтения. Ключ или секрет без кодовой фразы дают `OKX_PASSPHRASE_REQUIRED` при создании; закрытый HTTP-запрос без всех трёх реквизитов даёт `OKX_CREDENTIALS_REQUIRED` до отправки. Доказательство: `src/http/OkxHttpClient.ts:103`, `src/http/OkxHttpClient.ts:124`, `test/http/OkxHttpClient.test.ts:65`.
 
 Demo mode (`config.isDemoMode`) выбирает адреса потоков (`OKX_DEMO_*`) и включает в HTTP-клиенте заголовок `x-simulated-trading: 1`. В отличие от Bybit, у OKX торговый и приватный каналы доступны и в демо — REST-фолбэка «в демо только через REST» здесь нет.
 
