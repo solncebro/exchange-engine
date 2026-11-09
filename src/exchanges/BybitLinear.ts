@@ -1,4 +1,12 @@
-import type { CreateOrderWebSocketArgs, ExchangeArgs, FetchPageWithLimitArgs, SetLeverageResult } from '../types/exchange';
+import type { SetBybitLeverageArgs, SymbolLimitFilterArgs } from '../http/BybitHttpClient.types';
+import type { BybitPositionListWithAccountInfo, BybitRememberedAccountInfo } from './BybitLinear.types';
+import type { BybitAccountInfoRaw, BybitPositionRaw } from '../normalizers/bybitNormalizer';
+import type { AddIsolatedPositionMarginArgs, FetchOrderExecutionSummaryArgs, SetLeverageOptions } from '../types/exchange';
+import type { OrderExecutionSummary } from '../types/common';
+import { buildOrderExecutionWindowList, summarizeOrderExecutionList } from '../utils/orderExecutionSummary';
+import type { OrderExecutionEntry } from '../utils/orderExecutionSummary.types';
+import { sleep } from '../utils/sleep';
+import type { CreateOrderWebSocketArgs, ExchangeArgs, FetchFundingRateHistoryArgs, SetLeverageResult } from '../types/exchange';
 import type { Position, Order, FundingRateHistory, FundingInfo, MarkPrice, OpenInterest, LeverageTier, LeverageTierListBySymbol } from '../types/common';
 import { MarginModeEnum, OrderSideEnum, OrderTypeEnum, PositionModeEnum, TimeInForceEnum } from '../types/common';
 import { ExchangeError } from '../errors/ExchangeError';
@@ -10,6 +18,10 @@ import {
 } from './bybitTrailingStopId';
 import {
   normalizeBybitPosition,
+  normalizeBybitPositionList,
+  isBybitPortfolioMarginAccount,
+  resolveBybitMarginMode,
+  resolveBybitPositionMarginMode,
   normalizeBybitFundingRateHistoryList,
   normalizeBybitFundingInfoList,
   normalizeBybitMarkPriceList,
@@ -19,17 +31,22 @@ import {
 import {
   BYBIT_PUBLIC_LINEAR_WEBSOCKET_URL,
   BYBIT_LINEAR_BATCH_CHUNK_SIZE,
+  BYBIT_MARK_PRICE_KLINE_READ_INTERVAL_MS,
+  BYBIT_ISOLATED_MARGIN_MODE,
+  BYBIT_CROSS_MARGIN_MODE,
+  BYBIT_LINEAR_SETTLE_COIN,
+  BYBIT_MARGIN_MODE_UNKNOWN_ERROR_CODE,
+  BYBIT_ORDER_EXECUTION_PAGE_INTERVAL_MS,
+  BYBIT_POSITION_MARGIN_DECIMAL_PLACES,
 } from '../constants/bybit';
 import { BybitBaseClient } from './BybitBaseClient';
 
 const BYBIT_LEVERAGE_NOOP_ERROR_CODE = 110043;
+const ONE_MINUTE_MS = 60_000;
 
 /** Скольжение ведёт позицию целиком: частичного режима у него в нашем контракте нет. */
 const BYBIT_TRAILING_STOP_TPSL_MODE = 'Full';
 
-/** Как Bybit называет режимы маржи счёта; «обычный» у него и есть кросс-маржа. */
-const BYBIT_ISOLATED_MARGIN_MODE = 'ISOLATED_MARGIN';
-const BYBIT_CROSS_MARGIN_MODE = 'REGULAR_MARGIN';
 // The settle coin of the linear USDT contracts whose position mode is switched as one.
 const BYBIT_POSITION_MODE_SETTLE_COIN = 'USDT';
 
@@ -44,6 +61,8 @@ interface BuildBybitTrailingStopOrderArgs {
 class BybitLinear extends BybitBaseClient {
   protected readonly marketLabel = 'linear';
   protected readonly batchChunkSize = BYBIT_LINEAR_BATCH_CHUNK_SIZE;
+  private rememberedAccountInfo: BybitRememberedAccountInfo | null = null;
+  private accountInfoReadSequence = 0;
 
   constructor(args: ExchangeArgs) {
     super({
@@ -209,11 +228,71 @@ class BybitLinear extends BybitBaseClient {
     });
   }
 
-  async fetchFundingRateHistory(symbol: string, options?: FetchPageWithLimitArgs): Promise<FundingRateHistory[]> {
+  async fetchOrderExecutionSummary(args: FetchOrderExecutionSummaryArgs): Promise<OrderExecutionSummary> {
+    const executionList: OrderExecutionEntry[] = [];
+
+    for (const [windowIndex, window] of buildOrderExecutionWindowList(args).entries()) {
+      if (windowIndex > 0) await sleep(BYBIT_ORDER_EXECUTION_PAGE_INTERVAL_MS);
+
+      const rawList = await this.httpClient.fetchAllOrderExecutionList({ symbol: args.symbol, orderId: args.orderId, ...window });
+
+      for (const raw of rawList) {
+        if (raw.execType !== 'Trade') throw new Error('Unsupported order execution type');
+
+        executionList.push({ id: raw.execId, orderId: raw.orderId, symbol: raw.symbol, amount: Number(raw.execQty), price: Number(raw.execPrice), quoteAmount: Number(raw.execValue), feeAmount: raw.execFee === undefined || raw.execFee === '' ? null : Number(raw.execFee), feeAsset: raw.feeCurrency?.trim() ? raw.feeCurrency : null, timeMs: Number(raw.execTime) });
+      }
+    }
+
+    return summarizeOrderExecutionList({ ...args, executionList });
+  }
+
+  async fetchFundingRateHistory(symbol: string, options?: FetchFundingRateHistoryArgs): Promise<FundingRateHistory[]> {
     this.logger.debug(`[Bybit] Fetching funding rate history for ${symbol}`);
     const raw = await this.httpClient.fetchFundingHistory('linear', symbol, options);
+    const fundingRateHistoryList = normalizeBybitFundingRateHistoryList(raw.result.list);
 
-    return normalizeBybitFundingRateHistoryList(raw.result.list);
+    if (options?.shouldIncludeMarkPrices !== true) {
+      return fundingRateHistoryList;
+    }
+
+    for (const [index, fundingRateHistory] of fundingRateHistoryList.entries()) {
+      if (index > 0) await sleep(BYBIT_MARK_PRICE_KLINE_READ_INTERVAL_MS);
+
+      fundingRateHistory.markPrice = await this.fetchFundingMarkPrice(symbol, fundingRateHistory.fundingTime);
+    }
+
+    return fundingRateHistoryList;
+  }
+
+  private async fetchFundingMarkPrice(symbol: string, fundingTime: number): Promise<number | null> {
+    if (!Number.isFinite(fundingTime)) {
+      this.logger.warn(`[Bybit] Cannot enrich funding history for ${symbol}: invalid funding time`);
+
+      return null;
+    }
+
+    try {
+      const raw = await this.httpClient.fetchMarkPriceKline({
+        category: 'linear',
+        symbol,
+        start: fundingTime,
+        end: fundingTime + ONE_MINUTE_MS - 1,
+      });
+      const markPriceKline = raw.result.list.find((entry) => Number(entry[0]) === fundingTime);
+      const markPrice = Number(markPriceKline?.[1]);
+
+      if (!markPriceKline || !Number.isFinite(markPrice) || markPrice <= 0) {
+        this.logger.warn(`[Bybit] Cannot enrich funding history for ${symbol} at ${fundingTime}: exact mark-price kline is unavailable`);
+
+        return null;
+      }
+
+      return markPrice;
+    } catch (error) {
+      this.logger.warn(`[Bybit] Cannot enrich funding history for ${symbol} at ${fundingTime}: ${String(error)}`);
+
+      return null;
+    }
   }
 
   /**
@@ -251,20 +330,19 @@ class BybitLinear extends BybitBaseClient {
 
   async fetchPosition(symbol: string): Promise<Position> {
     this.logger.debug(`Fetching position for ${symbol}`);
-    const raw = await this.httpClient.getPositionList('linear', { symbol });
-    const position = raw.result.list[0];
+    const { accountInfo, positionList } = await this.readPositionListWithAccountInfo({ symbol }, this.readAccountInfoForPositionRead());
+    const position = positionList[0];
 
     if (!position) {
       throw new Error(`Position not found for ${symbol}`);
     }
 
-    return normalizeBybitPosition(position);
+    return this.normalizePositionWithAccountInfo(position, accountInfo);
   }
 
   async fetchPositionSnapshot(symbol: string, positionIdx?: number): Promise<Position | null> {
     this.logger.debug(`Fetching position snapshot for ${symbol} (positionIdx=${positionIdx ?? 'any'})`);
-    const raw = await this.httpClient.getPositionList('linear', { symbol });
-    const rawList = raw.result.list ?? [];
+    const { accountInfo, positionList: rawList } = await this.readPositionListWithAccountInfo({ symbol }, this.readAccountInfoForPositionRead());
 
     if (rawList.length === 0) {
       return null;
@@ -289,7 +367,7 @@ class BybitLinear extends BybitBaseClient {
         );
       }
 
-      return normalizeBybitPosition(rawList[0]);
+      return this.normalizePositionWithAccountInfo(rawList[0], accountInfo);
     }
 
     const matched = rawList.find((entry) => entry.positionIdx === positionIdx);
@@ -298,32 +376,140 @@ class BybitLinear extends BybitBaseClient {
       return null;
     }
 
-    return normalizeBybitPosition(matched);
+    return this.normalizePositionWithAccountInfo(matched, accountInfo);
   }
 
   async fetchPositionList(symbol: string): Promise<Position[]> {
     this.logger.debug(`Fetching position list for ${symbol}`);
-    const raw = await this.httpClient.getPositionList('linear', { symbol });
-    const rawList = raw.result.list ?? [];
+    const { accountInfo, positionList } = await this.readPositionListWithAccountInfo({ symbol }, this.readAccountInfoForPositionRead());
 
-    return rawList.map(normalizeBybitPosition);
+    return this.normalizePositionListWithAccountInfo(positionList, accountInfo);
   }
 
   async fetchAllPositions(): Promise<Position[]> {
-    this.logger.debug('[Bybit] Fetching all positions via settleCoin=USDT');
-    const raw = await this.httpClient.getPositionList('linear', { settleCoin: 'USDT' });
-    const rawList = raw.result.list ?? [];
+    this.logger.debug(`[Bybit] Fetching all positions via settleCoin=${BYBIT_LINEAR_SETTLE_COIN}`);
+    const [accountInfo, positionList] = await Promise.all([
+      this.readAccountInfoForPositionRead(),
+      this.httpClient.fetchAllPositionList('linear', { settleCoin: BYBIT_LINEAR_SETTLE_COIN }),
+    ]);
 
-    return rawList
-      .filter((entry) => parseFloat(entry.size) > 0)
-      .map(normalizeBybitPosition);
+    const openPositionList = normalizeBybitPositionList(positionList, accountInfo).filter((position) => position.contracts > 0);
+
+    this.warnAboutPositionListWithUnknownMarginMode(accountInfo, openPositionList);
+
+    return openPositionList;
   }
 
-  async setLeverage(leverage: number, symbol: string): Promise<SetLeverageResult> {
+  private normalizePositionWithAccountInfo(raw: BybitPositionRaw, accountInfo: BybitAccountInfoRaw | null): Position {
+    const position = normalizeBybitPosition(raw, resolveBybitPositionMarginMode(accountInfo, raw));
+
+    this.warnAboutPositionListWithUnknownMarginMode(accountInfo, [position]);
+
+    return position;
+  }
+
+  private normalizePositionListWithAccountInfo(rawList: BybitPositionRaw[], accountInfo: BybitAccountInfoRaw | null): Position[] {
+    const positionList = normalizeBybitPositionList(rawList, accountInfo);
+
+    this.warnAboutPositionListWithUnknownMarginMode(accountInfo, positionList);
+
+    return positionList;
+  }
+
+  // Без сведений о счёте предупреждение уже выдано при их чтении. Иначе неизвестный режим — у единого
+  // счёта незнакомый режим счёта, у классического незнакомая ячейка tradeMode — называется явно.
+  private warnAboutPositionListWithUnknownMarginMode(accountInfo: BybitAccountInfoRaw | null, positionList: Position[]): void {
+    if (accountInfo === null) {
+      return;
+    }
+
+    const symbolList = [...new Set(positionList.filter((position) => position.marginMode === null).map((position) => position.symbol))];
+
+    if (symbolList.length === 0) {
+      return;
+    }
+
+    this.logger.warn(
+      `[Bybit] margin mode of ${symbolList.join(', ')} is unknown ` +
+      `(unifiedMarginStatus=${String(accountInfo.unifiedMarginStatus)}, marginMode=${String(accountInfo.marginMode)}): ` +
+      'positions are read with an unknown margin mode',
+    );
+  }
+
+  async addIsolatedPositionMargin(args: AddIsolatedPositionMarginArgs): Promise<void> {
+    const margin = this.formatIsolatedPositionMarginAmount(args.amount, BYBIT_POSITION_MARGIN_DECIMAL_PLACES);
+
+    await this.httpClient.addPositionMargin({
+      category: 'linear',
+      symbol: args.symbol,
+      margin,
+      positionIdx: resolveBybitPositionIdx(args.positionSide),
+    });
+  }
+
+  private async readPositionListWithAccountInfo<AccountInfo extends BybitAccountInfoRaw | null>(
+    options: SymbolLimitFilterArgs,
+    pendingAccountInfo: Promise<AccountInfo>,
+  ): Promise<BybitPositionListWithAccountInfo<AccountInfo>> {
+    const [accountInfo, positionListResponse] = await Promise.all([
+      pendingAccountInfo,
+      this.httpClient.getPositionList('linear', options),
+    ]);
+
+    return { accountInfo, positionList: positionListResponse.result.list ?? [] };
+  }
+
+  private async readAccountInfo(): Promise<BybitAccountInfoRaw> {
+    this.accountInfoReadSequence++;
+    const readSequence = this.accountInfoReadSequence;
+    const response = await this.httpClient.fetchAccountInfo();
+
+    this.rememberAccountInfo(response.result, readSequence);
+
+    return response.result;
+  }
+
+  private rememberAccountInfo(accountInfo: BybitAccountInfoRaw, readSequence: number): void {
+    if (this.rememberedAccountInfo !== null && this.rememberedAccountInfo.readSequence > readSequence) {
+      return;
+    }
+
+    this.rememberedAccountInfo = { accountInfo, readSequence, rememberedAtMs: Date.now() };
+  }
+
+  private async readAccountInfoForPositionRead(): Promise<BybitAccountInfoRaw | null> {
+    try {
+      return await this.readAccountInfo();
+    } catch (error) {
+      const remembered = this.rememberedAccountInfo;
+      const reason = error instanceof Error ? error.message : String(error);
+
+      if (remembered === null) {
+        this.logger.warn(`[Bybit] /v5/account/info failed (${reason}) and nothing is remembered yet: positions are read with an unknown margin mode`);
+
+        return null;
+      }
+
+      const ageSeconds = Math.round((Date.now() - remembered.rememberedAtMs) / 1000);
+
+      this.logger.warn(
+        `[Bybit] /v5/account/info failed (${reason}): ` +
+        `margin mode is taken from the account information read ${ageSeconds} s ago (marginMode=${String(remembered.accountInfo.marginMode)})`,
+      );
+
+      return remembered.accountInfo;
+    }
+  }
+
+  async setLeverage(leverage: number, symbol: string, options?: SetLeverageOptions): Promise<SetLeverageResult> {
     this.logger.info(`Setting leverage to ${leverage}x for ${symbol}`);
 
+    const params = options?.direction === undefined
+      ? { category: 'linear', symbol, buyLeverage: leverage, sellLeverage: leverage }
+      : await this.readDirectionalLeverageParams(leverage, symbol, options);
+
     try {
-      await this.httpClient.setLeverage({ category: 'linear', symbol, buyLeverage: leverage, sellLeverage: leverage });
+      await this.httpClient.setLeverage(params);
     } catch (error) {
       if (error instanceof ExchangeError && error.code === BYBIT_LEVERAGE_NOOP_ERROR_CODE) {
         // «Плечо не изменилось» = на бирже УЖЕ стоит ровно запрошенное — это подтверждение.
@@ -336,6 +522,61 @@ class BybitLinear extends BybitBaseClient {
     // Ответ Bybit установленного значения не несёт; принятая без ошибки установка ставит ровно
     // запрошенное — контракт подтверждения единый с Binance (см. SetLeverageResult).
     return { confirmedLeverage: leverage };
+  }
+
+  private async readDirectionalLeverageParams(leverage: number, symbol: string, options: SetLeverageOptions): Promise<SetBybitLeverageArgs> {
+    const readResult = await this.readPositionListWithAccountInfo({ symbol }, this.readAccountInfo());
+    const { accountInfo } = readResult;
+
+    if (isBybitPortfolioMarginAccount(accountInfo)) {
+      throw new ExchangeError(
+        `Bybit: directional leverage is unavailable for ${symbol} — the account is in portfolio margin, where the exchange treats leverage rules as invalid`,
+        'LEVERAGE_PORTFOLIO_MARGIN_UNSUPPORTED',
+        'bybit',
+      );
+    }
+
+    const positionList = readResult.positionList.filter(position => position.symbol === symbol);
+    const marginMode = resolveBybitMarginMode(accountInfo, positionList);
+
+    if (marginMode === null) {
+      throw new ExchangeError('Bybit: cannot safely determine margin mode for directional leverage', BYBIT_MARGIN_MODE_UNKNOWN_ERROR_CODE, 'bybit');
+    }
+
+    const params: SetBybitLeverageArgs = { category: 'linear', symbol, buyLeverage: leverage, sellLeverage: leverage };
+
+    if (marginMode !== MarginModeEnum.Isolated) {
+      return params;
+    }
+
+    const isOneWay = positionList.length === 1 && positionList[0].positionIdx === 0;
+
+    if (isOneWay) {
+      return params;
+    }
+
+    const isHedge = positionList.length === 2 &&
+      positionList.some(position => position.positionIdx === 1) &&
+      positionList.some(position => position.positionIdx === 2);
+
+    if (!isHedge) {
+      throw new ExchangeError('Bybit: cannot safely determine position mode for directional leverage', 'LEVERAGE_POSITION_MODE_UNKNOWN', 'bybit');
+    }
+
+    const oppositeIdx = options.direction === 'long' ? 2 : 1;
+    const oppositeLeverage = Number(positionList.find(position => position.positionIdx === oppositeIdx)?.leverage);
+
+    if (!Number.isFinite(oppositeLeverage) || oppositeLeverage <= 0) {
+      throw new ExchangeError('Bybit: opposite side leverage is unavailable', 'LEVERAGE_OPPOSITE_SIDE_UNKNOWN', 'bybit');
+    }
+
+    if (options.direction === 'long') {
+      params.sellLeverage = oppositeLeverage;
+    } else {
+      params.buyLeverage = oppositeLeverage;
+    }
+
+    return params;
   }
 
   async fetchLeverageTierList(symbol: string): Promise<LeverageTier[]> {
@@ -356,20 +597,40 @@ class BybitLinear extends BybitBaseClient {
    * потребителя, попросившего изолированную маржу перед рискованным входом, счёт оставался
    * в прежнем режиме, и узнать об этом было неоткуда.
    *
-   * Сначала читаем текущий режим и молчим, если он уже нужный: лишняя запись в настройки
-   * счёта — не бесплатное действие, а биржа отбивает её ошибкой.
+   * Сначала читаем текущий режим по тому же правилу, что и чтение позиций, и молчим, если он уже
+   * нужный: лишняя запись в настройки счёта — не бесплатное действие, а биржа отбивает её ошибкой.
+   * Портфельную маржу не трогаем: перевод выводит из неё весь счёт, а вернуть её библиотека не может.
    */
   async setMarginMode(marginMode: MarginModeEnum, symbol: string): Promise<void> {
     const desiredMode = marginMode === MarginModeEnum.Isolated
       ? BYBIT_ISOLATED_MARGIN_MODE
       : BYBIT_CROSS_MARGIN_MODE;
-    const accountInfo = await this.httpClient.fetchAccountInfo();
-    const currentMode = accountInfo.result['marginMode'];
+    const readResult = await this.readPositionListWithAccountInfo({ symbol }, this.readAccountInfo());
+    const { accountInfo } = readResult;
 
-    if (currentMode === desiredMode) {
-      this.logger.debug(`[Bybit] Margin mode already ${desiredMode} — nothing to switch for ${symbol}`);
+    const positionList = readResult.positionList.filter(position => position.symbol === symbol);
+    const currentMarginMode = resolveBybitMarginMode(accountInfo, positionList);
+
+    if (currentMarginMode === marginMode) {
+      this.logger.debug(`[Bybit] Margin mode already ${marginMode} (${String(accountInfo.marginMode)}) — nothing to switch for ${symbol}`);
 
       return;
+    }
+
+    if (currentMarginMode === null) {
+      throw new ExchangeError(
+        `Bybit: cannot safely determine the current margin mode of the account for ${symbol} — refusing to switch it blindly`,
+        BYBIT_MARGIN_MODE_UNKNOWN_ERROR_CODE,
+        'bybit',
+      );
+    }
+
+    if (isBybitPortfolioMarginAccount(accountInfo)) {
+      throw new ExchangeError(
+        `Bybit: the account is in portfolio margin — switching it to ${marginMode} for ${symbol} would take the WHOLE account out of portfolio margin, and this library cannot switch it back; switch the account manually`,
+        'PORTFOLIO_MARGIN_SWITCH_REFUSED',
+        'bybit',
+      );
     }
 
     // Просили за символ, меняем счёт целиком — потребитель обязан узнать об этом громко,
@@ -378,13 +639,15 @@ class BybitLinear extends BybitBaseClient {
       `[Bybit] Margin mode is an ACCOUNT-WIDE setting: switching to ${desiredMode} for ${symbol} affects every symbol on this account`,
     );
     await this.httpClient.setMarginMode(desiredMode);
+    this.accountInfoReadSequence++;
+    this.rememberAccountInfo({ ...accountInfo, marginMode: desiredMode }, this.accountInfoReadSequence);
   }
 
   async fetchMarkPrice(symbol?: string): Promise<MarkPrice[]> {
     this.logger.debug('[Bybit] Fetching mark price');
     const raw = await this.httpClient.fetchTickers(this.category, { symbol });
 
-    return normalizeBybitMarkPriceList(raw.result.list);
+    return normalizeBybitMarkPriceList(raw.result.list, raw.time);
   }
 
   async fetchOpenInterest(symbol: string): Promise<OpenInterest> {
@@ -401,7 +664,7 @@ class BybitLinear extends BybitBaseClient {
 
     try {
       // Bybit needs a symbol or a coin: the coin switches every USDT contract without a position or an open order.
-      await this.httpClient.setPositionMode(this.category, bybitMode, BYBIT_POSITION_MODE_SETTLE_COIN);
+      await this.httpClient.setPositionMode({ category: this.category, mode: bybitMode, coin: BYBIT_POSITION_MODE_SETTLE_COIN });
     } catch (error) {
       if (error instanceof ExchangeError && error.code === 110025) {
         return;

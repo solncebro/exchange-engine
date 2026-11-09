@@ -1,4 +1,4 @@
-import { multiplyDecimalStrings, convertCoinsToContracts, convertContractsToCoins, toDecimalNumberString } from '../../src/utils/decimalString';
+import { multiplyDecimalStrings, convertCoinsToContracts, convertContractsToCoins, toDecimalNumberString, truncateToDecimalString } from '../../src/utils/decimalString';
 
 describe('multiplyDecimalStrings', () => {
   it('multiplies two decimal strings exactly', () => {
@@ -131,5 +131,35 @@ describe('toDecimalNumberString', () => {
     expect(toDecimalNumberString(51000)).toBe('51000');
     expect(toDecimalNumberString(0.05)).toBe('0.05');
     expect(toDecimalNumberString(0)).toBe('0');
+  });
+});
+
+describe('truncateToDecimalString', () => {
+  it.each([
+    [874544608.19717, 4, '874544608.1971'],
+    [874544608.19717, 8, '874544608.19717'],
+    [1e15, 4, '1000000000000000'],
+    [1e20, 8, '100000000000000000000'],
+    [123456789012.12345, 4, '123456789012.1234'],
+    [0.3, 4, '0.3'],
+    [1.23, 4, '1.23'],
+    [12.3 * 0.1, 4, '1.23'],
+    [12.3 * 0.1, 8, '1.23'],
+    [0.1 + 0.2, 8, '0.3'],
+    [1e-7, 4, '0'],
+    [1e-7, 8, '0.0000001'],
+    [1.5e-7, 8, '0.00000015'],
+    [1.99999, 4, '1.9999'],
+    [5, 4, '5'],
+  ])('cuts %s to %s decimals by its shortest decimal record as %s', (value, decimalPlaces, expected) => {
+    expect(truncateToDecimalString(value, decimalPlaces)).toBe(expected);
+  });
+
+  it.each([1e21, 2e21, Number.MAX_VALUE])('refuses %s, which has no decimal record', value => {
+    expect(() => truncateToDecimalString(value, 4)).toThrow('too large to write as a decimal string');
+  });
+
+  it.each([Number.NaN, Number.POSITIVE_INFINITY])('refuses %s', value => {
+    expect(() => truncateToDecimalString(value, 4)).toThrow('Invalid number for a decimal string');
   });
 });

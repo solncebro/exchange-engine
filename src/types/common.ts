@@ -280,9 +280,11 @@ export interface Position {
   markPrice: number;
   unrealizedPnl: number;
   leverage: number;
-  marginMode: MarginModeEnum;
+  marginMode: MarginModeEnum | null;
   liquidationPrice: number;
   positionIdx?: number;
+  openedAtMs?: number;
+  updatedAtMs?: number;
   info: Record<string, unknown>;
 }
 
@@ -315,6 +317,7 @@ export interface Order {
   clientOrderId: string;
   symbol: string;
   side: OrderSideEnum;
+  positionSide?: PositionSideEnum;
   type: OrderTypeEnum;
   timeInForce: TimeInForceEnum;
   price: number;
@@ -536,8 +539,40 @@ export interface FeeRate {
  */
 export type IncomeKind = 'realizedPnl' | 'commission' | 'funding' | 'other';
 
+export interface AccountTrade {
+  id: string;
+  symbol: string;
+  side: OrderSideEnum;
+  positionSide?: PositionSideEnum;
+  quantity: number;
+  price: number;
+  timestamp: number;
+}
+
+export interface OrderExecution {
+  executionId: string;
+  orderId: string;
+  amount: number;
+  price: number;
+  quoteAmount: number;
+  feeAmount: number | null;
+  feeAsset: string | null;
+  timestamp: number;
+}
+
+export interface OrderExecutionSummary {
+  executionList?: OrderExecution[];
+  quoteAmount?: number;
+  averagePrice?: number | null;
+  feeAmountByAsset?: Record<string, number>;
+  filledAmount: number;
+  firstFillTimeMs?: number | null;
+  lastFillTimeMs: number | null;
+}
+
 export interface Income {
   symbol: string;
+  positionSide?: PositionSideEnum;
   incomeType: string;
   /** Тот же вид, но общими словами: по нему потребитель раскладывает ОДИН ответ на три потока. */
   kind: IncomeKind;
@@ -575,6 +610,8 @@ export interface ClosedPnl {
    */
   orderId: string;
   side: OrderSideEnum;
+  positionSide?: PositionSideEnum;
+  isTradingFeeComplete?: boolean;
   quantity: number;
   entryPrice: number;
   exitPrice: number;

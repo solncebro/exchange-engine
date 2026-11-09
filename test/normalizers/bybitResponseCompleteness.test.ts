@@ -108,7 +108,7 @@ describe('normalizeBybitPosition — field completeness', () => {
   });
 
   it('extracts the business-critical fields', () => {
-    const position = normalizeBybitPosition(sample as unknown as BybitPositionRaw);
+    const position = normalizeBybitPosition(sample as unknown as BybitPositionRaw, null);
 
     expect(position.symbol).toBe('BTCUSDT');
     expect(position.contracts).toBeCloseTo(0.5);

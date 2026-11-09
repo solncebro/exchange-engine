@@ -2,6 +2,7 @@ import axios from 'axios';
 import { BybitHttpClient } from '../../src/http/BybitHttpClient';
 import { createMockLogger } from '../fixtures/mockLogger';
 import { createMockAxiosInstance } from '../fixtures/mockAxios';
+import { BYBIT_RAW_MARK_PRICE_KLINE_RESPONSE_BTCUSDT_1793721600000 } from '../fixtures/bybitRaw';
 
 jest.mock('axios');
 // Пауза между страницами журнала операций в тестах не нужна — листание проверяется по запросам.
@@ -238,6 +239,39 @@ describe('BybitHttpClient', () => {
     });
   });
 
+  describe('fetchMarkPriceKline', () => {
+    it('reads the public mark-price kline as an open request without a signature', async () => {
+      mockInstance.get.mockResolvedValueOnce({ data: BYBIT_RAW_MARK_PRICE_KLINE_RESPONSE_BTCUSDT_1793721600000 });
+
+      const response = await client.fetchMarkPriceKline({ category: 'linear', symbol: 'BTCUSDT', start: 1793721600000, end: 1793721659999 });
+      const [, options] = mockInstance.get.mock.calls[0];
+
+      expect(options.headers).toBeUndefined();
+      expect(response.result.list[0][1]).toBe('77660.1');
+    });
+
+    it('requests the exact one-minute mark-price window with one result', async () => {
+      await client.fetchMarkPriceKline({
+        category: 'linear',
+        symbol: 'BTCUSDT',
+        start: 1700000000000,
+        end: 1700000059999,
+      });
+
+      const [url, options] = mockInstance.get.mock.calls[0];
+
+      expect(url).toBe('/v5/market/mark-price-kline');
+      expect(options.params).toEqual(expect.objectContaining({
+        category: 'linear',
+        symbol: 'BTCUSDT',
+        interval: '1',
+        start: 1700000000000,
+        end: 1700000059999,
+        limit: 1,
+      }));
+    });
+  });
+
   describe('fetchOpenInterest', () => {
     it('calls GET /v5/market/open-interest', async () => {
       await client.fetchOpenInterest('linear', 'BTCUSDT');
@@ -389,7 +423,84 @@ describe('BybitHttpClient', () => {
     it('throws instead of paging on when the exchange repeats the same cursor', async () => {
       mockInstance.get.mockResolvedValue({ data: { result: { list: [{ symbol: 'x' }], nextPageCursor: 'same' } } });
 
-      await expect(client.fetchAllOpenOrders('linear', { settleCoin: 'USDT' })).rejects.toThrow('same page cursor twice');
+      await expect(client.fetchAllOpenOrders('linear', { settleCoin: 'USDT' })).rejects.toThrow('open orders handed out a page cursor it had already handed out');
+      expect(mockInstance.get).toHaveBeenCalledTimes(2);
+    });
+
+    it('throws on cursors that come back in a circle instead of running into the page ceiling', async () => {
+      let pageCount = 0;
+      mockInstance.get.mockImplementation(async () => {
+        pageCount++;
+
+        return { data: { result: { list: [{ symbol: `S${pageCount}` }], nextPageCursor: pageCount % 2 === 0 ? 'A' : 'B' } } };
+      });
+
+      await expect(client.fetchAllOpenOrders('linear', { settleCoin: 'USDT' })).rejects.toThrow('already handed out');
+      expect(mockInstance.get).toHaveBeenCalledTimes(3);
+    });
+
+    it('throws on a first page without a list instead of answering with no orders', async () => {
+      mockInstance.get.mockResolvedValueOnce({ data: { result: { nextPageCursor: 'abc' } } });
+
+      await expect(client.fetchAllOpenOrders('linear', { settleCoin: 'USDT' })).rejects.toThrow('open orders page 1 came without a list');
+    });
+  });
+
+  describe('fetchAllPositionList', () => {
+    it('throws on a first page without a list instead of answering with no positions', async () => {
+      mockInstance.get.mockResolvedValueOnce({ data: { result: { nextPageCursor: 'abc' } } });
+
+      await expect(client.fetchAllPositionList('linear', { settleCoin: 'USDT' })).rejects.toThrow('position list page 1 came without a list');
+      expect(mockInstance.get).toHaveBeenCalledTimes(1);
+    });
+
+    it('throws on a second page without a list after a full first page instead of answering partially', async () => {
+      mockInstance.get
+        .mockResolvedValueOnce({ data: { result: { list: Array.from({ length: 200 }, () => ({ symbol: 'A' })), nextPageCursor: 'c1' } } })
+        .mockResolvedValueOnce({ data: { result: {} } });
+
+      await expect(client.fetchAllPositionList('linear', { settleCoin: 'USDT' })).rejects.toThrow('position list page 2 came without a list');
+      expect(mockInstance.get).toHaveBeenCalledTimes(2);
+    });
+
+    it.each([
+      [3800, 3800, null],
+      [3801, null, 'reached the page count limit (20)'],
+    ])('reads %s positions when even the last filled page hands out a cursor: %s read, refusal %s', async (total, expectedLength, expectedError) => {
+      let servedCount = 0;
+      let pageCount = 0;
+      mockInstance.get.mockImplementation(async () => {
+        pageCount++;
+        const size = Math.min(200, total - servedCount);
+        servedCount += size;
+
+        return { data: { result: { list: Array.from({ length: size }, () => ({ symbol: 'X' })), nextPageCursor: size === 0 ? '' : `c${pageCount}` } } };
+      });
+
+      const reading = client.fetchAllPositionList('linear', { settleCoin: 'USDT' });
+
+      if (expectedError === null) {
+        await expect(reading).resolves.toHaveLength(expectedLength ?? 0);
+      } else {
+        await expect(reading).rejects.toThrow(expectedError);
+      }
+
+      expect(pageCount).toBe(20);
+    });
+  });
+
+  describe('fetchAllOrderExecutionList', () => {
+    it('reads execution pages of 100 by cursor through the common traversal until the empty page', async () => {
+      mockInstance.get
+        .mockResolvedValueOnce({ data: { result: { list: [{ execId: '1' }], nextPageCursor: 'c1' } } })
+        .mockResolvedValueOnce({ data: { result: { list: [], nextPageCursor: 'c2' } } });
+
+      const result = await client.fetchAllOrderExecutionList({ symbol: 'BTCUSDT', orderId: '77', startTime: 1000, endTime: 5000 });
+
+      expect(result.map((row: any) => row.execId)).toEqual(['1']);
+      expect(mockInstance.get.mock.calls.map(([path]) => path)).toEqual(['/v5/execution/list', '/v5/execution/list']);
+      expect(mockInstance.get.mock.calls.map(([, options]) => options.params.cursor)).toEqual([undefined, 'c1']);
+      expect(mockInstance.get.mock.calls.every(([, options]) => options.params.limit === 100 && options.params.category === 'linear' && options.params.orderId === '77')).toBe(true);
     });
   });
 
@@ -584,7 +695,7 @@ describe('BybitHttpClient', () => {
 
   describe('setPositionMode', () => {
     it('calls POST /v5/position/switch-mode with category and mode', async () => {
-      await client.setPositionMode('linear', 3);
+      await client.setPositionMode({ category: 'linear', mode: 3 });
 
       const [url, body] = mockInstance.post.mock.calls[0];
 
@@ -594,19 +705,48 @@ describe('BybitHttpClient', () => {
     });
 
     it('includes coin when provided', async () => {
-      await client.setPositionMode('linear', 0, 'USDT');
+      await client.setPositionMode({ category: 'linear', mode: 0, coin: 'USDT' });
 
       const [, body] = mockInstance.post.mock.calls[0];
 
       expect(body.coin).toBe('USDT');
+      expect(body.symbol).toBeUndefined();
     });
 
-    it('omits coin when not provided', async () => {
-      await client.setPositionMode('linear', 3);
+    it('includes symbol when provided', async () => {
+      await client.setPositionMode({ category: 'linear', mode: 3, symbol: 'ETHUSDT' });
+
+      const [, body] = mockInstance.post.mock.calls[0];
+
+      expect(body).toEqual({ category: 'linear', mode: 3, symbol: 'ETHUSDT' });
+    });
+
+    it('sends only the symbol when both symbol and coin are given: the symbol has the priority', async () => {
+      await client.setPositionMode({ category: 'linear', mode: 3, symbol: 'ETHUSDT', coin: 'USDT' });
+
+      const [, body] = mockInstance.post.mock.calls[0];
+
+      expect(body).toEqual({ category: 'linear', mode: 3, symbol: 'ETHUSDT' });
+    });
+
+    it('omits coin and symbol when not provided', async () => {
+      await client.setPositionMode({ category: 'linear', mode: 3 });
 
       const [, body] = mockInstance.post.mock.calls[0];
 
       expect(body.coin).toBeUndefined();
+      expect(body.symbol).toBeUndefined();
+    });
+  });
+
+  describe('addPositionMargin', () => {
+    it('calls POST /v5/position/add-margin with the margin as a string and the position index', async () => {
+      await client.addPositionMargin({ category: 'linear', symbol: 'ETHUSDT', margin: '1', positionIdx: 0 });
+
+      const [url, body] = mockInstance.post.mock.calls[0];
+
+      expect(url).toBe('/v5/position/add-margin');
+      expect(body).toEqual({ category: 'linear', symbol: 'ETHUSDT', margin: '1', positionIdx: 0 });
     });
   });
 

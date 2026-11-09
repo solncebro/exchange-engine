@@ -4,6 +4,12 @@ import {
   BYBIT_OPEN_ORDERS_MAX_PAGE_COUNT,
   BYBIT_OPEN_ORDERS_PAGE_INTERVAL_MS,
   BYBIT_OPEN_ORDERS_PAGE_LIMIT,
+  BYBIT_ORDER_EXECUTION_MAX_PAGE_COUNT,
+  BYBIT_ORDER_EXECUTION_PAGE_INTERVAL_MS,
+  BYBIT_ORDER_EXECUTION_PAGE_LIMIT,
+  BYBIT_POSITION_LIST_MAX_PAGE_COUNT,
+  BYBIT_POSITION_LIST_PAGE_INTERVAL_MS,
+  BYBIT_POSITION_LIST_PAGE_LIMIT,
   BYBIT_RECV_WINDOW,
   BYBIT_REQUEST_TIMEOUT,
   BYBIT_RISK_LIMIT_MAX_PAGE_COUNT,
@@ -15,6 +21,7 @@ import { ExchangeError } from '../errors/ExchangeError';
 import { serializeQueryParams } from '../utils/serializeQueryParams';
 import { sleep } from '../utils/sleep';
 import type {
+  BybitAccountInfoRaw,
   BybitClosedPnlRaw,
   BybitFeeRateRaw,
   BybitFundingRateHistoryRaw,
@@ -30,6 +37,7 @@ import type {
 } from '../normalizers/bybitNormalizer';
 import { applyTimeRangeOptions, buildOptionalParams } from '../utils/httpParams';
 import { BaseHttpClient } from './BaseHttpClient';
+import type { BybitOrderExecutionRaw } from '../normalizers/bybitNormalizer.types';
 
 import type {
   BybitAmendBatchOrdersResponse,
@@ -42,11 +50,15 @@ import type {
   BybitOrderBookRaw,
   BybitResponse,
   FetchBybitKlineArgs,
+  FetchAllBybitCursorPagesArgs,
+  FetchBybitMarkPriceKlineArgs,
   FetchTransactionLogArgs,
   FetchPageWithLimitArgs,
   PeriodFilterArgs,
   SetBybitLeverageArgs,
   SwitchBybitIsolatedArgs,
+  AddBybitPositionMarginArgs,
+  SetBybitPositionModeArgs,
   SymbolFilterArgs,
   SymbolLimitFilterArgs,
 } from './BybitHttpClient.types';
@@ -80,6 +92,14 @@ class BybitHttpClient extends BaseHttpClient {
     // Заголовки подписи строятся фабрикой: у Bybit отметка времени тоже проверяется на приёме, а
     // между сборкой и отправкой стоит пауза перед повтором.
     const response = await this.get<T & BybitApiResponse>(path, params, () => this.buildAuthHeaders(serializeQueryParams(params)));
+
+    this.validateResponse(response);
+
+    return response;
+  }
+
+  private async publicGet<T>(path: string, params: Record<string, string | number | boolean>): Promise<T> {
+    const response = await this.get<T & BybitApiResponse>(path, params);
 
     this.validateResponse(response);
 
@@ -207,6 +227,19 @@ class BybitHttpClient extends BaseHttpClient {
     return this.authenticatedGet('/v5/market/kline', params);
   }
 
+  async fetchMarkPriceKline(args: FetchBybitMarkPriceKlineArgs): Promise<BybitListResponse<string[]>> {
+    const params: Record<string, string | number | boolean> = {
+      category: args.category,
+      symbol: args.symbol,
+      interval: '1',
+      start: args.start,
+      end: args.end,
+      limit: 1,
+    };
+
+    return this.publicGet('/v5/market/mark-price-kline', params);
+  }
+
   async fetchFundingHistory(
     category: string,
     symbol: string,
@@ -292,32 +325,48 @@ class BybitHttpClient extends BaseHttpClient {
     category: string,
     options?: SymbolLimitFilterArgs,
   ): Promise<BybitOrderResponseRaw[]> {
-    const allOrderList: BybitOrderResponseRaw[] = [];
+    return this.fetchAllCursorPages({
+      label: 'open orders',
+      maxPageCount: BYBIT_OPEN_ORDERS_MAX_PAGE_COUNT,
+      pageIntervalMs: BYBIT_OPEN_ORDERS_PAGE_INTERVAL_MS,
+      readPage: (cursor) => this.getOpenOrders(category, { ...options, limit: BYBIT_OPEN_ORDERS_PAGE_LIMIT, cursor }),
+    });
+  }
+
+  private async fetchAllCursorPages<T>(args: FetchAllBybitCursorPagesArgs<T>): Promise<T[]> {
+    const allEntryList: T[] = [];
+    const seenCursorSet = new Set<string>();
     let cursor: string | undefined;
 
-    for (let pageCount = 0; pageCount < BYBIT_OPEN_ORDERS_MAX_PAGE_COUNT; pageCount++) {
+    for (let pageCount = 0; pageCount < args.maxPageCount; pageCount++) {
       if (pageCount > 0) {
-        await sleep(BYBIT_OPEN_ORDERS_PAGE_INTERVAL_MS);
+        await sleep(args.pageIntervalMs);
       }
 
-      const response = await this.getOpenOrders(category, { ...options, limit: BYBIT_OPEN_ORDERS_PAGE_LIMIT, cursor });
+      const response = await args.readPage(cursor);
+      const pageEntryList = response.result?.list;
 
-      allOrderList.push(...response.result.list);
+      if (!Array.isArray(pageEntryList)) {
+        throw new Error(`[Bybit] ${args.label} page ${pageCount + 1} came without a list — the answer would be incomplete`);
+      }
+
+      allEntryList.push(...pageEntryList);
       const nextPageCursor = response.result.nextPageCursor;
 
-      if (response.result.list.length === 0 || nextPageCursor === undefined || nextPageCursor === null || nextPageCursor === '') {
-        return allOrderList;
+      if (pageEntryList.length === 0 || nextPageCursor === undefined || nextPageCursor === null || nextPageCursor === '') {
+        return allEntryList;
       }
 
-      if (nextPageCursor === cursor) {
-        throw new Error('[Bybit] open orders handed out the same page cursor twice — the answer would be incomplete');
+      if (seenCursorSet.has(nextPageCursor)) {
+        throw new Error(`[Bybit] ${args.label} handed out a page cursor it had already handed out — the answer would be incomplete`);
       }
 
+      seenCursorSet.add(nextPageCursor);
       cursor = nextPageCursor;
     }
 
     throw new Error(
-      `[Bybit] open orders reached the page count limit (${BYBIT_OPEN_ORDERS_MAX_PAGE_COUNT}) — the answer would be incomplete`,
+      `[Bybit] ${args.label} reached the page count limit (${args.maxPageCount}) — the answer would be incomplete`,
     );
   }
 
@@ -326,6 +375,19 @@ class BybitHttpClient extends BaseHttpClient {
     options?: SymbolLimitFilterArgs,
   ): Promise<BybitListResponse<BybitOrderResponseRaw>> {
     return this.authenticatedGet('/v5/order/history', this.buildCategoryParams(category, options));
+  }
+
+  async fetchOrderExecutionList(options: SymbolLimitFilterArgs): Promise<BybitListResponse<BybitOrderExecutionRaw>> {
+    return this.authenticatedGet('/v5/execution/list', this.buildCategoryParams('linear', options));
+  }
+
+  async fetchAllOrderExecutionList(options: SymbolLimitFilterArgs): Promise<BybitOrderExecutionRaw[]> {
+    return this.fetchAllCursorPages({
+      label: 'order executions',
+      maxPageCount: BYBIT_ORDER_EXECUTION_MAX_PAGE_COUNT,
+      pageIntervalMs: BYBIT_ORDER_EXECUTION_PAGE_INTERVAL_MS,
+      readPage: (cursor) => this.fetchOrderExecutionList({ ...options, limit: BYBIT_ORDER_EXECUTION_PAGE_LIMIT, cursor }),
+    });
   }
 
   async createBatchOrders(
@@ -356,12 +418,33 @@ class BybitHttpClient extends BaseHttpClient {
     return this.authenticatedGet('/v5/position/list', this.buildCategoryParams(category, options));
   }
 
+  async fetchAllPositionList(
+    category: string,
+    options?: SymbolLimitFilterArgs,
+  ): Promise<BybitPositionRaw[]> {
+    return this.fetchAllCursorPages({
+      label: 'position list',
+      maxPageCount: BYBIT_POSITION_LIST_MAX_PAGE_COUNT,
+      pageIntervalMs: BYBIT_POSITION_LIST_PAGE_INTERVAL_MS,
+      readPage: (cursor) => this.getPositionList(category, { ...options, limit: BYBIT_POSITION_LIST_PAGE_LIMIT, cursor }),
+    });
+  }
+
   async setLeverage(args: SetBybitLeverageArgs): Promise<Record<string, unknown>> {
     return this.authenticatedPost('/v5/position/set-leverage', {
       category: args.category,
       symbol: args.symbol,
       buyLeverage: String(args.buyLeverage),
       sellLeverage: String(args.sellLeverage),
+    });
+  }
+
+  async addPositionMargin(args: AddBybitPositionMarginArgs): Promise<Record<string, unknown>> {
+    return this.authenticatedPost('/v5/position/add-margin', {
+      category: args.category,
+      symbol: args.symbol,
+      margin: args.margin,
+      positionIdx: args.positionIdx,
     });
   }
 
@@ -392,7 +475,7 @@ class BybitHttpClient extends BaseHttpClient {
     return this.authenticatedGet('/v5/account/wallet-balance', { accountType });
   }
 
-  async fetchAccountInfo(): Promise<BybitResponse<Record<string, unknown>>> {
+  async fetchAccountInfo(): Promise<BybitResponse<BybitAccountInfoRaw>> {
     return this.authenticatedGet('/v5/account/info', {});
   }
 
@@ -407,15 +490,13 @@ class BybitHttpClient extends BaseHttpClient {
     return this.authenticatedPost('/v5/account/set-margin-mode', { setMarginMode: mode });
   }
 
-  async setPositionMode(
-    category: string,
-    mode: number,
-    coin?: string,
-  ): Promise<Record<string, unknown>> {
-    const body: Record<string, unknown> = { category, mode };
+  async setPositionMode(args: SetBybitPositionModeArgs): Promise<Record<string, unknown>> {
+    const body: Record<string, unknown> = { category: args.category, mode: args.mode };
 
-    if (coin !== undefined) {
-      body.coin = coin;
+    if (args.symbol !== undefined) {
+      body.symbol = args.symbol;
+    } else if (args.coin !== undefined) {
+      body.coin = args.coin;
     }
 
     return this.authenticatedPost('/v5/position/switch-mode', body);

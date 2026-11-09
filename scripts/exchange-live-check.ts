@@ -1,5 +1,4 @@
 import path from 'node:path';
-import { ExchangeNameEnum } from '../src/types/common';
 import {
   createCheckContext,
   EXCHANGE_NAME_LIST,
@@ -9,15 +8,20 @@ import {
 import type { CheckCommandLineSettings } from './exchange-live-check/checkContext.types';
 import { printCheckMatrix, printExchangeFactList } from './exchange-live-check/checkOutput';
 import { runCheck } from './exchange-live-check/checkRunner';
+import type { ExchangeRunState, HandleTotalDeadlineArgs } from './exchange-live-check/checkRunner.types';
 import { balanceCheck } from './exchange-live-check/balanceCheck';
+import { directionalLeverageCheck } from './exchange-live-check/directionalLeverageCheck';
 import { feeRateCheck } from './exchange-live-check/feeRateCheck';
+import { fundingMarkPriceCheck } from './exchange-live-check/fundingMarkPriceCheck';
 import { futuresTradeSymbolCheck, spotTradeSymbolCheck } from './exchange-live-check/instrumentChecks';
+import { isolatedMarginCheck } from './exchange-live-check/isolatedMarginCheck';
 import { klineCheck } from './exchange-live-check/klineCheck';
 import { leverageTierCheck } from './exchange-live-check/leverageTierCheck';
-import type { ExchangeCheckReport, LiveCheck, LiveCheckContext, LiveCheckReportEntry } from './exchange-live-check/liveCheck.types';
+import { runFinalCleanup } from './exchange-live-check/finalCleanup';
+import type { ExchangeCheckReport, LiveCheck, LiveCheckContext, LiveCheckReportEntry, NumberedLiveCheck } from './exchange-live-check/liveCheck.types';
 import { markPriceCheck } from './exchange-live-check/markPriceCheck';
 import { orderBookCheck } from './exchange-live-check/orderBookCheck';
-import { cancelOwnOrders } from './exchange-live-check/orderCleanup';
+import { orderExecutionCheck } from './exchange-live-check/orderExecutionCheck';
 import { orderRateLimitCheck } from './exchange-live-check/orderRateLimitCheck';
 import { orderRoundTripCheck } from './exchange-live-check/orderRoundTripCheck';
 import { positionModeCheck } from './exchange-live-check/positionModeCheck';
@@ -32,7 +36,7 @@ const ENV_FILE_PATH = path.resolve(__dirname, '..', '.env');
 const LINGERING_TIMER_WATCH_MS = 5_000;
 /** Общий срок всего прогона: сорванный по нему прогон обязан показать таблицу, а не исчезнуть молча. */
 const TOTAL_DEADLINE_MS = 35 * 60_000;
-const ORDER_ALLOWED_EXCHANGE_LIST: ExchangeNameEnum[] = [ExchangeNameEnum.Binance, ExchangeNameEnum.Okx];
+const DEADLINE_CLEANUP_LIMIT_MS = 120_000;
 
 const CHECK_LIST: LiveCheck[] = [
   futuresTradeSymbolCheck,
@@ -49,24 +53,30 @@ const CHECK_LIST: LiveCheck[] = [
   orderRateLimitCheck,
   publicStreamCheck,
   orderRoundTripCheck,
+  orderExecutionCheck,
+  isolatedMarginCheck,
+  directionalLeverageCheck,
+  fundingMarkPriceCheck,
 ];
 
-function selectCheckList(titleFilter: string): LiveCheck[] {
+function selectCheckList(titleFilter: string): NumberedLiveCheck[] {
+  const numberedCheckList = CHECK_LIST.map((check, index) => ({ check, checkNumber: index + 1 }));
+
   if (titleFilter === '') {
-    return CHECK_LIST;
+    return numberedCheckList;
   }
 
   const needle = titleFilter.toLowerCase();
 
-  return CHECK_LIST.filter((check) => check.title.toLowerCase().includes(needle));
+  return numberedCheckList.filter(({ check }) => check.title.toLowerCase().includes(needle));
 }
 
-function printRunSummary(reportList: ExchangeCheckReport[], titleList: string[]): void {
+function printRunSummary(reportList: ExchangeCheckReport[], numberedCheckList: NumberedLiveCheck[]): void {
   for (const report of reportList) {
-    printExchangeFactList(report);
+    printExchangeFactList(report, numberedCheckList);
   }
 
-  printCheckMatrix(reportList, titleList);
+  printCheckMatrix(reportList, numberedCheckList);
 }
 
 /**
@@ -103,10 +113,24 @@ function buildSkippedEntryList(checkList: LiveCheck[], reasonText: string): Live
   return checkList.map((check) => ({ title: check.title, outcome: { status: 'skipped' as const, fact: reasonText } }));
 }
 
+async function runWithTimeLimit(task: Promise<void>, timeoutMs: number): Promise<boolean> {
+  let timerId: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<boolean>((resolve) => {
+    timerId = setTimeout(() => resolve(false), timeoutMs);
+  });
+
+  try {
+    return await Promise.race([task.then(() => true), timeout]);
+  } finally {
+    clearTimeout(timerId);
+  }
+}
+
 async function runExchangeCheckList(
   report: ExchangeCheckReport,
-  checkList: LiveCheck[],
+  numberedCheckList: NumberedLiveCheck[],
   commandLine: CheckCommandLineSettings,
+  runState: ExchangeRunState,
 ): Promise<void> {
   const { exchangeName } = report;
 
@@ -127,30 +151,32 @@ async function runExchangeCheckList(
     const reasonText = `клиент не построился: ${describeError(error)}`;
 
     printNote(reasonText);
-    report.entryList.push(...buildSkippedEntryList(checkList, reasonText));
+    report.entryList.push(...buildSkippedEntryList(numberedCheckList.map(({ check }) => check), reasonText));
 
     return;
   }
 
-  for (const [index, check] of checkList.entries()) {
-    report.entryList.push(await runCheck({ check, context, index: index + 1, hasCredentials }));
-  }
+  runState.context = context;
+  runState.unsettledOrderProbe = null;
+  runState.isCleanupRequired = commandLine.isOrderAllowed && hasCredentials;
 
-  if (commandLine.isOrderAllowed && hasCredentials && ORDER_ALLOWED_EXCHANGE_LIST.includes(exchangeName)) {
-    try {
-      await context.exchange.futures.loadTradeSymbols();
-
-      const cancelledCount = await cancelOwnOrders(
-        context.exchange.futures,
-        context.settings.futuresSymbol,
-        context.settings.clientOrderIdPrefix,
-      );
-
-      printNote(`сквозная уборка: снято своих заявок ${cancelledCount}; открытые позиции не трогались`);
-    } catch (error) {
-      printNote(`сквозная уборка не удалась — проверьте счёт руками: ${describeError(error)}`);
+  for (const { check, checkNumber } of numberedCheckList) {
+    if (runState.isTotalDeadlineReached) {
+      return;
     }
+
+    report.entryList.push(await runCheck({ check, context, checkNumber, hasCredentials, runState }));
   }
+
+  if (runState.isTotalDeadlineReached) {
+    return;
+  }
+
+  if (runState.isCleanupRequired) {
+    await runFinalCleanup(context, 'сквозная уборка');
+  }
+
+  runState.context = null;
 
   // Закрытие соединений — последнее действие по бирже, и оно не должно уносить с собой прогон:
   // непойманный отказ здесь оставил бы владельца без таблицы по УЖЕ выполненным обещаниям,
@@ -160,6 +186,26 @@ async function runExchangeCheckList(
   } catch (error) {
     printNote(`закрыть соединения не удалось: ${describeError(error)}`);
   }
+}
+
+async function handleTotalDeadline(args: HandleTotalDeadlineArgs): Promise<void> {
+  const { runState, reportList, numberedCheckList } = args;
+  const { context } = runState;
+
+  runState.isTotalDeadlineReached = true;
+  printBanner('Общий срок прогона вышел — останавливаю пробу, убираю своё и показываю то, что успели');
+  printNote(`отведено ${TOTAL_DEADLINE_MS / 60_000} мин; обещания, до которых не дошло, в таблице пусты`);
+  runState.currentAbortController?.abort(new Error('общий срок прогона вышел'));
+
+  if (context !== null && runState.isCleanupRequired) {
+    const isCleaned = await runWithTimeLimit(runFinalCleanup(context, 'уборка по общему сроку'), DEADLINE_CLEANUP_LIMIT_MS);
+
+    if (!isCleaned) {
+      printNote(`уборка по общему сроку не уложилась в ${DEADLINE_CLEANUP_LIMIT_MS / 1000} с — проверьте счёт руками (метка ${context.settings.clientOrderIdPrefix}, свой объём: ${context.ownPositionLedger.describe()})`);
+    }
+  }
+
+  printRunSummary(reportList, numberedCheckList);
 }
 
 async function main(): Promise<void> {
@@ -173,7 +219,7 @@ async function main(): Promise<void> {
   printBanner('Живая проверка договора с биржей: одни и те же обещания на Binance, Bybit и OKX');
   printNote('режим: только демо-счета (isDemoMode: true) — боевые адреса скрипт не трогает');
   printNote(`биржи: ${commandLine.exchangeNameList.join(', ')}`);
-  printNote(`постановка заявок: ${commandLine.isOrderAllowed ? 'РАЗРЕШЕНА ключом --allow-orders (только Binance и OKX)' : 'запрещена, только чтение'}`);
+  printNote(`постановка заявок: ${commandLine.isOrderAllowed ? 'РАЗРЕШЕНА ключом --allow-orders (демо-счета всех трёх бирж)' : 'запрещена, только чтение'}`);
   printNote('границу с trade-engine смотрите в scripts/README.md — обёртку здесь не проверяем');
 
   if (commandLine.unknownExchangeText !== '') {
@@ -186,32 +232,43 @@ async function main(): Promise<void> {
     return;
   }
 
-  const checkList = selectCheckList(commandLine.titleFilter);
+  const numberedCheckList = selectCheckList(commandLine.titleFilter);
 
-  if (checkList.length === 0) {
+  if (numberedCheckList.length === 0) {
     printNote(`по отбору --only=${commandLine.titleFilter} не нашлось ни одного обещания`);
 
     return;
   }
 
-  const titleList = checkList.map((check) => check.title);
   const reportList: ExchangeCheckReport[] = commandLine.exchangeNameList.map((exchangeName) => ({
     exchangeName,
     entryList: [],
   }));
+  const runState: ExchangeRunState = {
+    context: null,
+    currentAbortController: null,
+    unsettledOrderProbe: null,
+    isTotalDeadlineReached: false,
+    isCleanupRequired: false,
+  };
   const deadlineId = setTimeout(() => {
-    printBanner('Общий срок прогона вышел — показываю то, что успели');
-    printNote(`отведено ${TOTAL_DEADLINE_MS / 60_000} мин; обещания, до которых не дошло, в таблице пусты`);
-    printRunSummary(reportList, titleList);
-    process.exit(1);
+    handleTotalDeadline({ runState, reportList, numberedCheckList }).finally(() => process.exit(1));
   }, TOTAL_DEADLINE_MS);
 
   for (const report of reportList) {
-    await runExchangeCheckList(report, checkList, commandLine);
+    if (runState.isTotalDeadlineReached) {
+      break;
+    }
+
+    await runExchangeCheckList(report, numberedCheckList, commandLine, runState);
+  }
+
+  if (runState.isTotalDeadlineReached) {
+    return;
   }
 
   clearTimeout(deadlineId);
-  printRunSummary(reportList, titleList);
+  printRunSummary(reportList, numberedCheckList);
 
   const exitCode = resolveExitCode(reportList);
 

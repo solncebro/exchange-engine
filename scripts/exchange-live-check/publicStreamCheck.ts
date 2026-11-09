@@ -74,19 +74,27 @@ async function checkPublicStreamContract(context: LiveCheckContext): Promise<Liv
       }
     }
 
-    const readyPromise = client
+    let isReadyAttemptFinished = false;
+    let readyErrorText = '';
+
+    client
       .awaitWebSocketConnectionsReady()
       .then(() => {
         isReadySettled = true;
       })
       .catch((error: unknown) => {
-        violationList.push(`ожидание готовности соединений отказало: ${describeError(error)}`);
+        readyErrorText = describeError(error);
+      })
+      .finally(() => {
+        isReadyAttemptFinished = true;
       });
 
-    await Promise.race([readyPromise, sleep(READY_WAIT_MS)]);
+    await waitForCondition({ isReady: () => isReadyAttemptFinished, timeoutMs: READY_WAIT_MS });
 
-    if (!isReadySettled) {
+    if (!isReadyAttemptFinished) {
       violationList.push(`ожидание готовности соединений не завершилось за ${READY_WAIT_MS / 1000} с`);
+    } else if (!isReadySettled) {
+      violationList.push(`ожидание готовности соединений отказало: ${readyErrorText}`);
     }
 
     // Ждём САМ инструмент, а не первый попавшийся кадр: кадр тикеров Binance несёт только те

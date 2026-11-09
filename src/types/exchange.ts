@@ -8,6 +8,8 @@ import type {
   Order,
   TickerBySymbol,
   AccountBalances,
+  AccountTrade,
+  OrderExecutionSummary,
   Position,
   FundingRateHistory,
   FundingInfo,
@@ -49,6 +51,12 @@ import {
   WorkingTypeEnum,
 } from './common';
 
+export interface AddIsolatedPositionMarginArgs {
+  symbol: string;
+  positionSide: PositionSideEnum;
+  amount: number;
+}
+
 export interface ExchangeArgs {
   config: ExchangeConfig;
   logger: ExchangeLogger;
@@ -87,6 +95,10 @@ export interface FetchPageWithLimitArgs {
   startTime?: number;
   endTime?: number;
   limit?: number;
+}
+
+export interface FetchFundingRateHistoryArgs extends FetchPageWithLimitArgs {
+  shouldIncludeMarkPrices?: boolean;
 }
 
 /**
@@ -234,12 +246,13 @@ export interface ExchangeClient {
   fetchKlines(symbol: string, interval: KlineInterval, options?: FetchPageWithLimitArgs): Promise<Kline[]>;
   fetchAllKlines(symbolList: string[], interval: KlineInterval, options?: FetchAllKlinesOptions): Promise<Map<string, Kline[]>>;
   fetchBalances(): Promise<AccountBalances>;
-  fetchFundingRateHistory(symbol: string, options?: FetchPageWithLimitArgs): Promise<FundingRateHistory[]>;
+  fetchFundingRateHistory(symbol: string, options?: FetchFundingRateHistoryArgs): Promise<FundingRateHistory[]>;
   fetchPosition(symbol: string): Promise<Position>;
   fetchPositionSnapshot(symbol: string, positionIdx?: number): Promise<Position | null>;
   fetchPositionList(symbol: string): Promise<Position[]>;
   fetchAllPositions(): Promise<Position[]>;
-  setLeverage(leverage: number, symbol: string): Promise<SetLeverageResult>;
+  addIsolatedPositionMargin(args: AddIsolatedPositionMarginArgs): Promise<void>;
+  setLeverage(leverage: number, symbol: string, options?: SetLeverageOptions): Promise<SetLeverageResult>;
   fetchLeverageTierList(symbol: string): Promise<LeverageTier[]>;
   fetchAllLeverageTierList(): Promise<LeverageTierListBySymbol>;
   setMarginMode(marginMode: MarginModeEnum, symbol: string): Promise<void>;
@@ -250,6 +263,7 @@ export interface ExchangeClient {
   getMaxOrderQty(symbol: string): number;
   getMarketMaxOrderQty(symbol: string): number;
   fetchFundingInfo(symbol?: string): Promise<FundingInfo[]>;
+  fetchPositionLeverage(symbol: string): Promise<number | null>;
   fetchPositionMode(): Promise<PositionModeEnum | undefined>;
   createOrderWebSocket(args: CreateOrderWebSocketArgs): Promise<Order>;
   fetchOrderHistory(symbol: string, options?: FetchPageWithLimitArgs): Promise<Order[]>;
@@ -280,6 +294,8 @@ export interface ExchangeClient {
 
   fetchFeeRate(symbol?: string): Promise<FeeRate[]>;
   fetchIncome(options?: FetchIncomeArgs): Promise<Income[]>;
+  fetchAccountTrades(symbol: string, options: FetchPageWithLimitArgs): Promise<AccountTrade[]>;
+  fetchOrderExecutionSummary(args: FetchOrderExecutionSummaryArgs): Promise<OrderExecutionSummary>;
   fetchClosedPnl(symbol?: string, options?: FetchPageWithLimitArgs): Promise<ClosedPnl[]>;
 
   setPositionMode(mode: PositionModeEnum): Promise<void>;
@@ -357,4 +373,15 @@ export interface SubAccountClient {
   /** null — биржа такого перевода не знает (или он старше окна её истории: Binance — 7 дней). */
   fetchSubAccountTransfer(args: FetchSubAccountTransferArgs): Promise<SubAccountTransfer | null>;
   fetchSubAccountBalances(args: FetchSubAccountBalancesArgs): Promise<SubAccountBalance[]>;
+}
+
+export interface SetLeverageOptions {
+  direction?: 'long' | 'short';
+}
+
+export interface FetchOrderExecutionSummaryArgs {
+  symbol: string;
+  orderId: string;
+  startTime: number;
+  endTime: number;
 }

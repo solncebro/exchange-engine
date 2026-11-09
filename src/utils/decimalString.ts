@@ -119,6 +119,24 @@ export function toDecimalNumberString(value: number): string {
   return trimTrailingZeros(value.toFixed(20));
 }
 
+export function truncateToDecimalString(value: number, decimalPlaces: number): string {
+  const valueString = String(value);
+
+  if (valueString.toLowerCase().includes('e+')) {
+    throw new Error(`Number is too large to write as a decimal string: ${valueString}`);
+  }
+
+  const decimalString = normalizeExponentialNotation(valueString);
+
+  if (tryParseDecimalString(decimalString) === null) {
+    throw new Error(`Invalid number for a decimal string: ${valueString}`);
+  }
+
+  const [integerPart, fractionPart = ''] = decimalString.split('.');
+
+  return trimTrailingZeros(`${integerPart}.${fractionPart.slice(0, decimalPlaces)}`);
+}
+
 export function multiplyDecimalStrings(left: string, right: string): string {
   const parsedLeft = parseDecimalString(normalizeExponentialNotation(left));
   const parsedRight = parseDecimalString(normalizeExponentialNotation(right));

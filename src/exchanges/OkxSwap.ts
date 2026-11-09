@@ -1,4 +1,5 @@
-import type { ExchangeArgs, FetchPageWithLimitArgs, SetLeverageResult } from '../types/exchange';
+import type { SetLeverageOptions } from '../types/exchange';
+import type { ExchangeArgs, FetchFundingRateHistoryArgs, FetchPageWithLimitArgs, SetLeverageResult } from '../types/exchange';
 import type { ClosedPnl, FundingInfo, FundingRateHistory, LeverageTier, LeverageTierListBySymbol, MarkPrice, OpenInterest, Position } from '../types/common';
 import { MarginModeEnum, PositionModeEnum } from '../types/common';
 import { ExchangeError } from '../errors/ExchangeError';
@@ -255,7 +256,7 @@ class OkxSwap extends OkxBaseClient {
    * какая — уже изменена. Подтверждённым плечо считается только когда ОБА ответа назвали одно и то
    * же число.
    */
-  async setLeverage(leverage: number, symbol: string): Promise<SetLeverageResult> {
+  async setLeverage(leverage: number, symbol: string, _options?: SetLeverageOptions): Promise<SetLeverageResult> {
     this.logger.info(`[OKX] Setting leverage to ${leverage}x for ${symbol}`);
     const instId = this.symbolMap.resolveInstId(symbol);
     const mgnMode = this.toOkxMarginMode(await this.ensureMarginMode(symbol));
@@ -442,7 +443,7 @@ class OkxSwap extends OkxBaseClient {
     return positionList;
   }
 
-  async fetchFundingRateHistory(symbol: string, options?: FetchPageWithLimitArgs): Promise<FundingRateHistory[]> {
+  async fetchFundingRateHistory(symbol: string, options?: FetchFundingRateHistoryArgs): Promise<FundingRateHistory[]> {
     this.logger.debug(`[OKX] Fetching funding rate history for ${symbol}`);
     const instId = this.symbolMap.resolveInstId(symbol);
 

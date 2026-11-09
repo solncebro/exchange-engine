@@ -1,9 +1,17 @@
 import axios from 'axios';
+import type { BinanceUserTradeRaw } from '../../src/normalizers/binanceNormalizer';
 import { BinanceFutures } from '../../src/exchanges/BinanceFutures';
 import { createMockLogger } from '../fixtures/mockLogger';
 import { createMockAxiosInstance } from '../fixtures/mockAxios';
 import {
   BINANCE_RAW_POSITION_RISK,
+  BINANCE_RAW_POSITION_RISK_V3_OPEN_CROSS,
+  BINANCE_RAW_POSITION_RISK_V3_OPEN_ISOLATED,
+  BINANCE_RAW_POSITION_RISK_V3_ZERO_WITH_ORDER_ISOLATED,
+  BINANCE_RAW_SYMBOL_CONFIG_BTCUSDT,
+  BINANCE_RAW_SYMBOL_CONFIG_ETHUSDT_CROSSED,
+  BINANCE_RAW_SYMBOL_CONFIG_ETHUSDT_ISOLATED,
+  BINANCE_RAW_SYMBOL_CONFIG_LIST,
   BINANCE_RAW_FUNDING_RATE_HISTORY_LIST,
   BINANCE_RAW_EXCHANGE_INFO,
   BINANCE_RAW_TICKER_LIST,
@@ -47,7 +55,104 @@ function createClient(isDemoMode = false) {
   return { client, mockInstance };
 }
 
+function createClientWithLogger() {
+  const mockInstance = createMockAxiosInstance();
+  const logger = createMockLogger();
+  mockedAxios.create.mockReturnValue(mockInstance as any);
+
+  const client = new BinanceFutures({ config: { apiKey: 'testKey', secret: 'testSecret' }, logger });
+
+  return { client, mockInstance, logger };
+}
+
+function routeGetRequests(mockInstance: Record<string, jest.Mock>, responseQueueByPath: Record<string, unknown[][]>): void {
+  const servedCountByPath = new Map<string, number>();
+
+  mockInstance.get.mockImplementation(async (url: string) => {
+    const responseQueue = responseQueueByPath[url] ?? [[]];
+    const servedCount = servedCountByPath.get(url) ?? 0;
+
+    servedCountByPath.set(url, servedCount + 1);
+
+    return { data: responseQueue[Math.min(servedCount, responseQueue.length - 1)] };
+  });
+}
+
 describe('BinanceFutures', () => {
+  it.each([-4161, -2028])('preserves leverage rejection code %s', async (code) => {
+    const { client, mockInstance } = createClient();
+    mockInstance.post.mockResolvedValue({ data: { code, msg: 'rejected' } });
+    await expect(client.setLeverage(2, 'ARBUSDT')).rejects.toMatchObject({ code });
+    expect(mockInstance.post).toHaveBeenCalledTimes(1);
+  });
+
+  it('adds isolated margin once and propagates an ambiguous transport error', async () => {
+    const { client, mockInstance } = createClient();
+    mockInstance.post.mockRejectedValue(new Error('connection lost'));
+    await expect(client.addIsolatedPositionMargin({ symbol: 'ARBUSDT', amount: 10, positionSide: PositionSideEnum.Long })).rejects.toThrow('connection lost');
+    expect(mockInstance.post).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([0, -1, NaN, Infinity])('rejects invalid isolated margin amount %s before sending', async (amount) => {
+    const { client, mockInstance } = createClient();
+    await expect(client.addIsolatedPositionMargin({ symbol: 'ARBUSDT', amount, positionSide: PositionSideEnum.Long })).rejects.toThrow('positive');
+    expect(mockInstance.post).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [12.3 * 0.1, '1.23'],
+    [0.1 + 0.2, '0.3'],
+    [1e-7, '0.0000001'],
+    [1.234567891, '1.23456789'],
+    [0.000000019, '0.00000001'],
+    [0.3, '0.3'],
+    [1.23, '1.23'],
+    [874544608.19717, '874544608.19717'],
+    [1e15, '1000000000000000'],
+    [1e20, '100000000000000000000'],
+  ])('truncates isolated margin amount %s to eight decimals as the decimal string %s', async (amount, expectedAmount) => {
+    const { client, mockInstance } = createClient();
+    mockInstance.post.mockResolvedValue({ data: { code: 200, msg: 'Successfully modify position margin.', amount: 1, type: 1 } });
+
+    await client.addIsolatedPositionMargin({ symbol: 'ARBUSDT', amount, positionSide: PositionSideEnum.Long });
+
+    expect(mockInstance.post.mock.calls[0][2].params.amount).toBe(expectedAmount);
+  });
+
+  it('refuses an isolated margin amount that truncates to zero at eight decimals before sending', async () => {
+    const { client, mockInstance } = createClient();
+
+    await expect(client.addIsolatedPositionMargin({ symbol: 'ARBUSDT', amount: 1e-9, positionSide: PositionSideEnum.Long }))
+      .rejects.toThrow('must stay positive after truncating to 8 decimal places');
+    expect(mockInstance.post).not.toHaveBeenCalled();
+  });
+
+  it.each([1e21, 2e21])('refuses the isolated margin amount %s without a decimal record before sending', async amount => {
+    const { client, mockInstance } = createClient();
+
+    await expect(client.addIsolatedPositionMargin({ symbol: 'ARBUSDT', amount, positionSide: PositionSideEnum.Long }))
+      .rejects.toThrow('too large to write as a decimal string');
+    expect(mockInstance.post).not.toHaveBeenCalled();
+  });
+
+  it('reads every execution page for one order and ignores cancellation time', async () => {
+    const { client, mockInstance } = createClient();
+    const pageList = Array.from({ length: 1000 }, (_, index) => ({ id: String(9007199254740993n + BigInt(index)), orderId: '77', symbol: 'BTCUSDT', qty: '0.01', price: '100', quoteQty: '1', commission: '0.001', commissionAsset: 'USDT', time: 1500 }));
+    mockInstance.get.mockResolvedValueOnce({ data: pageList }).mockResolvedValueOnce({ data: [{ ...pageList[999], id: '9007199254741993', time: 1600 }] });
+    const summary = await client.fetchOrderExecutionSummary({ symbol: 'BTCUSDT', orderId: '77', startTime: 1000, endTime: 5000 });
+    expect(summary.filledAmount).toBeCloseTo(10.01, 9);
+    expect(summary.lastFillTimeMs).toBe(1600);
+    expect(mockInstance.get.mock.calls[0][1].params).toMatchObject({ symbol: 'BTCUSDT', orderId: '77', startTime: 1000, endTime: 5000 });
+    expect(mockInstance.get.mock.calls[1][1].params).toMatchObject({ symbol: 'BTCUSDT', orderId: '77', fromId: '9007199254741993' });
+    expect(mockInstance.get.mock.calls[1][1].params.startTime).toBeUndefined();
+  });
+
+  it('refuses executions belonging to another order', async () => {
+    const { client, mockInstance } = createClient();
+    mockInstance.get.mockResolvedValue({ data: [{ id: '1', orderId: 'other', symbol: 'BTCUSDT', qty: '1', time: 1500 }] });
+    await expect(client.fetchOrderExecutionSummary({ symbol: 'BTCUSDT', orderId: '77', startTime: 1000, endTime: 5000 })).rejects.toThrow('Unconfirmed');
+  });
+
   beforeEach(() => {
     jest.spyOn(Date, 'now').mockReturnValue(1700000000000);
   });
@@ -105,18 +210,41 @@ describe('BinanceFutures', () => {
   describe('fetchPosition', () => {
     it('normalizes position from raw data', async () => {
       const { client, mockInstance } = createClient();
-      mockInstance.get.mockResolvedValue({ data: [BINANCE_RAW_POSITION_RISK] });
+      routeGetRequests(mockInstance, { '/fapi/v3/positionRisk': [[BINANCE_RAW_POSITION_RISK]], '/fapi/v1/symbolConfig': [[BINANCE_RAW_SYMBOL_CONFIG_BTCUSDT]] });
 
       const position = await client.fetchPosition('BTCUSDT');
 
       expect(position.symbol).toBe('BTCUSDT');
       expect(position.side).toBe(PositionSideEnum.Long);
       expect(position.contracts).toBe(0.1);
+      expect(position.leverage).toBe(5);
+      expect(position.marginMode).toBe(MarginModeEnum.Isolated);
+    });
+
+    it('reads the position risk and the symbol configuration of the symbol in parallel', async () => {
+      const { client, mockInstance } = createClient();
+      const resolverList: Array<() => void> = [];
+      mockInstance.get.mockImplementation((url: string) => new Promise((resolve) => {
+        resolverList.push(() => resolve({ data: url === '/fapi/v1/symbolConfig' ? [BINANCE_RAW_SYMBOL_CONFIG_BTCUSDT] : [BINANCE_RAW_POSITION_RISK] }));
+      }));
+
+      const pendingPosition = client.fetchPosition('BTCUSDT');
+
+      for (let attempt = 0; attempt < 10 && mockInstance.get.mock.calls.length < 2; attempt++) {
+        await Promise.resolve();
+      }
+
+      expect(mockInstance.get.mock.calls.map((call) => call[0]).sort()).toEqual(['/fapi/v1/symbolConfig', '/fapi/v3/positionRisk']);
+      expect(mockInstance.get.mock.calls.every((call) => call[1].params.symbol === 'BTCUSDT')).toBe(true);
+
+      resolverList.forEach((resolve) => resolve());
+
+      expect((await pendingPosition).leverage).toBe(5);
     });
 
     it('says which of the two sides this position is: the reader must not have to guess', async () => {
       const { client, mockInstance } = createClient();
-      mockInstance.get.mockResolvedValue({ data: [BINANCE_RAW_POSITION_RISK] });
+      routeGetRequests(mockInstance, { '/fapi/v3/positionRisk': [[BINANCE_RAW_POSITION_RISK]], '/fapi/v1/symbolConfig': [[BINANCE_RAW_SYMBOL_CONFIG_BTCUSDT]] });
 
       const position = await client.fetchPosition('BTCUSDT');
 
@@ -125,11 +253,73 @@ describe('BinanceFutures', () => {
 
     it('marks a one-way position with zero, exactly as the other exchange does', async () => {
       const { client, mockInstance } = createClient();
-      mockInstance.get.mockResolvedValue({ data: [{ ...BINANCE_RAW_POSITION_RISK, positionSide: 'BOTH' }] });
+      routeGetRequests(mockInstance, { '/fapi/v3/positionRisk': [[{ ...BINANCE_RAW_POSITION_RISK, positionSide: 'BOTH' }]], '/fapi/v1/symbolConfig': [[BINANCE_RAW_SYMBOL_CONFIG_BTCUSDT]] });
 
       const position = await client.fetchPosition('BTCUSDT');
 
       expect(position.positionIdx).toBe(0);
+    });
+
+    it('returns the position with unknown leverage and margin mode and one warning when the symbol configuration fails', async () => {
+      const { client, mockInstance, logger } = createClientWithLogger();
+      mockInstance.get.mockImplementation(async (url: string) => {
+        if (url === '/fapi/v1/symbolConfig') {
+          throw Object.assign(new Error('configuration request failed'), { response: { status: 400 } });
+        }
+
+        return { data: [BINANCE_RAW_POSITION_RISK_V3_OPEN_CROSS] };
+      });
+
+      const position = await client.fetchPosition('ETHUSDT');
+
+      expect(position.contracts).toBe(0.01);
+      expect(position.leverage).toBe(0);
+      expect(position.marginMode).toBeNull();
+      expect(mockInstance.get.mock.calls.map((call) => call[0]).sort()).toEqual(['/fapi/v1/symbolConfig', '/fapi/v3/positionRisk']);
+      expect(logger.warn).toHaveBeenCalledTimes(1);
+      expect(logger.warn).toHaveBeenCalledWith(
+        '[Binance] /fapi/v1/symbolConfig failed (HTTP 400: configuration request failed): leverage and margin mode of ETHUSDT are unknown',
+      );
+    });
+
+    it('returns the position with unknown leverage and margin mode and one warning when the symbol configuration has no such symbol', async () => {
+      const { client, mockInstance, logger } = createClientWithLogger();
+      routeGetRequests(mockInstance, {
+        '/fapi/v3/positionRisk': [[BINANCE_RAW_POSITION_RISK_V3_OPEN_ISOLATED]],
+        '/fapi/v1/symbolConfig': [[BINANCE_RAW_SYMBOL_CONFIG_BTCUSDT]],
+      });
+
+      const position = await client.fetchPosition('ETHUSDT');
+
+      expect(position.leverage).toBe(0);
+      expect(position.marginMode).toBeNull();
+      expect(mockInstance.get.mock.calls.map((call) => call[0]).sort()).toEqual(['/fapi/v1/symbolConfig', '/fapi/v3/positionRisk']);
+      expect(logger.warn).toHaveBeenCalledTimes(1);
+      expect(logger.warn).toHaveBeenCalledWith('[Binance] /fapi/v1/symbolConfig has no ETHUSDT: leverage and margin mode are unknown');
+    });
+
+    it('does not warn when the symbol configuration answers for the symbol', async () => {
+      const { client, mockInstance, logger } = createClientWithLogger();
+      routeGetRequests(mockInstance, { '/fapi/v3/positionRisk': [[BINANCE_RAW_POSITION_RISK_V3_OPEN_CROSS]], '/fapi/v1/symbolConfig': [[BINANCE_RAW_SYMBOL_CONFIG_ETHUSDT_CROSSED]] });
+
+      await client.fetchPosition('ETHUSDT');
+
+      expect(mockInstance.get.mock.calls.map((call) => call[0]).sort()).toEqual(['/fapi/v1/symbolConfig', '/fapi/v3/positionRisk']);
+      expect(logger.warn).not.toHaveBeenCalled();
+    });
+
+    it('fails when the position risk request itself fails, even with a working symbol configuration', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockImplementation(async (url: string) => {
+        if (url === '/fapi/v3/positionRisk') {
+          throw Object.assign(new Error('position risk request failed'), { response: { status: 400 } });
+        }
+
+        return { data: [BINANCE_RAW_SYMBOL_CONFIG_ETHUSDT_CROSSED] };
+      });
+
+      await expect(client.fetchPosition('ETHUSDT')).rejects.toThrow('HTTP 400: position risk request failed');
+      expect(mockInstance.get.mock.calls.map((call) => call[0]).sort()).toEqual(['/fapi/v1/symbolConfig', '/fapi/v3/positionRisk']);
     });
 
     it('throws when symbol not found in response', async () => {
@@ -141,6 +331,108 @@ describe('BinanceFutures', () => {
   });
 
   describe('fetchPositionSnapshot', () => {
+    it('returns null for a requested empty hedge slot: the position risk does not return it and nothing else is read', async () => {
+      const { client, mockInstance } = createClient();
+      routeGetRequests(mockInstance, {
+        '/fapi/v3/positionRisk': [[]],
+        '/fapi/v1/symbolConfig': [[BINANCE_RAW_SYMBOL_CONFIG_BTCUSDT]],
+      });
+
+      const result = await client.fetchPositionSnapshot('BTCUSDT', 1);
+
+      expect(result).toBeNull();
+      expect(mockInstance.get.mock.calls.map((call) => call[0]).sort()).toEqual(['/fapi/v1/symbolConfig', '/fapi/v3/positionRisk']);
+    });
+
+    it('returns null for an empty oneWay symbol even when its symbol configuration is known', async () => {
+      const { client, mockInstance } = createClient();
+      routeGetRequests(mockInstance, {
+        '/fapi/v3/positionRisk': [[]],
+        '/fapi/v1/symbolConfig': [[BINANCE_RAW_SYMBOL_CONFIG_ETHUSDT_ISOLATED]],
+      });
+
+      const result = await client.fetchPositionSnapshot('ETHUSDT');
+
+      expect(result).toBeNull();
+      expect(mockInstance.get.mock.calls.map((call) => call[0]).sort()).toEqual(['/fapi/v1/symbolConfig', '/fapi/v3/positionRisk']);
+    });
+
+    it('reads margin mode and leverage of live open v3 entries from the live symbol configuration', async () => {
+      const { client, mockInstance } = createClient();
+      routeGetRequests(mockInstance, {
+        '/fapi/v3/positionRisk': [[BINANCE_RAW_POSITION_RISK_V3_OPEN_ISOLATED], [BINANCE_RAW_POSITION_RISK_V3_OPEN_CROSS]],
+        '/fapi/v1/symbolConfig': [[BINANCE_RAW_SYMBOL_CONFIG_ETHUSDT_ISOLATED], [BINANCE_RAW_SYMBOL_CONFIG_ETHUSDT_CROSSED]],
+      });
+
+      const isolatedResult = await client.fetchPositionSnapshot('ETHUSDT');
+      const crossResult = await client.fetchPositionSnapshot('ETHUSDT');
+
+      expect(isolatedResult?.marginMode).toBe(MarginModeEnum.Isolated);
+      expect(isolatedResult?.leverage).toBe(2);
+      expect(crossResult?.marginMode).toBe(MarginModeEnum.Cross);
+      expect(crossResult?.leverage).toBe(2);
+      expect(mockInstance.get).toHaveBeenCalledTimes(4);
+    });
+
+    it('reads the live v3 empty entry kept by a resting order as isolated: the symbol configuration decides, not isolatedWallet', async () => {
+      const { client, mockInstance } = createClient();
+      routeGetRequests(mockInstance, {
+        '/fapi/v3/positionRisk': [[BINANCE_RAW_POSITION_RISK_V3_ZERO_WITH_ORDER_ISOLATED]],
+        '/fapi/v1/symbolConfig': [[BINANCE_RAW_SYMBOL_CONFIG_ETHUSDT_ISOLATED]],
+      });
+
+      const result = await client.fetchPositionSnapshot('ETHUSDT');
+
+      expect(result?.contracts).toBe(0);
+      expect(result?.marginMode).toBe(MarginModeEnum.Isolated);
+      expect(result?.leverage).toBe(2);
+      expect(mockInstance.get.mock.calls.map((call) => call[0]).sort()).toEqual(['/fapi/v1/symbolConfig', '/fapi/v3/positionRisk']);
+    });
+
+    it('returns null for a missing hedge slot next to an open one', async () => {
+      const { client, mockInstance } = createClient();
+      routeGetRequests(mockInstance, {
+        '/fapi/v3/positionRisk': [[{ ...BINANCE_RAW_POSITION_RISK_V3_OPEN_CROSS, positionSide: 'LONG' }]],
+        '/fapi/v1/symbolConfig': [[BINANCE_RAW_SYMBOL_CONFIG_ETHUSDT_CROSSED]],
+      });
+
+      const result = await client.fetchPositionSnapshot('ETHUSDT', 2);
+
+      expect(result).toBeNull();
+      expect(mockInstance.get.mock.calls.map((call) => call[0]).sort()).toEqual(['/fapi/v1/symbolConfig', '/fapi/v3/positionRisk']);
+    });
+
+    it('returns a slot with unknown leverage and margin mode and one warning when the symbol configuration fails', async () => {
+      const { client, mockInstance, logger } = createClientWithLogger();
+      mockInstance.get.mockImplementation(async (url: string) => {
+        if (url === '/fapi/v1/symbolConfig') {
+          throw Object.assign(new Error('configuration request failed'), { response: { status: 400 } });
+        }
+
+        return { data: [BINANCE_RAW_POSITION_RISK_V3_ZERO_WITH_ORDER_ISOLATED] };
+      });
+
+      const result = await client.fetchPositionSnapshot('ETHUSDT');
+
+      expect(result?.contracts).toBe(0);
+      expect(result?.leverage).toBe(0);
+      expect(result?.marginMode).toBeNull();
+      expect(mockInstance.get.mock.calls.map((call) => call[0]).sort()).toEqual(['/fapi/v1/symbolConfig', '/fapi/v3/positionRisk']);
+      expect(logger.warn).toHaveBeenCalledTimes(1);
+      expect(logger.warn).toHaveBeenCalledWith(
+        '[Binance] /fapi/v1/symbolConfig failed (HTTP 400: configuration request failed): leverage and margin mode of ETHUSDT are unknown',
+      );
+    });
+
+    it('reads only the position risk and the symbol configuration when the requested slot is present', async () => {
+      const { client, mockInstance } = createClient();
+      routeGetRequests(mockInstance, { '/fapi/v3/positionRisk': [[{ ...BINANCE_RAW_POSITION_RISK, positionSide: 'LONG' }]], '/fapi/v1/symbolConfig': [[BINANCE_RAW_SYMBOL_CONFIG_BTCUSDT]] });
+
+      await client.fetchPositionSnapshot('BTCUSDT', 1);
+
+      expect(mockInstance.get.mock.calls.map((call) => call[0]).sort()).toEqual(['/fapi/v1/symbolConfig', '/fapi/v3/positionRisk']);
+    });
+
     it('returns null when response is empty', async () => {
       const { client, mockInstance } = createClient();
       mockInstance.get.mockResolvedValue({ data: [] });
@@ -152,9 +444,7 @@ describe('BinanceFutures', () => {
 
     it('returns BOTH-side entry when positionIdx is undefined (oneWay)', async () => {
       const { client, mockInstance } = createClient();
-      mockInstance.get.mockResolvedValue({
-        data: [{ ...BINANCE_RAW_POSITION_RISK, positionSide: 'BOTH' }],
-      });
+      routeGetRequests(mockInstance, { '/fapi/v3/positionRisk': [[{ ...BINANCE_RAW_POSITION_RISK, positionSide: 'BOTH' }]], '/fapi/v1/symbolConfig': [[BINANCE_RAW_SYMBOL_CONFIG_BTCUSDT]] });
 
       const result = await client.fetchPositionSnapshot('BTCUSDT');
 
@@ -164,11 +454,12 @@ describe('BinanceFutures', () => {
 
     it('maps positionIdx=1 to positionSide=LONG and returns matched entry', async () => {
       const { client, mockInstance } = createClient();
-      mockInstance.get.mockResolvedValue({
-        data: [
+      routeGetRequests(mockInstance, {
+        '/fapi/v3/positionRisk': [[
           { ...BINANCE_RAW_POSITION_RISK, positionSide: 'LONG', positionAmt: '0.5' },
           { ...BINANCE_RAW_POSITION_RISK, positionSide: 'SHORT', positionAmt: '0' },
-        ],
+        ]],
+        '/fapi/v1/symbolConfig': [[BINANCE_RAW_SYMBOL_CONFIG_BTCUSDT]],
       });
 
       const result = await client.fetchPositionSnapshot('BTCUSDT', 1);
@@ -180,11 +471,12 @@ describe('BinanceFutures', () => {
 
     it('maps positionIdx=2 to positionSide=SHORT', async () => {
       const { client, mockInstance } = createClient();
-      mockInstance.get.mockResolvedValue({
-        data: [
+      routeGetRequests(mockInstance, {
+        '/fapi/v3/positionRisk': [[
           { ...BINANCE_RAW_POSITION_RISK, positionSide: 'LONG', positionAmt: '0' },
           { ...BINANCE_RAW_POSITION_RISK, positionSide: 'SHORT', positionAmt: '0.3' },
-        ],
+        ]],
+        '/fapi/v1/symbolConfig': [[BINANCE_RAW_SYMBOL_CONFIG_BTCUSDT]],
       });
 
       const result = await client.fetchPositionSnapshot('BTCUSDT', 2);
@@ -196,9 +488,7 @@ describe('BinanceFutures', () => {
 
     it('returns null when target positionSide is not present', async () => {
       const { client, mockInstance } = createClient();
-      mockInstance.get.mockResolvedValue({
-        data: [{ ...BINANCE_RAW_POSITION_RISK, positionSide: 'LONG' }],
-      });
+      routeGetRequests(mockInstance, { '/fapi/v3/positionRisk': [[{ ...BINANCE_RAW_POSITION_RISK, positionSide: 'LONG' }]], '/fapi/v1/symbolConfig': [[BINANCE_RAW_SYMBOL_CONFIG_BTCUSDT]] });
 
       const result = await client.fetchPositionSnapshot('BTCUSDT', 2);
 
@@ -218,11 +508,12 @@ describe('BinanceFutures', () => {
 
     it('throws when positionIdx is undefined but response contains LONG/SHORT entries (hedge mode)', async () => {
       const { client, mockInstance } = createClient();
-      mockInstance.get.mockResolvedValue({
-        data: [
+      routeGetRequests(mockInstance, {
+        '/fapi/v3/positionRisk': [[
           { ...BINANCE_RAW_POSITION_RISK, positionSide: 'LONG', positionAmt: '0.5' },
           { ...BINANCE_RAW_POSITION_RISK, positionSide: 'SHORT', positionAmt: '0' },
-        ],
+        ]],
+        '/fapi/v1/symbolConfig': [[BINANCE_RAW_SYMBOL_CONFIG_BTCUSDT]],
       });
 
       await expect(client.fetchPositionSnapshot('BTCUSDT')).rejects.toThrow(
@@ -232,9 +523,7 @@ describe('BinanceFutures', () => {
 
     it('returns null when positionIdx is undefined and only BOTH entry is present (oneWay closed)', async () => {
       const { client, mockInstance } = createClient();
-      mockInstance.get.mockResolvedValue({
-        data: [{ ...BINANCE_RAW_POSITION_RISK, positionSide: 'OTHER', positionAmt: '0' }],
-      });
+      routeGetRequests(mockInstance, { '/fapi/v3/positionRisk': [[{ ...BINANCE_RAW_POSITION_RISK, positionSide: 'OTHER', positionAmt: '0' }]], '/fapi/v1/symbolConfig': [[BINANCE_RAW_SYMBOL_CONFIG_BTCUSDT]] });
 
       const result = await client.fetchPositionSnapshot('BTCUSDT');
 
@@ -254,11 +543,12 @@ describe('BinanceFutures', () => {
 
     it('returns all entries with mapped positionIdx (hedge mode)', async () => {
       const { client, mockInstance } = createClient();
-      mockInstance.get.mockResolvedValue({
-        data: [
+      routeGetRequests(mockInstance, {
+        '/fapi/v3/positionRisk': [[
           { ...BINANCE_RAW_POSITION_RISK, positionSide: 'LONG' },
           { ...BINANCE_RAW_POSITION_RISK, positionSide: 'SHORT' },
-        ],
+        ]],
+        '/fapi/v1/symbolConfig': [[BINANCE_RAW_SYMBOL_CONFIG_BTCUSDT]],
       });
 
       const result = await client.fetchPositionList('BTCUSDT');
@@ -266,6 +556,103 @@ describe('BinanceFutures', () => {
       expect(result).toHaveLength(2);
       expect(result[0].positionIdx).toBe(1);
       expect(result[1].positionIdx).toBe(2);
+      expect(result.every((position) => position.leverage === 5 && position.marginMode === MarginModeEnum.Isolated)).toBe(true);
+    });
+  });
+
+  describe('fetchAllPositions', () => {
+    it('reads the symbol configuration of all symbols without a symbol parameter and keeps only open positions', async () => {
+      const { client, mockInstance } = createClient();
+      routeGetRequests(mockInstance, {
+        '/fapi/v3/positionRisk': [[BINANCE_RAW_POSITION_RISK, BINANCE_RAW_POSITION_RISK_V3_ZERO_WITH_ORDER_ISOLATED, BINANCE_RAW_POSITION_RISK_V3_OPEN_CROSS]],
+        '/fapi/v1/symbolConfig': [BINANCE_RAW_SYMBOL_CONFIG_LIST],
+      });
+
+      const positionList = await client.fetchAllPositions();
+      const symbolConfigCall = mockInstance.get.mock.calls.find((call) => call[0] === '/fapi/v1/symbolConfig');
+
+      expect(symbolConfigCall?.[1].params.symbol).toBeUndefined();
+      expect(positionList.map((position) => [position.symbol, position.contracts, position.marginMode, position.leverage])).toEqual([
+        ['BTCUSDT', 0.1, MarginModeEnum.Isolated, 5],
+        ['ETHUSDT', 0.01, MarginModeEnum.Isolated, 2],
+      ]);
+    });
+
+    it('fetchAllPositions returns every open position with unknown leverage and margin mode and one warning when the symbol configuration fails', async () => {
+      const { client, mockInstance, logger } = createClientWithLogger();
+      mockInstance.get.mockImplementation(async (url: string) => {
+        if (url === '/fapi/v1/symbolConfig') {
+          throw Object.assign(new Error('configuration request failed'), { response: { status: 400 } });
+        }
+
+        return { data: [BINANCE_RAW_POSITION_RISK, BINANCE_RAW_POSITION_RISK_V3_OPEN_CROSS] };
+      });
+
+      const positionList = await client.fetchAllPositions();
+
+      expect(positionList.map((position) => [position.symbol, position.contracts, position.marginMode, position.leverage])).toEqual([
+        ['BTCUSDT', 0.1, null, 0],
+        ['ETHUSDT', 0.01, null, 0],
+      ]);
+      expect(mockInstance.get.mock.calls.map((call) => call[0]).sort()).toEqual(['/fapi/v1/symbolConfig', '/fapi/v3/positionRisk']);
+      expect(logger.warn).toHaveBeenCalledTimes(1);
+      expect(logger.warn).toHaveBeenCalledWith(
+        '[Binance] /fapi/v1/symbolConfig failed (HTTP 400: configuration request failed): leverage and margin mode of BTCUSDT, ETHUSDT are unknown',
+      );
+    });
+
+    it('fetchAllPositions leaves unknown only the symbol missing from the symbol configuration', async () => {
+      const { client, mockInstance, logger } = createClientWithLogger();
+      routeGetRequests(mockInstance, {
+        '/fapi/v3/positionRisk': [[BINANCE_RAW_POSITION_RISK, BINANCE_RAW_POSITION_RISK_V3_OPEN_CROSS]],
+        '/fapi/v1/symbolConfig': [[BINANCE_RAW_SYMBOL_CONFIG_BTCUSDT]],
+      });
+
+      const positionList = await client.fetchAllPositions();
+
+      expect(positionList.map((position) => [position.symbol, position.contracts, position.marginMode, position.leverage])).toEqual([
+        ['BTCUSDT', 0.1, MarginModeEnum.Isolated, 5],
+        ['ETHUSDT', 0.01, null, 0],
+      ]);
+      expect(logger.warn).toHaveBeenCalledTimes(1);
+      expect(logger.warn).toHaveBeenCalledWith('[Binance] /fapi/v1/symbolConfig has no ETHUSDT: leverage and margin mode are unknown');
+    });
+
+    it('fetchAllPositions warns only about the returned positions, not about empty cells of symbols with orders only', async () => {
+      const { client, mockInstance, logger } = createClientWithLogger();
+      mockInstance.get.mockImplementation(async (url: string) => {
+        if (url === '/fapi/v1/symbolConfig') {
+          throw Object.assign(new Error('configuration request failed'), { response: { status: 400 } });
+        }
+
+        return {
+          data: [
+            { ...BINANCE_RAW_POSITION_RISK_V3_OPEN_CROSS, symbol: 'ETHUSDT', positionAmt: '1' },
+            { ...BINANCE_RAW_POSITION_RISK_V3_OPEN_CROSS, symbol: 'SNTUSDT', positionAmt: '0' },
+          ],
+        };
+      });
+
+      const positionList = await client.fetchAllPositions();
+      const warningText = String(logger.warn.mock.calls[0]?.[0]);
+
+      expect(positionList.map((position) => position.symbol)).toEqual(['ETHUSDT']);
+      expect(logger.warn).toHaveBeenCalledTimes(1);
+      expect(warningText).toContain('ETHUSDT');
+      expect(warningText).not.toContain('SNTUSDT');
+    });
+
+    it('fetchAllPositions rejects when positionRisk request fails', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockImplementation(async (url: string) => {
+        if (url === '/fapi/v3/positionRisk') {
+          throw Object.assign(new Error('position risk request failed'), { response: { status: 400 } });
+        }
+
+        return { data: BINANCE_RAW_SYMBOL_CONFIG_LIST };
+      });
+
+      await expect(client.fetchAllPositions()).rejects.toThrow('position risk request failed');
     });
   });
 
@@ -1232,14 +1619,105 @@ describe('BinanceFutures', () => {
 
   // Итог закрытия у Binance готовой ручкой не отдаётся: собираем его из списка собственных
   // сделок. Смысл полей обязан совпасть с Bybit, иначе одно и то же поле будет значить разное.
+  describe('fetchPositionLeverage', () => {
+    it('reads the configured leverage independently of positionRisk', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: [{ symbol: 'BTCUSDT', leverage: 21 }] });
+
+      await expect(client.fetchPositionLeverage('BTCUSDT')).resolves.toBe(21);
+      expect(mockInstance.get.mock.calls[0][0]).toBe('/fapi/v1/symbolConfig');
+    });
+
+    it.each([undefined, 0, -1, Number.NaN, Number.POSITIVE_INFINITY])('returns unknown for unsuitable leverage %s', async (leverage) => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: [{ symbol: 'BTCUSDT', leverage }] });
+
+      await expect(client.fetchPositionLeverage('BTCUSDT')).resolves.toBeNull();
+    });
+
+    it('does not borrow leverage from a different symbol or an ambiguous response', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValueOnce({ data: [{ symbol: 'ETHUSDT', leverage: 10 }] })
+        .mockResolvedValueOnce({ data: [{ symbol: 'BTCUSDT', leverage: 10 }, { symbol: 'BTCUSDT', leverage: 20 }] });
+
+      await expect(client.fetchPositionLeverage('BTCUSDT')).resolves.toBeNull();
+      await expect(client.fetchPositionLeverage('BTCUSDT')).resolves.toBeNull();
+    });
+
+    it('propagates request failures rather than inventing leverage', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockRejectedValue(Object.assign(new Error('configuration request failed'), { response: { status: 400 } }));
+
+      await expect(client.fetchPositionLeverage('BTCUSDT')).rejects.toThrow('configuration request failed');
+    });
+  });
+
+  describe('fetchAccountTrades', () => {
+    const execution: BinanceUserTradeRaw = {
+      id: 1, orderId: 1, symbol: 'BTCUSDT', side: 'BUY', positionSide: 'LONG',
+      price: '100', qty: '2', quoteQty: '200', realizedPnl: '0', commission: '0.02',
+      commissionAsset: 'USDT', time: 1000,
+    };
+
+    it('returns opening and closing fills across all pages without truncating to the display limit', async () => {
+      const { client, mockInstance } = createClient();
+      const pageList = Array.from({ length: 1000 }, (_, index) => ({ ...execution, id: index + 1 }));
+      mockInstance.get.mockResolvedValueOnce({ data: pageList }).mockResolvedValueOnce({ data: [{ ...execution, id: 1001, side: 'SELL' }] });
+
+      const tradeList = await client.fetchAccountTrades('BTCUSDT', { startTime: 1000, endTime: 2000, limit: 1 });
+
+      expect(tradeList).toHaveLength(1001);
+      expect(tradeList[0].side).toBe(OrderSideEnum.Buy);
+      expect(tradeList[1000].side).toBe(OrderSideEnum.Sell);
+      expect(tradeList[1000].positionSide).toBe(PositionSideEnum.Long);
+      expect(mockInstance.get.mock.calls[1][1].params.fromId).toBe(1001);
+    });
+
+    it('requires an explicit bounded time window before making requests', async () => {
+      const { client, mockInstance } = createClient();
+
+      await expect(client.fetchAccountTrades('BTCUSDT', { startTime: 1000 })).rejects.toThrow('explicit time window');
+      await expect(client.fetchAccountTrades('BTCUSDT', { startTime: 1000, endTime: 1001 + 7 * 24 * 60 * 60 * 1000 })).rejects.toThrow('seven days');
+      expect(mockInstance.get).not.toHaveBeenCalled();
+    });
+
+    it('fails rather than returning a full page without usable identifiers', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: Array.from({ length: 1000 }, () => ({ ...execution, id: 'invalid' })) });
+
+      await expect(client.fetchAccountTrades('BTCUSDT', { startTime: 1000, endTime: 2000 })).rejects.toThrow('pagination did not advance');
+    });
+
+    it('fails when the exchange repeats the same full page', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: Array.from({ length: 1000 }, (_, index) => ({ ...execution, id: index + 1 })) });
+
+      await expect(client.fetchAccountTrades('BTCUSDT', { startTime: 1000, endTime: 2000 })).rejects.toThrow('pagination did not advance');
+      expect(mockInstance.get).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not silently return partial history at the page ceiling', async () => {
+      const { client, mockInstance } = createClient();
+      let page = 0;
+      mockInstance.get.mockImplementation(async () => {
+        const pageList = Array.from({ length: 1000 }, (_, index) => ({ ...execution, id: page * 1000 + index + 1 }));
+        page += 1;
+
+        return { data: pageList };
+      });
+
+      await expect(client.fetchAccountTrades('BTCUSDT', { startTime: 1000, endTime: 2000 })).rejects.toThrow('completeness limit');
+    });
+  });
+
   describe('fetchClosedPnl', () => {
     const CLOSING_TRADE_LIST = [
       // Заполнение, которое ОТКРЫВАЛО позицию: ничего не закрыло, итог нулевой,
       // но комиссию биржа за него взяла — и в итог сделки она обязана войти.
-      { orderId: 10, symbol: 'BTCUSDT', side: 'SELL', price: '100', qty: '2', realizedPnl: '0', commission: '0.10', time: 1000 },
+      { orderId: 10, symbol: 'BTCUSDT', side: 'SELL', price: '100', qty: '2', realizedPnl: '0', commission: '0.10', commissionAsset: 'USDT', time: 1000 },
       // Два заполнения ОДНОЙ закрывающей заявки.
-      { orderId: 20, symbol: 'BTCUSDT', side: 'BUY', price: '96', qty: '1', realizedPnl: '4', commission: '0.05', time: 5000 },
-      { orderId: 20, symbol: 'BTCUSDT', side: 'BUY', price: '98', qty: '1', realizedPnl: '2', commission: '0.05', time: 5500 },
+      { orderId: 20, symbol: 'BTCUSDT', side: 'BUY', price: '96', qty: '1', realizedPnl: '4', commission: '0.05', commissionAsset: 'USDT', time: 5000 },
+      { orderId: 20, symbol: 'BTCUSDT', side: 'BUY', price: '98', qty: '1', realizedPnl: '2', commission: '0.05', commissionAsset: 'USDT', time: 5500 },
     ];
 
     it('returns one row per closing order, with the volume-weighted exit price', async () => {
@@ -1285,9 +1763,9 @@ describe('BinanceFutures', () => {
       const { client, mockInstance } = createClient();
       mockInstance.get.mockResolvedValue({
         data: [
-          { orderId: 10, symbol: 'BTCUSDT', side: 'SELL', price: '100', qty: '4', realizedPnl: '0', commission: '0.40', time: 1000 },
-          { orderId: 20, symbol: 'BTCUSDT', side: 'BUY', price: '99', qty: '1', realizedPnl: '1', commission: '0.01', time: 2000 },
-          { orderId: 30, symbol: 'BTCUSDT', side: 'BUY', price: '98', qty: '3', realizedPnl: '6', commission: '0.03', time: 3000 },
+          { orderId: 10, symbol: 'BTCUSDT', side: 'SELL', price: '100', qty: '4', realizedPnl: '0', commission: '0.40', commissionAsset: 'USDT', time: 1000 },
+          { orderId: 20, symbol: 'BTCUSDT', side: 'BUY', price: '99', qty: '1', realizedPnl: '1', commission: '0.01', commissionAsset: 'USDT', time: 2000 },
+          { orderId: 30, symbol: 'BTCUSDT', side: 'BUY', price: '98', qty: '3', realizedPnl: '6', commission: '0.03', commissionAsset: 'USDT', time: 3000 },
         ],
       });
 
@@ -1303,7 +1781,7 @@ describe('BinanceFutures', () => {
     it('derives the entry price of a long the other way round', async () => {
       const { client, mockInstance } = createClient();
       mockInstance.get.mockResolvedValue({
-        data: [{ orderId: 30, symbol: 'BTCUSDT', side: 'SELL', price: '110', qty: '2', realizedPnl: '20', commission: '0.2', time: 7000 }],
+        data: [{ orderId: 30, symbol: 'BTCUSDT', side: 'SELL', price: '110', qty: '2', realizedPnl: '20', commission: '0.2', commissionAsset: 'USDT', time: 7000 }],
       });
 
       const [row] = await client.fetchClosedPnl('BTCUSDT');
@@ -1360,6 +1838,25 @@ describe('BinanceFutures', () => {
       // Номер и окно времени биржа вместе не принимает — вторая страница идёт только по номеру.
       expect(secondConfig.params.fromId).toBe(1001);
       expect(secondConfig.params.startTime).toBeUndefined();
+    });
+
+    it('returns the partial closed PnL with a warning at the page ceiling instead of failing', async () => {
+      const mockInstance = createMockAxiosInstance();
+      const logger = createMockLogger();
+      mockedAxios.create.mockReturnValue(mockInstance as any);
+      const client = new BinanceFutures({ config: { apiKey: 'testKey', secret: 'testSecret' }, logger });
+      let page = 0;
+      mockInstance.get.mockImplementation(async () => {
+        const pageList = buildClosingPage(page * 1000 + 1, 1000, 20);
+        page += 1;
+
+        return { data: pageList };
+      });
+
+      const [row] = await client.fetchClosedPnl('BTCUSDT', { startTime: 1000 });
+
+      expect(row.quantity).toBe(30000);
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('page ceiling'));
     });
 
     it('does not double-count an execution repeated on the page seam', async () => {

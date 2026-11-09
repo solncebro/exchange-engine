@@ -73,6 +73,9 @@ export const BINANCE_FUTURES_CREATE_BATCH_CHUNK_SIZE = 5;
 export const BINANCE_FUTURES_MODIFY_BATCH_CHUNK_SIZE = 5;
 export const BINANCE_FUTURES_CANCEL_BATCH_CHUNK_SIZE = 10;
 
+// Сумма `/fapi/v1/positionMargin`: восемь знаков после точки, остаток отбрасывается.
+export const BINANCE_POSITION_MARGIN_DECIMAL_PLACES = 8;
+
 // Подсчёты главного счёта (раздел «VIP and institutional sub-account» документации):
 // https://developers.binance.com/en/docs/catalog/vip-and-institutional-sub-account/api/rest-api/asset-management
 // Живут только на боевом адресе api.binance.com: демо-режим обслуживает лишь пути /api
@@ -89,3 +92,6 @@ export const BINANCE_SUB_ACCOUNT_FUTURES_ACCOUNT_PATH = '/sapi/v2/sub-account/fu
 export const BINANCE_SUB_ACCOUNT_USDT_FUTURES_TYPE = 1;
 export const BINANCE_SUB_ACCOUNT_LIST_PAGE_LIMIT = 200;
 export const BINANCE_SUB_ACCOUNT_LIST_MAX_PAGE_COUNT = 50;
+
+/** Долларовые активы комиссии: в BNFCR счёт ЕЭЗ в режиме Binance Futures Credits получает и комиссии, и итог позиции. */
+export const BINANCE_USD_COMMISSION_ASSET_LIST = ['USDT', 'USDC', 'BNFCR'] as const;

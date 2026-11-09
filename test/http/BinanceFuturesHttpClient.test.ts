@@ -1,3 +1,4 @@
+import { PositionSideEnum } from '../../src/types/common';
 import axios from 'axios';
 import { BinanceFuturesHttpClient } from '../../src/http/BinanceFuturesHttpClient';
 import { createMockLogger } from '../fixtures/mockLogger';
@@ -251,16 +252,17 @@ describe('BinanceFuturesHttpClient', () => {
     });
   });
 
-  describe('modifyPositionMargin', () => {
+  describe('addIsolatedPositionMargin', () => {
     it('calls signedPost /fapi/v1/positionMargin', async () => {
-      await client.modifyPositionMargin('BTCUSDT', 100, 1);
+      await client.addIsolatedPositionMargin({ symbol: 'BTCUSDT', amount: '0.00000001', positionSide: PositionSideEnum.Long });
 
       const [url, , options] = mockInstance.post.mock.calls[0];
 
       expect(url).toBe('/fapi/v1/positionMargin');
       expect(options.params.symbol).toBe('BTCUSDT');
-      expect(options.params.amount).toBe(100);
+      expect(options.params.amount).toBe('0.00000001');
       expect(options.params.type).toBe(1);
+      expect(options.params.positionSide).toBe('LONG');
       expect(options.params.signature).toBeDefined();
     });
   });
@@ -291,6 +293,28 @@ describe('BinanceFuturesHttpClient', () => {
       const [url, options] = mockInstance.get.mock.calls[0];
 
       expect(url).toBe('/fapi/v3/account');
+      expect(options.params.signature).toBeDefined();
+    });
+  });
+
+  describe('fetchSymbolConfig', () => {
+    it('reads the signed symbol configuration without changing leverage', async () => {
+      await client.fetchSymbolConfig('BTCUSDT');
+
+      const [url, options] = mockInstance.get.mock.calls[0];
+
+      expect(url).toBe('/fapi/v1/symbolConfig');
+      expect(options.params.symbol).toBe('BTCUSDT');
+      expect(options.params.signature).toBeDefined();
+    });
+
+    it('reads the configuration of every symbol when no symbol is given', async () => {
+      await client.fetchSymbolConfig();
+
+      const [url, options] = mockInstance.get.mock.calls[0];
+
+      expect(url).toBe('/fapi/v1/symbolConfig');
+      expect(options.params).not.toHaveProperty('symbol');
       expect(options.params.signature).toBeDefined();
     });
   });

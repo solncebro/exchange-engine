@@ -1,3 +1,6 @@
+import type { AddIsolatedPositionMarginArgs } from '../types/exchange';
+import type { FetchOrderExecutionSummaryArgs, SetLeverageOptions } from '../types/exchange';
+import type { OrderExecutionSummary } from '../types/common';
 import type {
   CancelBatchOrdersResult,
   CreateBatchOrdersResult,
@@ -5,6 +8,7 @@ import type {
   ExchangeArgs,
   FetchAllKlinesOptions,
   FetchIncomeArgs,
+  FetchFundingRateHistoryArgs,
   FetchPageWithLimitArgs,
   ModifyBatchOrderArgs,
   ModifyBatchOrdersResult,
@@ -28,6 +32,7 @@ import type {
   TradeSymbolBySymbol,
   TickerBySymbol,
   AccountBalances,
+  AccountTrade,
   Position,
   Order,
   FundingRateHistory,
@@ -52,6 +57,7 @@ import type { PublicStreamLike } from '../types/stream';
 import { loadKlinesInChunks } from '../utils/klineLoader';
 import { amountToPrecision, priceToPrecision, MAX_PRICE_DECIMAL_PLACES } from '../precision/precision';
 import type { StepRounding } from '../precision/precision';
+import { truncateToDecimalString } from '../utils/decimalString';
 
 abstract class BaseExchangeClient implements ExchangeClient {
   readonly apiKey: string;
@@ -372,12 +378,16 @@ abstract class BaseExchangeClient implements ExchangeClient {
     throw new Error(`Not supported for ${this.marketLabel} market`);
   }
 
-  async fetchFundingRateHistory(_symbol: string, _options?: FetchPageWithLimitArgs): Promise<FundingRateHistory[]> {
+  async fetchFundingRateHistory(_symbol: string, _options?: FetchFundingRateHistoryArgs): Promise<FundingRateHistory[]> {
     throw new Error(`Not supported for ${this.marketLabel} market`);
   }
 
   async fetchFundingInfo(_symbol?: string): Promise<FundingInfo[]> {
     throw new Error(`Not supported for ${this.marketLabel} market`);
+  }
+
+  async fetchPositionLeverage(_symbol: string): Promise<number | null> {
+    return null;
   }
 
   async fetchPositionMode(): Promise<PositionModeEnum | undefined> {
@@ -400,7 +410,25 @@ abstract class BaseExchangeClient implements ExchangeClient {
     throw new Error(`Not supported for ${this.marketLabel} market`);
   }
 
-  async setLeverage(_leverage: number, _symbol: string): Promise<SetLeverageResult> {
+  async addIsolatedPositionMargin(_args: AddIsolatedPositionMarginArgs): Promise<void> {
+    throw new Error('Adding isolated position margin is not supported for this market');
+  }
+
+  protected formatIsolatedPositionMarginAmount(amount: number, decimalPlaces: number): string {
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new Error('Isolated position margin amount must be finite and positive');
+    }
+
+    const truncatedAmount = truncateToDecimalString(amount, decimalPlaces);
+
+    if (Number(truncatedAmount) <= 0) {
+      throw new Error(`Isolated position margin amount must stay positive after truncating to ${decimalPlaces} decimal places: ${amount}`);
+    }
+
+    return truncatedAmount;
+  }
+
+  async setLeverage(_leverage: number, _symbol: string, _options?: SetLeverageOptions): Promise<SetLeverageResult> {
     throw new Error(`Not supported for ${this.marketLabel} market`);
   }
 
@@ -487,6 +515,14 @@ abstract class BaseExchangeClient implements ExchangeClient {
 
   async fetchIncome(_options?: FetchIncomeArgs): Promise<Income[]> {
     throw new Error(`Not supported for ${this.marketLabel} market`);
+  }
+
+  async fetchOrderExecutionSummary(_args: FetchOrderExecutionSummaryArgs): Promise<OrderExecutionSummary> {
+    throw new Error('Order execution history is not supported for this market');
+  }
+
+  async fetchAccountTrades(_symbol: string, _options: FetchPageWithLimitArgs): Promise<AccountTrade[]> {
+    throw new Error(`Account trade history is not supported for ${this.marketLabel} market`);
   }
 
   async fetchClosedPnl(_symbol?: string, _options?: FetchPageWithLimitArgs): Promise<ClosedPnl[]> {

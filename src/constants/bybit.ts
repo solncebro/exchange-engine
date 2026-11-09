@@ -75,6 +75,13 @@ export const BYBIT_TRANSACTION_LOG_MAX_PAGE_COUNT = 200;
 export const BYBIT_TRANSACTION_LOG_PAGE_INTERVAL_MS = 60;
 
 /**
+ * Пауза между открытыми чтениями отметочной цены для истории фандинга — тот же темп, что у
+ * остальных повторных чтений Bybit: долгое окно даёт десятки начислений, и запросы подряд без
+ * паузы расходуют общий лимит адреса, нужный остальным путям бота.
+ */
+export const BYBIT_MARK_PRICE_KLINE_READ_INTERVAL_MS = 60;
+
+/**
  * Записи журнала операций, несущие начисление фандинга. У них нулевой денежный поток, а
  * сама сумма лежит в поле `funding` (живой счёт 02.09.2026, FLOCKUSDT: `cashFlow=0`,
  * `funding=-2.3156522`). Один список на клиент и нормализатор — чтобы фильтр и чтение суммы
@@ -109,8 +116,10 @@ export const BYBIT_OPEN_ORDERS_PAGE_LIMIT = 50;
 export const BYBIT_OPEN_ORDERS_PAGE_INTERVAL_MS = 60;
 
 /**
- * Потолок страниц при обходе открытых заявок по курсору. 2000 заявок с запасом — дальше отказ,
- * а не неполный список (незамеченная своя заявка живёт на бирже без учёта ботом).
+ * Потолок страниц при обходе открытых заявок по курсору. Последняя заполненная страница тоже
+ * отдаёт непустой курсор, и конец виден только по следующей, пустой странице, поэтому 40 страниц
+ * по 50 вмещают 39 полных — 1950 заявок; дальше отказ, а не неполный список (незамеченная своя
+ * заявка живёт на бирже без учёта ботом).
  */
 export const BYBIT_OPEN_ORDERS_MAX_PAGE_COUNT = 40;
 
@@ -124,3 +133,37 @@ export const BYBIT_API_KEY_INFO_PATH = '/v5/user/query-api';
 export const BYBIT_UNIVERSAL_TRANSFER_PATH = '/v5/asset/transfer/universal-transfer';
 export const BYBIT_UNIVERSAL_TRANSFER_LIST_PATH = '/v5/asset/transfer/query-universal-transfer-list';
 export const BYBIT_ACCOUNT_COINS_BALANCE_PATH = '/v5/asset/transfer/query-account-coins-balance';
+
+export const BYBIT_ISOLATED_MARGIN_MODE = 'ISOLATED_MARGIN';
+export const BYBIT_CROSS_MARGIN_MODE = 'REGULAR_MARGIN';
+export const BYBIT_PORTFOLIO_MARGIN_MODE = 'PORTFOLIO_MARGIN';
+export const BYBIT_CLASSIC_ACCOUNT_STATUS = 1;
+
+/** `/v5/position/add-margin`: «Support up to 4 decimal»; пятый знак биржа отвергает кодом 10001. */
+export const BYBIT_POSITION_MARGIN_DECIMAL_PLACES = 4;
+
+/** Максимум страницы `/v5/position/list` («[1, 200]. Default: 20») — без него ответ режется до 20 позиций. */
+export const BYBIT_POSITION_LIST_PAGE_LIMIT = 200;
+
+/** Пауза между страницами позиций — тот же темп, что у листания открытых заявок. */
+export const BYBIT_POSITION_LIST_PAGE_INTERVAL_MS = 60;
+
+/**
+ * Потолок страниц при обходе позиций по курсору. Последняя заполненная страница тоже отдаёт
+ * непустой курсор (живой демо-счёт 05.11.2026), и конец виден только по следующей, пустой
+ * странице, поэтому 20 страниц по 200 вмещают 19 полных — 3800 позиций; дальше отказ, а не
+ * неполный список.
+ */
+export const BYBIT_POSITION_LIST_MAX_PAGE_COUNT = 20;
+
+/** Максимум страницы `/v5/execution/list` («[1, 100]. Default: 50»). */
+export const BYBIT_ORDER_EXECUTION_PAGE_LIMIT = 100;
+
+/** Пауза между страницами исполнений заявки — тот же темп, что у листания открытых заявок. */
+export const BYBIT_ORDER_EXECUTION_PAGE_INTERVAL_MS = 60;
+
+/** Потолок страниц исполнений заявки в одном семидневном окне — дальше отказ, а не неполная сводка. */
+export const BYBIT_ORDER_EXECUTION_MAX_PAGE_COUNT = 1000;
+
+/** Код отказа, когда режим маржи единого счёта не из известных (или биржа его не прислала). */
+export const BYBIT_MARGIN_MODE_UNKNOWN_ERROR_CODE = 'MARGIN_MODE_UNKNOWN';

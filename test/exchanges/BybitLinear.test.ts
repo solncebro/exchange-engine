@@ -8,6 +8,12 @@ import {
   BYBIT_RAW_KLINE_LIST,
   BYBIT_RAW_WALLET_BALANCE,
   BYBIT_RAW_POSITION,
+  BYBIT_RAW_ACCOUNT_INFO_DEMO_ISOLATED,
+  BYBIT_RAW_POSITION_DEMO_ISOLATED_ACCOUNT_BTCUSDT,
+  BYBIT_RAW_POSITION_DEMO_ISOLATED_ACCOUNT_ETHUSDT_EMPTY,
+  BYBIT_RAW_POSITION_LIST_LIVE_DEMO_CURSOR,
+  BYBIT_RAW_POSITION_LIST_PAGE_DEMO_BTCUSDT,
+  BYBIT_RAW_POSITION_LIST_END_PAGE_DEMO,
   BYBIT_RAW_ORDER_RESPONSE,
   BYBIT_RAW_ORDER_BOOK,
   BYBIT_RAW_PUBLIC_TRADE_LIST,
@@ -20,7 +26,16 @@ import {
   BYBIT_RAW_AMEND_BATCH_RESPONSE,
   BYBIT_RAW_RISK_LIMIT_AVAUSDT_LIST,
   BYBIT_RAW_RISK_LIMIT_PAGE_LIST,
+  BYBIT_RAW_FUNDING_HISTORY_RESPONSE_BTCUSDT,
+  BYBIT_RAW_MARK_PRICE_KLINE_RESPONSE_BTCUSDT_1793721600000,
+  BYBIT_RAW_MARK_PRICE_KLINE_RESPONSE_BTCUSDT_1793692800000,
+  BYBIT_RAW_TICKER_RESPONSE_ETHUSDT_DEMO,
+  BYBIT_RAW_ADD_MARGIN_RESPONSE_ETHUSDT_DEMO,
+  BYBIT_RAW_ADD_MARGIN_REFUSAL_FIVE_DECIMALS,
+  BYBIT_RAW_ADD_MARGIN_REFUSAL_POSITION_IDX_MISMATCH,
 } from '../fixtures/bybitRaw';
+import * as sleepModule from '../../src/utils/sleep';
+import { BYBIT_MARK_PRICE_KLINE_READ_INTERVAL_MS } from '../../src/constants/bybit';
 import { BTCUSDT_TRADE_SYMBOL } from '../fixtures/mockTradeSymbol';
 import { OrderTypeEnum, OrderSideEnum, PositionSideEnum, MarginModeEnum, PositionModeEnum, TimeInForceEnum } from '../../src/types/common';
 import { ExchangeError } from '../../src/errors/ExchangeError';
@@ -33,17 +48,113 @@ const mockedAxios = axios as jest.Mocked<typeof axios>;
 
 function createClient(isDemoMode = false) {
   const mockInstance = createMockAxiosInstance();
+  const logger = createMockLogger();
   mockedAxios.create.mockReturnValue(mockInstance as any);
 
   const client = new BybitLinear({
     config: { apiKey: 'testKey', secret: 'testSecret', isDemoMode },
-    logger: createMockLogger(),
+    logger,
   });
 
-  return { client, mockInstance };
+  return { client, mockInstance, logger };
 }
 
 describe('BybitLinear', () => {
+  it('reads execution cursors and deduplicates fills of the requested order', async () => {
+    const { client, mockInstance } = createClient();
+    const first = { execId: 'fill-1', orderId: '77', symbol: 'BTCUSDT', execQty: '0.4', execPrice: '100', execValue: '40', execFee: '0.04', feeCurrency: 'USDT', execTime: '1500', execType: 'Trade' };
+    const second = { ...first, execId: 'fill-2', execQty: '0.6', execValue: '60', execFee: '0.06', execTime: '1600' };
+    mockInstance.get.mockResolvedValueOnce({ data: { retCode: 0, result: { list: [second], nextPageCursor: 'next' } } })
+      // Bybit marks the end of a cursor list with null (live transaction-log answer, 17.09.2026).
+      .mockResolvedValueOnce({ data: { retCode: 0, result: { list: [second, first], nextPageCursor: null } } });
+    const summary = await client.fetchOrderExecutionSummary({ symbol: 'BTCUSDT', orderId: '77', startTime: 1000, endTime: 5000 });
+    expect(mockInstance.get).toHaveBeenCalledTimes(2);
+    expect(summary.filledAmount).toBeCloseTo(1, 9);
+    expect(summary.lastFillTimeMs).toBe(1600);
+    expect(mockInstance.get.mock.calls[1][1].params).toMatchObject({ category: 'linear', symbol: 'BTCUSDT', orderId: '77', cursor: 'next', startTime: 1000, endTime: 5000 });
+  });
+
+  it('rejects a repeated execution cursor instead of returning an incomplete total', async () => {
+    const { client, mockInstance } = createClient();
+    const fill = { execId: 'fill-1', orderId: '77', symbol: 'BTCUSDT', execQty: '0.4', execPrice: '100', execValue: '40', execFee: '0.04', feeCurrency: 'USDT', execTime: '1500', execType: 'Trade' };
+    mockInstance.get.mockResolvedValue({ data: { retCode: 0, result: { list: [fill], nextPageCursor: 'same' } } });
+    await expect(client.fetchOrderExecutionSummary({ symbol: 'BTCUSDT', orderId: '77', startTime: 1000, endTime: 5000 })).rejects.toThrow('order executions handed out a page cursor it had already handed out');
+    expect(mockInstance.get).toHaveBeenCalledTimes(2);
+  });
+
+  it('rejects execution cursors that come back in a circle on the third page', async () => {
+    const { client, mockInstance } = createClient();
+    const fill = { execId: 'fill-1', orderId: '77', symbol: 'BTCUSDT', execQty: '0.4', execPrice: '100', execValue: '40', execFee: '0.04', feeCurrency: 'USDT', execTime: '1500', execType: 'Trade' };
+    const sleepSpy = jest.spyOn(sleepModule, 'sleep').mockResolvedValue(undefined);
+    mockInstance.get
+      .mockResolvedValueOnce({ data: { retCode: 0, result: { list: [fill], nextPageCursor: 'A' } } })
+      .mockResolvedValueOnce({ data: { retCode: 0, result: { list: [fill], nextPageCursor: 'B' } } })
+      .mockResolvedValueOnce({ data: { retCode: 0, result: { list: [fill], nextPageCursor: 'A' } } });
+
+    await expect(client.fetchOrderExecutionSummary({ symbol: 'BTCUSDT', orderId: '77', startTime: 1000, endTime: 5000 })).rejects.toThrow('already handed out');
+    expect(mockInstance.get).toHaveBeenCalledTimes(3);
+    sleepSpy.mockRestore();
+  });
+
+  it('rejects an execution page without a list instead of summarizing what was read', async () => {
+    const { client, mockInstance } = createClient();
+    const fill = { execId: 'fill-1', orderId: '77', symbol: 'BTCUSDT', execQty: '0.4', execPrice: '100', execValue: '40', execFee: '0.04', feeCurrency: 'USDT', execTime: '1500', execType: 'Trade' };
+    const sleepSpy = jest.spyOn(sleepModule, 'sleep').mockResolvedValue(undefined);
+    mockInstance.get
+      .mockResolvedValueOnce({ data: { retCode: 0, result: { list: [fill], nextPageCursor: 'next' } } })
+      .mockResolvedValueOnce({ data: { retCode: 0, result: { nextPageCursor: '' } } });
+
+    await expect(client.fetchOrderExecutionSummary({ symbol: 'BTCUSDT', orderId: '77', startTime: 1000, endTime: 5000 })).rejects.toThrow('order executions page 2 came without a list');
+    sleepSpy.mockRestore();
+  });
+
+  it('keeps the page pause between seven-day execution windows', async () => {
+    const { client, mockInstance } = createClient();
+    const sleepSpy = jest.spyOn(sleepModule, 'sleep').mockResolvedValue(undefined);
+    mockInstance.get.mockResolvedValue({ data: { retCode: 0, result: { list: [], nextPageCursor: null } } });
+
+    await client.fetchOrderExecutionSummary({ symbol: 'BTCUSDT', orderId: '77', startTime: 1000, endTime: 1000 + 8 * 24 * 60 * 60 * 1000 });
+
+    expect(mockInstance.get).toHaveBeenCalledTimes(2);
+    expect(sleepSpy).toHaveBeenCalledTimes(1);
+    expect(mockInstance.get.mock.calls.every(call => call[1].params.limit === 100)).toBe(true);
+    sleepSpy.mockRestore();
+  });
+
+  it('stops on an empty execution page even when the exchange still hands out a cursor', async () => {
+    const { client, mockInstance } = createClient();
+    const fill = { execId: 'fill-1', orderId: '77', symbol: 'BTCUSDT', execQty: '0.4', execPrice: '100', execValue: '40', execFee: '0.04', feeCurrency: 'USDT', execTime: '1500', execType: 'Trade' };
+    mockInstance.get
+      .mockResolvedValueOnce({ data: { retCode: 0, result: { list: [fill], nextPageCursor: 'next' } } })
+      .mockResolvedValueOnce({ data: { retCode: 0, result: { list: [], nextPageCursor: 'after-empty' } } });
+    const summary = await client.fetchOrderExecutionSummary({ symbol: 'BTCUSDT', orderId: '77', startTime: 1000, endTime: 5000 });
+    expect(mockInstance.get).toHaveBeenCalledTimes(2);
+    expect(summary.filledAmount).toBeCloseTo(0.4, 9);
+  });
+
+  it('reads an old order in explicit seven-day windows', async () => {
+    const { client, mockInstance } = createClient();
+    mockInstance.get.mockResolvedValue({ data: { retCode: 0, result: { list: [], nextPageCursor: null } } });
+    const endTime = 1000 + 8 * 24 * 60 * 60 * 1000;
+    await expect(client.fetchOrderExecutionSummary({ symbol: 'BTCUSDT', orderId: '77', startTime: 1000, endTime })).resolves.toMatchObject({ filledAmount: 0, firstFillTimeMs: null, lastFillTimeMs: null, executionList: [] });
+    expect(mockInstance.get).toHaveBeenCalledTimes(2);
+    expect(mockInstance.get.mock.calls[1][1].params).toMatchObject({ startTime: 1000 + 7 * 24 * 60 * 60 * 1000, endTime });
+  });
+
+  it('returns unknown without a request when separate leverage reads are unsupported', async () => {
+    const { client, mockInstance } = createClient();
+
+    await expect(client.fetchPositionLeverage('BTCUSDT')).resolves.toBeNull();
+    expect(mockInstance.get).not.toHaveBeenCalled();
+  });
+
+  it('rejects unsupported normalized account execution history', async () => {
+    const { client, mockInstance } = createClient();
+
+    await expect(client.fetchAccountTrades('BTCUSDT', { startTime: 1000, endTime: 2000 })).rejects.toThrow('Account trade history is not supported');
+    expect(mockInstance.get).not.toHaveBeenCalled();
+  });
+
   beforeEach(() => {
     jest.spyOn(Date, 'now').mockReturnValue(1700000000000);
   });
@@ -136,7 +247,7 @@ describe('BybitLinear', () => {
     it('normalizes position from raw data', async () => {
       const { client, mockInstance } = createClient();
       mockInstance.get.mockResolvedValue({
-        data: { result: { list: [BYBIT_RAW_POSITION] } },
+        data: { result: { marginMode: 'REGULAR_MARGIN', list: [BYBIT_RAW_POSITION] } },
       });
 
       const position = await client.fetchPosition('BTCUSDT');
@@ -170,7 +281,7 @@ describe('BybitLinear', () => {
     it('returns first list element when positionIdx is undefined (oneWay mode)', async () => {
       const { client, mockInstance } = createClient();
       mockInstance.get.mockResolvedValue({
-        data: { result: { list: [{ ...BYBIT_RAW_POSITION, positionIdx: 0 }] } },
+        data: { result: { marginMode: 'REGULAR_MARGIN', list: [{ ...BYBIT_RAW_POSITION, positionIdx: 0 }] } },
       });
 
       const result = await client.fetchPositionSnapshot('BTCUSDT');
@@ -184,6 +295,7 @@ describe('BybitLinear', () => {
       mockInstance.get.mockResolvedValue({
         data: {
           result: {
+            marginMode: 'REGULAR_MARGIN',
             list: [
               { ...BYBIT_RAW_POSITION, positionIdx: 1, side: 'Buy', size: '100' },
               { ...BYBIT_RAW_POSITION, positionIdx: 2, side: 'Sell', size: '0' },
@@ -221,6 +333,7 @@ describe('BybitLinear', () => {
       mockInstance.get.mockResolvedValue({
         data: {
           result: {
+            marginMode: 'REGULAR_MARGIN',
             list: [{ ...BYBIT_RAW_POSITION, positionIdx: 1, side: '', size: '0' }],
           },
         },
@@ -278,6 +391,500 @@ describe('BybitLinear', () => {
     });
   });
 
+  describe('position margin mode when the account information is refused', () => {
+    const permissionRefusal = { retCode: 10005, retMsg: 'Permission denied, please check your API key permissions.' };
+    const rateLimitRefusal = { retCode: 10006, retMsg: 'Too many visits!' };
+
+    function mockRefusedAccountAndPositionList(mockInstance: Record<string, jest.Mock>, refusal: Record<string, unknown>): void {
+      mockInstance.get.mockImplementation(async (requestPath: string) => {
+        if (requestPath === '/v5/account/info') {
+          return { data: refusal };
+        }
+
+        return { data: { retCode: 0, result: { list: [BYBIT_RAW_POSITION_DEMO_ISOLATED_ACCOUNT_BTCUSDT] } } };
+      });
+    }
+
+    it.each([
+      ['fetchPosition', (client: BybitLinear) => client.fetchPosition('BTCUSDT')],
+      ['fetchPositionSnapshot', (client: BybitLinear) => client.fetchPositionSnapshot('BTCUSDT')],
+      ['fetchPositionList', (client: BybitLinear) => client.fetchPositionList('BTCUSDT')],
+      ['fetchAllPositions', (client: BybitLinear) => client.fetchAllPositions()],
+    ])('%s reads the position with an unknown margin mode and one warning on the rate limit refusal 10006 instead of reading it as cross', async (_name, readPositions) => {
+      const { client, mockInstance, logger } = createClient();
+      mockRefusedAccountAndPositionList(mockInstance, rateLimitRefusal);
+
+      const positionList = [await readPositions(client)].flat();
+
+      expect(positionList.map(position => [position?.symbol, position?.leverage, position?.marginMode])).toEqual([['BTCUSDT', 5, null]]);
+      expect(logger.warn).toHaveBeenCalledTimes(1);
+      expect(logger.warn).toHaveBeenCalledWith(
+        '[Bybit] /v5/account/info failed (Bybit API error 10006: Too many visits!) and nothing is remembered yet: positions are read with an unknown margin mode',
+      );
+    });
+
+    it('reads the position with an unknown margin mode on the permission refusal 10005 as well', async () => {
+      const { client, mockInstance, logger } = createClient();
+      mockRefusedAccountAndPositionList(mockInstance, permissionRefusal);
+
+      const position = await client.fetchPosition('BTCUSDT');
+
+      expect(position.marginMode).toBeNull();
+      expect(logger.warn).toHaveBeenCalledTimes(1);
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('/v5/account/info failed (Bybit API error 10005'));
+    });
+
+    it('reads the position with an unknown margin mode when the account information fails without an exchange code', async () => {
+      const { client, mockInstance, logger } = createClient();
+      mockInstance.get.mockImplementation(async (requestPath: string) => {
+        if (requestPath === '/v5/account/info') {
+          throw Object.assign(new Error('gateway answered without a code'), { response: { status: 403, data: 'Forbidden' } });
+        }
+
+        return { data: { retCode: 0, result: { list: [BYBIT_RAW_POSITION_DEMO_ISOLATED_ACCOUNT_BTCUSDT] } } };
+      });
+
+      const position = await client.fetchPosition('BTCUSDT');
+
+      expect(position.marginMode).toBeNull();
+      expect(logger.warn).toHaveBeenCalledTimes(1);
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('HTTP 403'));
+    });
+
+    it('fails the position read when the position request itself fails', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockImplementation(async (requestPath: string) => {
+        if (requestPath === '/v5/position/list') {
+          return { data: permissionRefusal };
+        }
+
+        return { data: { retCode: 0, result: BYBIT_RAW_ACCOUNT_INFO_DEMO_ISOLATED } };
+      });
+
+      await expect(client.fetchAllPositions()).rejects.toMatchObject({ code: 10005 });
+      await expect(client.fetchPosition('BTCUSDT')).rejects.toMatchObject({ code: 10005 });
+    });
+
+    it('keeps the margin mode switch strict: a refused account information stops the write', async () => {
+      const { client, mockInstance } = createClient();
+      mockRefusedAccountAndPositionList(mockInstance, permissionRefusal);
+
+      await expect(client.setMarginMode(MarginModeEnum.Isolated, 'BTCUSDT')).rejects.toThrow('Permission denied');
+      expect(mockInstance.post).not.toHaveBeenCalled();
+    });
+
+    it('keeps directional leverage strict: a refused account information stops the write', async () => {
+      const { client, mockInstance } = createClient();
+      mockRefusedAccountAndPositionList(mockInstance, permissionRefusal);
+
+      await expect(client.setLeverage(3, 'BTCUSDT', { direction: 'long' })).rejects.toThrow('Permission denied');
+      expect(mockInstance.post).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('remembered account margin mode when a later account information read fails', () => {
+    const rateLimitRefusal = { retCode: 10006, retMsg: 'Too many visits!' };
+    const regularMarginAccountInfo = { ...BYBIT_RAW_ACCOUNT_INFO_DEMO_ISOLATED, marginMode: 'REGULAR_MARGIN' };
+
+    function mockAccountInfoQueue(mockInstance: Record<string, jest.Mock>, accountAnswerList: unknown[]): void {
+      mockInstance.get.mockImplementation(async (requestPath: string) => {
+        if (requestPath === '/v5/account/info') {
+          return { data: accountAnswerList.length > 1 ? accountAnswerList.shift() : accountAnswerList[0] };
+        }
+
+        return { data: { retCode: 0, result: { list: [BYBIT_RAW_POSITION_DEMO_ISOLATED_ACCOUNT_BTCUSDT], nextPageCursor: '' } } };
+      });
+      mockInstance.post.mockResolvedValue({ data: { retCode: 0, result: {} } });
+    }
+
+    it.each([
+      ['fetchPosition', async (client: BybitLinear) => [await client.fetchPosition('BTCUSDT')]],
+      ['fetchPositionSnapshot', async (client: BybitLinear) => [await client.fetchPositionSnapshot('BTCUSDT')]],
+      ['fetchPositionList', (client: BybitLinear) => client.fetchPositionList('BTCUSDT')],
+      ['fetchAllPositions', (client: BybitLinear) => client.fetchAllPositions()],
+    ])('%s keeps the leverage of the position entry and the remembered margin mode, with a warning', async (_name, readPositions) => {
+      const { client, mockInstance, logger } = createClient();
+      mockAccountInfoQueue(mockInstance, [{ retCode: 0, result: BYBIT_RAW_ACCOUNT_INFO_DEMO_ISOLATED }, rateLimitRefusal]);
+
+      await client.fetchPosition('BTCUSDT');
+
+      const positionList = await readPositions(client);
+
+      expect(positionList.map(position => [position?.symbol, position?.leverage, position?.marginMode])).toEqual([['BTCUSDT', 5, MarginModeEnum.Isolated]]);
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('/v5/account/info failed (Bybit API error 10006: Too many visits!)'));
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('marginMode=ISOLATED_MARGIN'));
+    });
+
+    it('reads an unknown margin mode with one warning when nothing was remembered yet', async () => {
+      const { client, mockInstance, logger } = createClient();
+      mockAccountInfoQueue(mockInstance, [rateLimitRefusal]);
+
+      const position = await client.fetchPosition('BTCUSDT');
+
+      expect(position.leverage).toBe(5);
+      expect(position.marginMode).toBeNull();
+      expect(logger.warn).toHaveBeenCalledTimes(1);
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('nothing is remembered yet: positions are read with an unknown margin mode'));
+    });
+
+    it('remembers the mode the library switched the account to', async () => {
+      const { client, mockInstance } = createClient();
+      mockAccountInfoQueue(mockInstance, [{ retCode: 0, result: regularMarginAccountInfo }, rateLimitRefusal]);
+
+      await client.setMarginMode(MarginModeEnum.Isolated, 'BTCUSDT');
+
+      const position = await client.fetchPosition('BTCUSDT');
+
+      expect(mockInstance.post.mock.calls[0][1]).toEqual({ setMarginMode: 'ISOLATED_MARGIN' });
+      expect(position.marginMode).toBe(MarginModeEnum.Isolated);
+    });
+
+    it('does not let a read sent before the switch overwrite the switched mode', async () => {
+      const { client, mockInstance } = createClient();
+      const pendingAnswerList: Array<() => void> = [];
+      let accountReadCount = 0;
+
+      mockInstance.get.mockImplementation((requestPath: string) => {
+        if (requestPath !== '/v5/account/info') {
+          return Promise.resolve({ data: { retCode: 0, result: { list: [BYBIT_RAW_POSITION_DEMO_ISOLATED_ACCOUNT_BTCUSDT] } } });
+        }
+
+        accountReadCount++;
+
+        if (accountReadCount === 1) {
+          return new Promise(resolve => pendingAnswerList.push(() => resolve({ data: { retCode: 0, result: regularMarginAccountInfo } })));
+        }
+
+        return Promise.resolve({ data: accountReadCount === 2 ? { retCode: 0, result: regularMarginAccountInfo } : rateLimitRefusal });
+      });
+      mockInstance.post.mockResolvedValue({ data: { retCode: 0, result: {} } });
+
+      const earlyRead = client.fetchPosition('BTCUSDT');
+
+      for (let i = 0; i < 20 && pendingAnswerList.length === 0; i++) {
+        await Promise.resolve();
+      }
+
+      await client.setMarginMode(MarginModeEnum.Isolated, 'BTCUSDT');
+      pendingAnswerList.forEach(resolve => resolve());
+
+      expect((await earlyRead).marginMode).toBe(MarginModeEnum.Cross);
+      expect((await client.fetchPosition('BTCUSDT')).marginMode).toBe(MarginModeEnum.Isolated);
+    });
+
+    it('keeps the margin mode switch strict even with a remembered mode', async () => {
+      const { client, mockInstance } = createClient();
+      mockAccountInfoQueue(mockInstance, [{ retCode: 0, result: regularMarginAccountInfo }, rateLimitRefusal]);
+
+      await client.fetchPosition('BTCUSDT');
+
+      await expect(client.setMarginMode(MarginModeEnum.Isolated, 'BTCUSDT')).rejects.toMatchObject({ code: 10006 });
+      expect(mockInstance.post).not.toHaveBeenCalled();
+    });
+
+    it('keeps directional leverage strict even with a remembered mode', async () => {
+      const { client, mockInstance } = createClient();
+      mockAccountInfoQueue(mockInstance, [{ retCode: 0, result: BYBIT_RAW_ACCOUNT_INFO_DEMO_ISOLATED }, rateLimitRefusal]);
+
+      await client.fetchPosition('BTCUSDT');
+
+      await expect(client.setLeverage(3, 'BTCUSDT', { direction: 'long' })).rejects.toMatchObject({ code: 10006 });
+      expect(mockInstance.post).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('position margin mode from the account', () => {
+    function mockAccountAndPositionList(mockInstance: Record<string, jest.Mock>, positionList: unknown[]): void {
+      mockInstance.get.mockImplementation(async (requestPath: string) => {
+        if (requestPath === '/v5/account/info') {
+          return { data: { retCode: 0, result: BYBIT_RAW_ACCOUNT_INFO_DEMO_ISOLATED } };
+        }
+
+        return { data: { retCode: 0, result: { list: positionList } } };
+      });
+    }
+
+    it('reads the live position with the deprecated tradeMode 0 as isolated on the live isolated account', async () => {
+      const { client, mockInstance } = createClient();
+      mockAccountAndPositionList(mockInstance, [BYBIT_RAW_POSITION_DEMO_ISOLATED_ACCOUNT_BTCUSDT]);
+
+      const position = await client.fetchPosition('BTCUSDT');
+      const snapshot = await client.fetchPositionSnapshot('BTCUSDT');
+      const positionList = await client.fetchPositionList('BTCUSDT');
+      const allPositionList = await client.fetchAllPositions();
+
+      expect(position.marginMode).toBe(MarginModeEnum.Isolated);
+      expect(snapshot?.marginMode).toBe(MarginModeEnum.Isolated);
+      expect(positionList.map(entry => entry.marginMode)).toEqual([MarginModeEnum.Isolated]);
+      expect(allPositionList.map(entry => entry.marginMode)).toEqual([MarginModeEnum.Isolated]);
+      expect(mockInstance.get.mock.calls.filter(call => call[0] === '/v5/account/info')).toHaveLength(4);
+      expect(mockInstance.get.mock.calls.filter(call => call[0] === '/v5/position/list')).toHaveLength(4);
+    });
+
+    it.each([
+      ['fetchPosition', async (client: BybitLinear) => [await client.fetchPosition('BTCUSDT')]],
+      ['fetchPositionSnapshot', async (client: BybitLinear) => [await client.fetchPositionSnapshot('BTCUSDT')]],
+      ['fetchPositionList', (client: BybitLinear) => client.fetchPositionList('BTCUSDT')],
+      ['fetchAllPositions', (client: BybitLinear) => client.fetchAllPositions()],
+    ])('%s reads the positions of a unified account with an unknown mode as unknown, with one warning', async (_name, readPositions) => {
+      const { client, mockInstance, logger } = createClient();
+      mockInstance.get.mockImplementation(async (requestPath: string) => {
+        if (requestPath === '/v5/account/info') {
+          return { data: { retCode: 0, result: { ...BYBIT_RAW_ACCOUNT_INFO_DEMO_ISOLATED, marginMode: 'UNKNOWN_MARGIN' } } };
+        }
+
+        return { data: { retCode: 0, result: { list: [BYBIT_RAW_POSITION_DEMO_ISOLATED_ACCOUNT_BTCUSDT] } } };
+      });
+
+      const positionList = await readPositions(client);
+
+      expect(positionList.map(position => [position?.symbol, position?.marginMode])).toEqual([['BTCUSDT', null]]);
+      expect(logger.warn).toHaveBeenCalledTimes(1);
+      expect(logger.warn).toHaveBeenCalledWith(
+        '[Bybit] margin mode of BTCUSDT is unknown (unifiedMarginStatus=3, marginMode=UNKNOWN_MARGIN): positions are read with an unknown margin mode',
+      );
+    });
+
+    it.each([
+      ['fetchPosition', async (client: BybitLinear) => [await client.fetchPosition('BTCUSDT')]],
+      ['fetchPositionSnapshot', async (client: BybitLinear) => [await client.fetchPositionSnapshot('BTCUSDT')]],
+      ['fetchPositionList', (client: BybitLinear) => client.fetchPositionList('BTCUSDT')],
+      ['fetchAllPositions', (client: BybitLinear) => client.fetchAllPositions()],
+    ])('%s reads the position of a classic account with an unknown cell mode as unknown, with one warning', async (_name, readPositions) => {
+      const { client, mockInstance, logger } = createClient();
+      mockInstance.get.mockImplementation(async (requestPath: string) => {
+        if (requestPath === '/v5/account/info') {
+          return { data: { retCode: 0, result: { ...BYBIT_RAW_ACCOUNT_INFO_DEMO_ISOLATED, unifiedMarginStatus: 1 } } };
+        }
+
+        return { data: { retCode: 0, result: { list: [{ ...BYBIT_RAW_POSITION_DEMO_ISOLATED_ACCOUNT_BTCUSDT, tradeMode: 7 }] } } };
+      });
+
+      const positionList = await readPositions(client);
+      const warningText = String(logger.warn.mock.calls[0]?.[0]);
+
+      expect(positionList.map(position => [position?.symbol, position?.marginMode])).toEqual([['BTCUSDT', null]]);
+      expect(logger.warn).toHaveBeenCalledTimes(1);
+      expect(warningText).toContain('BTCUSDT');
+      expect(warningText).toContain('unknown margin mode');
+    });
+
+    it('fetchAllPositions warns about the unknown margin mode only of the returned positions, not of empty cells', async () => {
+      const { client, mockInstance, logger } = createClient();
+      mockInstance.get.mockImplementation(async (requestPath: string) => {
+        if (requestPath === '/v5/account/info') {
+          return { data: { retCode: 0, result: { ...BYBIT_RAW_ACCOUNT_INFO_DEMO_ISOLATED, marginMode: 'UNKNOWN_MARGIN' } } };
+        }
+
+        return {
+          data: {
+            retCode: 0,
+            result: {
+              list: [
+                { ...BYBIT_RAW_POSITION_DEMO_ISOLATED_ACCOUNT_BTCUSDT, symbol: 'ETHUSDT', size: '1' },
+                { ...BYBIT_RAW_POSITION_DEMO_ISOLATED_ACCOUNT_BTCUSDT, symbol: 'SNTUSDT', size: '0' },
+              ],
+            },
+          },
+        };
+      });
+
+      const positionList = await client.fetchAllPositions();
+      const warningText = String(logger.warn.mock.calls[0]?.[0]);
+
+      expect(positionList.map(position => position.symbol)).toEqual(['ETHUSDT']);
+      expect(logger.warn).toHaveBeenCalledTimes(1);
+      expect(warningText).toContain('ETHUSDT');
+      expect(warningText).not.toContain('SNTUSDT');
+    });
+
+    it('drops empty slots from fetchAllPositions', async () => {
+      const { client, mockInstance } = createClient();
+      mockAccountAndPositionList(mockInstance, [
+        BYBIT_RAW_POSITION_DEMO_ISOLATED_ACCOUNT_BTCUSDT,
+        BYBIT_RAW_POSITION_DEMO_ISOLATED_ACCOUNT_ETHUSDT_EMPTY,
+      ]);
+
+      const allPositionList = await client.fetchAllPositions();
+
+      expect(allPositionList.map(entry => entry.symbol)).toEqual(['BTCUSDT']);
+    });
+
+    it('reads every page of all positions by cursor until the live empty end page', async () => {
+      const { client, mockInstance } = createClient();
+      const sleepSpy = jest.spyOn(sleepModule, 'sleep').mockResolvedValue(undefined);
+      const secondPageCursor = 'ETHUSDT%2C1793879791998%2C0';
+      const secondPage = {
+        ...BYBIT_RAW_POSITION_LIST_PAGE_DEMO_BTCUSDT,
+        result: {
+          ...BYBIT_RAW_POSITION_LIST_PAGE_DEMO_BTCUSDT.result,
+          nextPageCursor: secondPageCursor,
+          list: [{ ...BYBIT_RAW_POSITION_DEMO_ISOLATED_ACCOUNT_ETHUSDT_EMPTY, size: '0.01', avgPrice: '2397.02', side: 'Buy' }],
+        },
+      };
+      const positionPageList: unknown[] = [BYBIT_RAW_POSITION_LIST_PAGE_DEMO_BTCUSDT, secondPage, BYBIT_RAW_POSITION_LIST_END_PAGE_DEMO];
+
+      mockInstance.get.mockImplementation(async (requestPath: string) => requestPath === '/v5/account/info'
+        ? { data: { retCode: 0, result: BYBIT_RAW_ACCOUNT_INFO_DEMO_ISOLATED } }
+        : { data: positionPageList.shift() });
+
+      const allPositionList = await client.fetchAllPositions();
+      const positionListParamsList = mockInstance.get.mock.calls
+        .filter(call => call[0] === '/v5/position/list')
+        .map(call => call[1].params);
+
+      expect(allPositionList.map(entry => entry.symbol)).toEqual(['BTCUSDT', 'ETHUSDT']);
+      expect(allPositionList.map(entry => entry.marginMode)).toEqual([MarginModeEnum.Isolated, MarginModeEnum.Isolated]);
+      expect(positionListParamsList.map(params => params.cursor)).toEqual([undefined, BYBIT_RAW_POSITION_LIST_LIVE_DEMO_CURSOR, secondPageCursor]);
+      expect(positionListParamsList.every(params => params.limit === 200 && params.settleCoin === 'USDT')).toBe(true);
+      sleepSpy.mockRestore();
+    });
+
+    it('reads the single live page and stops on the empty page behind its non-empty cursor', async () => {
+      const { client, mockInstance } = createClient();
+      const sleepSpy = jest.spyOn(sleepModule, 'sleep').mockResolvedValue(undefined);
+      const positionPageList: unknown[] = [BYBIT_RAW_POSITION_LIST_PAGE_DEMO_BTCUSDT, BYBIT_RAW_POSITION_LIST_END_PAGE_DEMO];
+
+      mockInstance.get.mockImplementation(async (requestPath: string) => requestPath === '/v5/account/info'
+        ? { data: { retCode: 0, result: BYBIT_RAW_ACCOUNT_INFO_DEMO_ISOLATED } }
+        : { data: positionPageList.shift() });
+
+      const allPositionList = await client.fetchAllPositions();
+
+      expect(allPositionList.map(entry => entry.symbol)).toEqual(['BTCUSDT']);
+      expect(mockInstance.get.mock.calls.filter(call => call[0] === '/v5/position/list')).toHaveLength(2);
+      sleepSpy.mockRestore();
+    });
+
+    it('keeps single-symbol reads to one position request without paging', async () => {
+      const { client, mockInstance } = createClient();
+      mockAccountAndPositionList(mockInstance, [BYBIT_RAW_POSITION_DEMO_ISOLATED_ACCOUNT_BTCUSDT]);
+
+      await client.fetchPosition('BTCUSDT');
+
+      const positionListCallList = mockInstance.get.mock.calls.filter(call => call[0] === '/v5/position/list');
+
+      expect(positionListCallList).toHaveLength(1);
+      expect(positionListCallList[0][1].params.cursor).toBeUndefined();
+    });
+
+    it('sends the account and position requests together', async () => {
+      const { client, mockInstance } = createClient();
+      const resolverList: Array<() => void> = [];
+
+      mockInstance.get.mockImplementation((requestPath: string) => new Promise(resolve => {
+        resolverList.push(() => resolve(requestPath === '/v5/account/info'
+          ? { data: { retCode: 0, result: BYBIT_RAW_ACCOUNT_INFO_DEMO_ISOLATED } }
+          : { data: { retCode: 0, result: { list: [BYBIT_RAW_POSITION_DEMO_ISOLATED_ACCOUNT_BTCUSDT] } } }));
+      }));
+
+      const pendingPosition = client.fetchPosition('BTCUSDT');
+
+      for (let i = 0; i < 20 && mockInstance.get.mock.calls.length < 2; i++) {
+        await Promise.resolve();
+      }
+
+      expect(mockInstance.get.mock.calls.map(call => call[0]).sort()).toEqual(['/v5/account/info', '/v5/position/list']);
+
+      resolverList.forEach(resolve => resolve());
+
+      expect((await pendingPosition).marginMode).toBe(MarginModeEnum.Isolated);
+    });
+  });
+
+  describe('fetchTickers timestamp', () => {
+    it('takes the ticker timestamp from the time of the live demo response: list entries carry no time', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: BYBIT_RAW_TICKER_RESPONSE_ETHUSDT_DEMO });
+      const nowSpy = jest.spyOn(Date, 'now').mockReturnValue(9999999999999);
+
+      const tickerBySymbol = await client.fetchTickers();
+
+      expect('time' in BYBIT_RAW_TICKER_RESPONSE_ETHUSDT_DEMO.result.list[0]).toBe(false);
+      expect(tickerBySymbol.get('ETHUSDT')?.timestamp).toBe(1793883954764);
+      nowSpy.mockRestore();
+    });
+  });
+
+  describe('addIsolatedPositionMargin', () => {
+    it.each([
+      [PositionSideEnum.Both, 0],
+      [PositionSideEnum.Long, 1],
+      [PositionSideEnum.Short, 2],
+    ])('sends %s margin to the add-margin endpoint with position index %s', async (positionSide, positionIdx) => {
+      const { client, mockInstance } = createClient();
+      mockInstance.post.mockResolvedValue({ data: BYBIT_RAW_ADD_MARGIN_RESPONSE_ETHUSDT_DEMO });
+
+      await client.addIsolatedPositionMargin({ symbol: 'ETHUSDT', positionSide, amount: 1 });
+
+      expect(mockInstance.post.mock.calls[0][0]).toBe('/v5/position/add-margin');
+      expect(mockInstance.post.mock.calls[0][1]).toEqual({ category: 'linear', symbol: 'ETHUSDT', margin: '1', positionIdx });
+    });
+
+    it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])('refuses amount %s before any request', async amount => {
+      const { client, mockInstance } = createClient();
+
+      await expect(client.addIsolatedPositionMargin({ symbol: 'ETHUSDT', positionSide: PositionSideEnum.Both, amount }))
+        .rejects.toThrow('Isolated position margin amount must be finite and positive');
+      expect(mockInstance.post).not.toHaveBeenCalled();
+    });
+
+    it('resolves on the live demo answer of the exchange', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.post.mockResolvedValue({ data: BYBIT_RAW_ADD_MARGIN_RESPONSE_ETHUSDT_DEMO });
+
+      await expect(client.addIsolatedPositionMargin({ symbol: 'ETHUSDT', positionSide: PositionSideEnum.Both, amount: 1 })).resolves.toBeUndefined();
+    });
+
+    it('surfaces the live exchange refusal of a position index with its code', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.post.mockResolvedValue({ data: BYBIT_RAW_ADD_MARGIN_REFUSAL_POSITION_IDX_MISMATCH });
+
+      const failure = client.addIsolatedPositionMargin({ symbol: 'ETHUSDT', positionSide: PositionSideEnum.Long, amount: 1 });
+
+      await expect(failure).rejects.toBeInstanceOf(ExchangeError);
+      await expect(failure).rejects.toMatchObject({ code: 10001 });
+      await expect(failure).rejects.toThrow(BYBIT_RAW_ADD_MARGIN_REFUSAL_POSITION_IDX_MISMATCH.retMsg);
+    });
+
+    it.each([
+      [12.3 * 0.1, '1.23'],
+      [0.1 + 0.2, '0.3'],
+      [1.23456, '1.2345'],
+      [1.00005, '1'],
+      [0.00019, '0.0001'],
+      [0.3, '0.3'],
+      [1.23, '1.23'],
+      [874544608.19717, '874544608.1971'],
+      [1e15, '1000000000000000'],
+      [1e20, '100000000000000000000'],
+    ])('truncates %s to four decimals as %s, which the live exchange accepts', async (amount, expectedMargin) => {
+      const { client, mockInstance } = createClient();
+      mockInstance.post.mockImplementation(async (_path: string, body: Record<string, string>) => /\.\d{5,}$|e/i.test(body.margin)
+        ? { data: BYBIT_RAW_ADD_MARGIN_REFUSAL_FIVE_DECIMALS }
+        : { data: BYBIT_RAW_ADD_MARGIN_RESPONSE_ETHUSDT_DEMO });
+
+      await expect(client.addIsolatedPositionMargin({ symbol: 'ETHUSDT', positionSide: PositionSideEnum.Both, amount })).resolves.toBeUndefined();
+      expect(mockInstance.post.mock.calls[0][1].margin).toBe(expectedMargin);
+    });
+
+    it.each([0.00005, 1e-7])('refuses %s that truncates to zero at four decimals before any request', async amount => {
+      const { client, mockInstance } = createClient();
+
+      await expect(client.addIsolatedPositionMargin({ symbol: 'ETHUSDT', positionSide: PositionSideEnum.Both, amount }))
+        .rejects.toThrow('must stay positive after truncating to 4 decimal places');
+      expect(mockInstance.post).not.toHaveBeenCalled();
+    });
+
+    it.each([1e21, 2e21])('refuses %s without a decimal record before any request', async amount => {
+      const { client, mockInstance } = createClient();
+
+      await expect(client.addIsolatedPositionMargin({ symbol: 'ETHUSDT', positionSide: PositionSideEnum.Both, amount }))
+        .rejects.toThrow('too large to write as a decimal string');
+      expect(mockInstance.post).not.toHaveBeenCalled();
+    });
+  });
+
   describe('fetchPositionList', () => {
     it('returns empty array when result list is empty', async () => {
       const { client, mockInstance } = createClient();
@@ -295,6 +902,7 @@ describe('BybitLinear', () => {
       mockInstance.get.mockResolvedValue({
         data: {
           result: {
+            marginMode: 'REGULAR_MARGIN',
             list: [
               { ...BYBIT_RAW_POSITION, positionIdx: 1, side: 'Buy', size: '100' },
               { ...BYBIT_RAW_POSITION, positionIdx: 2, side: 'Sell', size: '50' },
@@ -536,10 +1144,203 @@ describe('BybitLinear', () => {
       expect(result[0].fundingRate).toBe(0.0001);
       expect(result[0].fundingTime).toBe(1700000000000);
       expect(result[0].markPrice).toBeNull();
+      expect(mockInstance.get).toHaveBeenCalledTimes(1);
+    });
+
+    it('enriches each funding charge with the opening mark price from its exact minute', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get
+        .mockResolvedValueOnce({
+          data: {
+            result: {
+              list: [
+                { symbol: 'BTCUSDT', fundingRate: '0.0001', fundingRateTimestamp: '1700000000000' },
+                { symbol: 'BTCUSDT', fundingRate: '0.0002', fundingRateTimestamp: '1700028800000' },
+              ],
+            },
+          },
+        })
+        .mockResolvedValueOnce({ data: { result: { list: [['1700000000000', '35000.5', '35001', '34999', '35000']] } } })
+        .mockResolvedValueOnce({ data: { result: { list: [['1700028800000', '35100.25', '35101', '35099', '35100']] } } });
+
+      const result = await client.fetchFundingRateHistory('BTCUSDT', { shouldIncludeMarkPrices: true });
+
+      expect(result.map((entry) => entry.markPrice)).toEqual([35000.5, 35100.25]);
+      expect(mockInstance.get).toHaveBeenCalledTimes(3);
+      expect(mockInstance.get.mock.calls[1][0]).toBe('/v5/market/mark-price-kline');
+      expect(mockInstance.get.mock.calls[1][1].params).toEqual(expect.objectContaining({
+        category: 'linear',
+        symbol: 'BTCUSDT',
+        interval: '1',
+        start: 1700000000000,
+        end: 1700000059999,
+        limit: 1,
+      }));
+    });
+
+    it('reads funding mark prices with open requests and pauses between them like other repeated reads', async () => {
+      const { client, mockInstance } = createClient();
+      const sleepSpy = jest.spyOn(sleepModule, 'sleep').mockResolvedValue(undefined);
+      mockInstance.get
+        .mockResolvedValueOnce({ data: BYBIT_RAW_FUNDING_HISTORY_RESPONSE_BTCUSDT })
+        .mockResolvedValueOnce({ data: BYBIT_RAW_MARK_PRICE_KLINE_RESPONSE_BTCUSDT_1793721600000 })
+        .mockResolvedValueOnce({ data: BYBIT_RAW_MARK_PRICE_KLINE_RESPONSE_BTCUSDT_1793692800000 });
+
+      const result = await client.fetchFundingRateHistory('BTCUSDT', { shouldIncludeMarkPrices: true });
+
+      expect(result.map((entry) => entry.markPrice)).toEqual([77660.1, 76782.73]);
+      expect(mockInstance.get.mock.calls[1][1].headers).toBeUndefined();
+      expect(mockInstance.get.mock.calls[2][1].headers).toBeUndefined();
+      expect(sleepSpy).toHaveBeenCalledTimes(1);
+      expect(sleepSpy).toHaveBeenCalledWith(BYBIT_MARK_PRICE_KLINE_READ_INTERVAL_MS);
+      expect(sleepSpy.mock.invocationCallOrder[0]).toBeGreaterThan(mockInstance.get.mock.invocationCallOrder[1]);
+      expect(sleepSpy.mock.invocationCallOrder[0]).toBeLessThan(mockInstance.get.mock.invocationCallOrder[2]);
+    });
+
+    it.each([
+      { label: 'empty', responseList: [] },
+      { label: 'different minute', responseList: [['1699999940000', '35000.5', '35001', '34999', '35000']] },
+      { label: 'invalid opening price', responseList: [['1700000000000', 'invalid', '35001', '34999', '35000']] },
+    ])('keeps the mark price unknown for a $label mark-price response', async ({ responseList }) => {
+      const { client, mockInstance, logger } = createClient();
+      mockInstance.get
+        .mockResolvedValueOnce({ data: { result: { list: [{ symbol: 'BTCUSDT', fundingRate: '0.0001', fundingRateTimestamp: '1700000000000' }] } } })
+        .mockResolvedValueOnce({ data: { result: { list: responseList } } });
+
+      const result = await client.fetchFundingRateHistory('BTCUSDT', { shouldIncludeMarkPrices: true });
+
+      expect(result[0].markPrice).toBeNull();
+      expect(logger.warn).toHaveBeenCalled();
+    });
+
+    it('keeps the mark price unknown when its additional request fails', async () => {
+      const { client, mockInstance, logger } = createClient();
+      mockInstance.get
+        .mockResolvedValueOnce({ data: { result: { list: [{ symbol: 'BTCUSDT', fundingRate: '0.0001', fundingRateTimestamp: '1700000000000' }] } } })
+        .mockRejectedValueOnce(new Error('network failure'));
+
+      const result = await client.fetchFundingRateHistory('BTCUSDT', { shouldIncludeMarkPrices: true });
+
+      expect(result[0].markPrice).toBeNull();
+      expect(logger.warn).toHaveBeenCalled();
     });
   });
 
   describe('setLeverage', () => {
+    it.each(['long', 'short'] as const)('preserves the opposite empty side in isolated hedge for %s', async direction => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValueOnce({ data: { retCode: 0, result: { marginMode: 'ISOLATED_MARGIN', unifiedMarginStatus: 5 } } });
+      mockInstance.get.mockResolvedValueOnce({ data: { retCode: 0, result: { list: [
+        { ...BYBIT_RAW_POSITION, positionIdx: 1, size: '0', leverage: '6', tradeMode: 0 },
+        { ...BYBIT_RAW_POSITION, positionIdx: 2, size: '0', leverage: '9', tradeMode: 0 },
+      ] } } });
+      mockInstance.post.mockResolvedValue({ data: { retCode: 0 } });
+
+      await client.setLeverage(20, 'BTCUSDT', { direction });
+
+      expect(mockInstance.post.mock.calls[0][1]).toMatchObject({
+        buyLeverage: direction === 'long' ? '20' : '6',
+        sellLeverage: direction === 'short' ? '20' : '9',
+      });
+    });
+
+    it('sets both sides in confirmed REGULAR_MARGIN', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValueOnce({ data: { retCode: 0, result: { marginMode: 'REGULAR_MARGIN' } } });
+      mockInstance.get.mockResolvedValueOnce({ data: { retCode: 0, result: { list: [] } } });
+      mockInstance.post.mockResolvedValue({ data: { retCode: 0 } });
+
+      await client.setLeverage(20, 'BTCUSDT', { direction: 'long' });
+
+      expect(mockInstance.post.mock.calls[0][1]).toMatchObject({ buyLeverage: '20', sellLeverage: '20' });
+    });
+
+    it('reads a portfolio margin position with the empty leverage as cross with leverage 0 and refuses directional leverage before write', async () => {
+      const { client, mockInstance } = createClient();
+      const portfolioAccountInfo = { ...BYBIT_RAW_ACCOUNT_INFO_DEMO_ISOLATED, marginMode: 'PORTFOLIO_MARGIN', unifiedMarginStatus: 6 };
+      const portfolioPosition = { ...BYBIT_RAW_POSITION_DEMO_ISOLATED_ACCOUNT_BTCUSDT, leverage: '', liqPrice: '' };
+
+      mockInstance.get.mockImplementation(async (requestPath: string) => requestPath === '/v5/account/info'
+        ? { data: { retCode: 0, result: portfolioAccountInfo } }
+        : { data: { retCode: 0, result: { list: [portfolioPosition] } } });
+      mockInstance.post.mockResolvedValue({ data: { retCode: 0 } });
+
+      const position = await client.fetchPosition('BTCUSDT');
+      const failure = client.setLeverage(3, 'BTCUSDT', { direction: 'long' });
+
+      expect(position.marginMode).toBe(MarginModeEnum.Cross);
+      expect(position.leverage).toBe(0);
+      await expect(failure).rejects.toBeInstanceOf(ExchangeError);
+      await expect(failure).rejects.toMatchObject({ code: 'LEVERAGE_PORTFOLIO_MARGIN_UNSUPPORTED', exchange: 'bybit' });
+      await expect(failure).rejects.toThrow('portfolio margin');
+      expect(mockInstance.post).not.toHaveBeenCalled();
+    });
+
+    it.each(['', 'invalid'])('refuses missing opposite leverage %s before write', async leverage => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValueOnce({ data: { retCode: 0, result: { marginMode: 'ISOLATED_MARGIN' } } });
+      mockInstance.get.mockResolvedValueOnce({ data: { retCode: 0, result: { list: [
+        { ...BYBIT_RAW_POSITION, positionIdx: 1 },
+        { ...BYBIT_RAW_POSITION, positionIdx: 2, leverage },
+      ] } } });
+
+      await expect(client.setLeverage(20, 'BTCUSDT', { direction: 'long' })).rejects.toThrow();
+      expect(mockInstance.post).not.toHaveBeenCalled();
+    });
+
+    it('refuses unknown UTA mode instead of using its obsolete tradeMode', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValueOnce({ data: { retCode: 0, result: { unifiedMarginStatus: 5 } } });
+      mockInstance.get.mockResolvedValueOnce({ data: { retCode: 0, result: { list: [
+        { ...BYBIT_RAW_POSITION, positionIdx: 1, tradeMode: 0 },
+        { ...BYBIT_RAW_POSITION, positionIdx: 2, tradeMode: 0 },
+      ] } } });
+
+      await expect(client.setLeverage(20, 'BTCUSDT', { direction: 'long' })).rejects.toMatchObject({ code: 'MARGIN_MODE_UNKNOWN' });
+      expect(mockInstance.post).not.toHaveBeenCalled();
+    });
+
+    it('refuses a classic account with disagreeing tradeMode by the same margin mode code', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValueOnce({ data: { retCode: 0, result: { unifiedMarginStatus: 1 } } });
+      mockInstance.get.mockResolvedValueOnce({ data: { retCode: 0, result: { list: [
+        { ...BYBIT_RAW_POSITION, positionIdx: 1, tradeMode: 1 },
+        { ...BYBIT_RAW_POSITION, positionIdx: 2, tradeMode: 0 },
+      ] } } });
+
+      await expect(client.setLeverage(20, 'BTCUSDT', { direction: 'long' })).rejects.toMatchObject({ code: 'MARGIN_MODE_UNKNOWN' });
+      expect(mockInstance.post).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      { unifiedMarginStatus: 1 },
+      { unifiedMarginStatus: 1, marginMode: 'REGULAR_MARGIN' },
+    ])('uses reliable per-symbol tradeMode for a confirmed classic account %o', async accountInfo => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValueOnce({ data: { retCode: 0, result: accountInfo } });
+      mockInstance.get.mockResolvedValueOnce({ data: { retCode: 0, result: { list: [
+        { ...BYBIT_RAW_POSITION, positionIdx: 1, tradeMode: 1, leverage: '6' },
+        { ...BYBIT_RAW_POSITION, positionIdx: 2, tradeMode: 1, leverage: '9' },
+      ] } } });
+      mockInstance.post.mockResolvedValue({ data: { retCode: 0 } });
+
+      await client.setLeverage(6, 'BTCUSDT', { direction: 'long' });
+
+      expect(mockInstance.post).toHaveBeenCalledTimes(1);
+      expect(mockInstance.post.mock.calls[0][1]).toMatchObject({ buyLeverage: '6', sellLeverage: '9' });
+    });
+
+    it('refuses isolated mode without a complete position-mode snapshot', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValueOnce({ data: { retCode: 0, result: { marginMode: 'ISOLATED_MARGIN' } } });
+      mockInstance.get.mockResolvedValueOnce({ data: { retCode: 0, result: { list: [
+        { ...BYBIT_RAW_POSITION, positionIdx: 1, leverage: '6' },
+      ] } } });
+
+      await expect(client.setLeverage(20, 'BTCUSDT', { direction: 'long' })).rejects.toThrow();
+      expect(mockInstance.post).not.toHaveBeenCalled();
+    });
+
     it('sends equal buy/sell leverage', async () => {
       const { client, mockInstance } = createClient();
       mockInstance.post.mockResolvedValue({ data: {} });
@@ -550,6 +1351,7 @@ describe('BybitLinear', () => {
 
       expect(body.buyLeverage).toBe('20');
       expect(body.sellLeverage).toBe('20');
+      expect(mockInstance.get).not.toHaveBeenCalled();
     });
 
     // Ответ Bybit установленного значения не несёт, но принятая без ошибки установка ставит
@@ -685,9 +1487,15 @@ describe('BybitLinear', () => {
   // Раньше просьба переключить режим молча ничего не делала: попросили изолированную
   // маржу перед рискованным входом — счёт остался как был, и узнать об этом было неоткуда.
   describe('setMarginMode', () => {
-    function armAccountInfo(mockInstance: Record<string, jest.Mock>, marginMode: string): void {
-      mockInstance.get.mockResolvedValue({ data: { retCode: 0, result: { marginMode } } });
+    function armAccountAndPositionList(mockInstance: Record<string, jest.Mock>, accountInfo: Record<string, unknown>, positionList: unknown[]): void {
+      mockInstance.get.mockImplementation(async (requestPath: string) => requestPath === '/v5/account/info'
+        ? { data: { retCode: 0, result: accountInfo } }
+        : { data: { retCode: 0, result: { list: positionList } } });
       mockInstance.post.mockResolvedValue({ data: { retCode: 0, result: {} } });
+    }
+
+    function armAccountInfo(mockInstance: Record<string, jest.Mock>, marginMode: string): void {
+      armAccountAndPositionList(mockInstance, { marginMode }, []);
     }
 
     it('actually switches the account to isolated margin', async () => {
@@ -720,6 +1528,81 @@ describe('BybitLinear', () => {
       await client.setMarginMode(MarginModeEnum.Isolated, 'BTCUSDT');
 
       expect(mockInstance.post).not.toHaveBeenCalled();
+    });
+
+    it('takes the portfolio margin account as already cross, by the same rule as the position read', async () => {
+      const { client, mockInstance } = createClient();
+      armAccountInfo(mockInstance, 'PORTFOLIO_MARGIN');
+
+      await client.setMarginMode(MarginModeEnum.Cross, 'BTCUSDT');
+
+      expect(mockInstance.post).not.toHaveBeenCalled();
+    });
+
+    it('refuses to take the portfolio margin account to isolated before any write', async () => {
+      const { client, mockInstance } = createClient();
+      armAccountInfo(mockInstance, 'PORTFOLIO_MARGIN');
+
+      const failure = client.setMarginMode(MarginModeEnum.Isolated, 'BTCUSDT');
+
+      await expect(failure).rejects.toBeInstanceOf(ExchangeError);
+      await expect(failure).rejects.toMatchObject({ code: 'PORTFOLIO_MARGIN_SWITCH_REFUSED', exchange: 'bybit' });
+      await expect(failure).rejects.toThrow('WHOLE account out of portfolio margin');
+      expect(mockInstance.post).not.toHaveBeenCalled();
+    });
+
+    it.each([undefined, 'UNKNOWN_MARGIN'])('refuses the unified account mode %s before any write', async marginMode => {
+      const { client, mockInstance } = createClient();
+      armAccountAndPositionList(mockInstance, { marginMode, unifiedMarginStatus: 5 }, []);
+
+      await expect(client.setMarginMode(MarginModeEnum.Isolated, 'BTCUSDT')).rejects.toMatchObject({ code: 'MARGIN_MODE_UNKNOWN' });
+      expect(mockInstance.post).not.toHaveBeenCalled();
+    });
+
+    it('refuses a classic account with disagreeing tradeMode before any write instead of switching blindly', async () => {
+      const { client, mockInstance } = createClient();
+      armAccountAndPositionList(mockInstance, { unifiedMarginStatus: 1, marginMode: 'REGULAR_MARGIN' }, [
+        { ...BYBIT_RAW_POSITION, symbol: 'BTCUSDT', positionIdx: 1, tradeMode: 1 },
+        { ...BYBIT_RAW_POSITION, symbol: 'BTCUSDT', positionIdx: 2, tradeMode: 0 },
+      ]);
+
+      const failure = client.setMarginMode(MarginModeEnum.Isolated, 'BTCUSDT');
+
+      await expect(failure).rejects.toBeInstanceOf(ExchangeError);
+      await expect(failure).rejects.toMatchObject({ code: 'MARGIN_MODE_UNKNOWN', exchange: 'bybit' });
+      await expect(failure).rejects.toThrow('Bybit: cannot safely determine the current margin mode of the account for BTCUSDT — refusing to switch it blindly');
+      expect(mockInstance.post).not.toHaveBeenCalled();
+    });
+
+    it('decides on a classic account by the per-symbol tradeMode, the same rule as the position read', async () => {
+      const { client, mockInstance } = createClient();
+      const classicAccountInfo = { unifiedMarginStatus: 1, marginMode: 'REGULAR_MARGIN' };
+      const isolatedPositionList = [
+        { ...BYBIT_RAW_POSITION, symbol: 'BTCUSDT', positionIdx: 1, tradeMode: 1 },
+        { ...BYBIT_RAW_POSITION, symbol: 'BTCUSDT', positionIdx: 2, tradeMode: 1 },
+      ];
+      armAccountAndPositionList(mockInstance, classicAccountInfo, isolatedPositionList);
+
+      const positionList = await client.fetchPositionList('BTCUSDT');
+
+      await client.setMarginMode(MarginModeEnum.Isolated, 'BTCUSDT');
+
+      expect(positionList.map(position => position.marginMode)).toEqual([MarginModeEnum.Isolated, MarginModeEnum.Isolated]);
+      expect(mockInstance.post).not.toHaveBeenCalled();
+      expect(mockInstance.get.mock.calls.filter(call => call[0] === '/v5/position/list').map(call => call[1].params.symbol)).toEqual(['BTCUSDT', 'BTCUSDT']);
+    });
+
+    it('writes the account margin mode on a classic account only when its per-symbol tradeMode differs', async () => {
+      const { client, mockInstance } = createClient();
+      armAccountAndPositionList(mockInstance, { unifiedMarginStatus: 1, marginMode: 'ISOLATED_MARGIN' }, [
+        { ...BYBIT_RAW_POSITION, symbol: 'BTCUSDT', positionIdx: 0, tradeMode: 0 },
+      ]);
+
+      await client.setMarginMode(MarginModeEnum.Cross, 'BTCUSDT');
+      await client.setMarginMode(MarginModeEnum.Isolated, 'BTCUSDT');
+
+      expect(mockInstance.post).toHaveBeenCalledTimes(1);
+      expect(mockInstance.post.mock.calls[0][1]).toEqual({ setMarginMode: 'ISOLATED_MARGIN' });
     });
 
     it('warns that the switch reaches the whole account, not just the requested symbol', async () => {
@@ -995,6 +1878,15 @@ describe('BybitLinear', () => {
   });
 
   describe('fetchMarkPrice', () => {
+    it('takes the mark price timestamp from the time of the live demo response', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: BYBIT_RAW_TICKER_RESPONSE_ETHUSDT_DEMO });
+
+      const result = await client.fetchMarkPrice('ETHUSDT');
+
+      expect(result[0].timestamp).toBe(1793883954764);
+    });
+
     it('returns normalized mark price list', async () => {
       const { client, mockInstance } = createClient();
       mockInstance.get.mockResolvedValue({

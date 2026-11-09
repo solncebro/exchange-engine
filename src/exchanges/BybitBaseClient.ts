@@ -174,7 +174,7 @@ abstract class BybitBaseClient extends BaseExchangeClient {
   protected async fetchAndNormalizeTickers(): Promise<TickerBySymbol> {
     const raw = await this.httpClient.fetchTickers(this.category);
 
-    return normalizeBybitTickers(raw.result.list);
+    return normalizeBybitTickers(raw.result.list, raw.time);
   }
 
   protected async fetchAndNormalizeKlines(

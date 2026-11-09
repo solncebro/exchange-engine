@@ -100,9 +100,10 @@ Rate limiting в `BaseHttpClient` — **только реактивный** (н�
 
 ### Все методы используют категорию:
 - `fetchInstrumentsInfo(category, options?)` → `BybitListResponse<BybitInstrumentInfoRaw>` — GET `/v5/market/instruments-info`
-- `fetchTickers(category, options?)` → `BybitListResponse<BybitTickerRaw>` — GET `/v5/market/tickers`
+- `fetchTickers(category, options?)` → `BybitListResponse<BybitTickerRaw>` — GET `/v5/market/tickers`; `BybitListResponse.time?` — время ответа биржи (у записей списка тикеров своего времени нет), из него берётся отметка тикеров и цены маркировки
 - `fetchOrderBook(category, symbol, limit?)` → `BybitResponse<BybitOrderBookRaw>` — GET `/v5/market/orderbook`
 - `fetchKline(args)` → `BybitListResponse<string[]>` — GET `/v5/market/kline` (с конвертацией интервалов)
+- `fetchMarkPriceKline(args)` → `BybitListResponse<string[]>` — открытый GET без подписи (`publicGet`) `/v5/market/mark-price-kline`, минутный интервал, точное окно и одна запись для обогащения истории начислений
 - `fetchRecentTrades(category, symbol, limit?)` → `BybitListResponse<BybitPublicTradeRaw>` — GET `/v5/market/recent-trade`
 - `fetchFundingHistory(category, symbol, options?)` → `BybitListResponse<BybitFundingRateHistoryRaw>` — GET `/v5/market/funding/history`
 - `fetchOpenInterest(category, symbol, options?)` → `BybitListResponse<BybitOpenInterestRaw>` — GET `/v5/market/open-interest`
@@ -115,7 +116,10 @@ Rate limiting в `BaseHttpClient` — **только реактивный** (н�
 - `createBatchOrders(category, requestList)` → POST `/v5/order/create-batch`. Max 20 ордеров (linear/inverse/option), 10 (spot). Chunking — на уровне `BybitBaseClient.createBatchOrders` через `batchChunkSize`.
 - `cancelBatchOrders(category, requestList)` → POST `/v5/order/cancel-batch`. Те же лимиты. Chunking — на уровне `BybitBaseClient.cancelBatchOrders`.
 - `amendBatchOrders(category, requestList)` → `BybitAmendBatchOrdersResponse` — POST `/v5/order/amend-batch`. Max 20 ордеров (linear/inverse/option), 10 (spot). Per-order success/error в `retExtInfo.list[]` (`code === 0` = успех). Chunking — на уровне `BybitBaseClient.modifyBatchOrders`.
-- `getPositionList(category, options?)` → `BybitListResponse<BybitPositionRaw>` — GET `/v5/position/list`
+- `getPositionList(category, options?)` → `BybitListResponse<BybitPositionRaw>` — GET `/v5/position/list`, ОДНА страница (по документации по умолчанию 20 позиций)
+- `fetchAllPositionList(category, options?)` → `BybitPositionRaw[]` — все страницы `/v5/position/list` по `BYBIT_POSITION_LIST_PAGE_LIMIT` (200) через общий `fetchAllCursorPages`, потолок `BYBIT_POSITION_LIST_MAX_PAGE_COUNT` (20 страниц: последняя заполненная страница тоже отдаёт курсор, конец виден по следующей пустой, поэтому вмещается 3800 позиций, 3801-я — отказ), пауза `BYBIT_POSITION_LIST_PAGE_INTERVAL_MS` (60 мс). Живой демо-счёт 05.11.2026 с одной позицией: на `limit=200` курсор непустой (`BTCUSDT%2C1793865600065%2C0`), следующая страница — `{"nextPageCursor":"","list":[]}`, поэтому короткий список — два запроса. Потребитель — `BybitLinear.fetchAllPositions`
+- `fetchAllOpenOrders(category, options?)` → `BybitOrderResponseRaw[]` — все страницы `/v5/order/realtime` по `BYBIT_OPEN_ORDERS_PAGE_LIMIT` (50) через тот же `fetchAllCursorPages`; потолок `BYBIT_OPEN_ORDERS_MAX_PAGE_COUNT` (40) по той же причине вмещает 1950 заявок
+- `fetchAllCursorPages<T>(args: FetchAllBybitCursorPagesArgs<T>)` (private) — общий обход курсора: `{ label, maxPageCount, pageIntervalMs, readPage(cursor) }`; конец — пустая страница или пустой/отсутствующий/`null` курсор (биржа ставит непустой курсор и на последней заполненной странице); страница без списка (`result.list` не массив — и первая, и любая следующая), курсор, уже выданный раньше (запоминаются все виденные, поэтому ловится и круг `A → B → A`, а не только повтор подряд), и упор в потолок — исключение с `label` в тексте, а не частичный или пустой результат. Пользователи: `fetchAllOpenOrders`, `fetchAllPositionList`, `fetchAllOrderExecutionList`. Курсор уходит обратно как получен (`%2C` внутри кодируется ещё раз); проверено живым листанием `/v5/order/history` по одной записи 05.11.2026 — страницы сменяются
 - `getClosedPnl(category, options?)` → `BybitListResponse<BybitClosedPnlRaw>` — GET `/v5/position/closed-pnl`
 - `fetchFeeRate(category, options?)` → `BybitListResponse<BybitFeeRateRaw>` — GET `/v5/account/fee-rate`
 - `fetchTransactionLog(options?: FetchTransactionLogArgs)` → `BybitListResponse<BybitTransactionLogRaw>` — GET `/v5/account/transaction-log`, ОДНА страница. `FetchTransactionLogArgs extends CategoryFilterArgs` добавляет `startTime?`/`endTime?`/`cursor?` (10.09.2026), пробрасываемые как есть в params
@@ -123,9 +127,10 @@ Rate limiting в `BaseHttpClient` — **только реактивный** (н�
 - `setLeverage(args)` → POST `/v5/position/set-leverage`
 - `switchIsolated(args)` → POST `/v5/position/switch-isolated`
 - `fetchWalletBalance(accountType)` → `BybitResponse<BybitWalletBalanceRaw>` — GET `/v5/account/wallet-balance`
-- `fetchAccountInfo()` → GET `/v5/account/info`
+- `fetchAccountInfo()` → `BybitResponse<BybitAccountInfoRaw>` — GET `/v5/account/info`
 - `setMarginMode(mode)` → POST `/v5/account/set-margin-mode`
-- `setPositionMode(category, mode, coin?)` → POST `/v5/position/switch-mode`
+- `setPositionMode(args: SetBybitPositionModeArgs)` → POST `/v5/position/switch-mode`; `{ category, mode, coin?, symbol? }`, необязательные поля попадают в тело, только если заданы. По документации Bybit приоритет «symbol > coin > system default»: с `symbol` переключается один символ, с `coin` — все символы монеты без позиций и заявок. Если заданы оба, в тело уходит только `symbol` («Either `symbol` or `coin` is required. `symbol` has a higher priority»). Библиотечный `setPositionMode` шлёт `coin`; `symbol` использует живая проверка (проба 17)
+- `addPositionMargin(args: AddBybitPositionMarginArgs)` → POST `/v5/position/add-margin`; `{ category, symbol, margin, positionIdx }`, `margin` строкой — уже усечённой до 4 знаков в `BybitLinear.addIsolatedPositionMargin`
 - `setTradingStop(params)` → POST `/v5/position/trading-stop`
 - `fetchAllInstrumentsInfo(category)` → `BybitInstrumentInfoRaw[]` — пагинация через cursor, возвращает полный список инструментов. Число страниц ограничено `BYBIT_INSTRUMENTS_MAX_PAGE_COUNT` (20, `src/constants/bybit.ts`): страница — 1000 записей, всех инструментов на порядок меньше, поэтому потолок ничего не отсекает — он останавливает сбойный курсор, который биржа отдаёт бесконечно. При достижении потолка — `logger.warn(... reached the page count limit ...; returning a partial result)`, как у OKX (`OKX_MAX_PAGE_COUNT`) и Binance (`USER_TRADE_MAX_PAGE_COUNT`)
 - `buildCategoryParams(category, options?)` собирает необязательные параметры общим `buildOptionalParams` (`src/utils/httpParams.ts`) вместо девяти написанных вручную проверок. Помощник кладёт только заданные значения и СОХРАНЯЕТ порядок объявления — по той же строке строится подпись Bybit. Числа НЕ приводит к строкам: приведение — необязательный преобразователь помощника, и его подставляет только OKX
@@ -250,3 +255,6 @@ async fetchSomething(symbol: string, options?: FetchPageWithLimitArgs): Promise<
 - `okxTimestampError.ts` — `isOkxStaleTimestampError(error)` (код 50102 в `ExchangeError` или в тексте обогащённой ошибки)
 - `binanceRateLimit.ts` (не `.types.ts`, но чистый модуль без класса) — константы + чистые функции `parseUsedWeight1m`, `parseRetryAfterMs`, `parseBinanceBanUntilMs`, `observeRateLimitResponse` для проактивного троттлинга Binance (см. «Rate-limit awareness» выше)
 - `binanceRequestGate.ts` — класс `BinanceRequestGate` (память лимитов и очередь ожидания, общая на адрес) + реестр `getBinanceRequestGate(baseUrl)`/`resetBinanceRequestGateRegistry()`
+
+
+`BybitHttpClient.fetchOrderExecutionList` читает одну страницу `/v5/execution/list`: категория linear, символ, номер заявки, границы времени, размер страницы и указатель продолжения. `BybitHttpClient.fetchAllOrderExecutionList(options)` читает все страницы окна через общий `fetchAllCursorPages` (`BYBIT_ORDER_EXECUTION_PAGE_LIMIT` 100, потолок `BYBIT_ORDER_EXECUTION_MAX_PAGE_COUNT` 1000, пауза `BYBIT_ORDER_EXECUTION_PAGE_INTERVAL_MS` 60 мс); проверка принадлежности исполнений выполняется в `BybitLinear.fetchOrderExecutionSummary`.

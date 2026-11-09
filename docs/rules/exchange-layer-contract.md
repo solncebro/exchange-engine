@@ -22,8 +22,9 @@
 Аккаунт:
   fetchBalances(): Promise<AccountBalances>
   fetchPosition(symbol): Promise<Position>
+  fetchPositionLeverage(symbol): Promise<number | null>
   fetchPositionMode(): Promise<PositionModeEnum | undefined>
-  fetchFundingRateHistory(symbol, options?): Promise<FundingRateHistory[]>
+  fetchFundingRateHistory(symbol, options?: FetchFundingRateHistoryArgs): Promise<FundingRateHistory[]>
   fetchFundingInfo(symbol?): Promise<FundingInfo[]>
 
 Ордера:
@@ -52,6 +53,8 @@
   fetchOpenInterest(symbol): Promise<OpenInterest>
   fetchFeeRate(symbol?): Promise<FeeRate[]>
   fetchIncome(options?: FetchIncomeArgs): Promise<Income[]>
+  fetchAccountTrades(symbol, options: FetchPageWithLimitArgs): Promise<AccountTrade[]>
+  fetchOrderExecutionSummary(args: FetchOrderExecutionSummaryArgs): Promise<OrderExecutionSummary>
   fetchClosedPnl(symbol?, options?): Promise<ClosedPnl[]>
     // limit = сколько строк ИТОГА вернуть (одинаково на обеих биржах). У Bybit это готовая ручка
     // биржи, у Binance итоги собираются из сырых исполнений счёта — с startTime они забираются
@@ -187,3 +190,19 @@ WebSocket Registry:
 - Проверки до сети (`src/exchanges/subAccountTransferValidation.ts`): сумма конечная и больше нуля
   (`INVALID_TRANSFER_AMOUNT`), непустые номер перевода и подсчёта (`INVALID_TRANSFER_ID`,
   `INVALID_SUB_ACCOUNT_ID`); у Bybit ещё UUID и числовой номер пользователя.
+
+`fetchAccountTrades` поддержан только Binance Futures; остальные клиенты дают явную ошибку неподдерживаемого метода. Требуются символ и конечное окно до семи дней, результат содержит все исполнения окна без обрезки по `limit`. Доказательство: `src/exchanges/BaseExchangeClient.ts:524`, `src/exchanges/BinanceFutures.ts:1105`.
+
+`fetchPositionLeverage(symbol)` отдельно читает настроенное плечо Binance Futures; положительное конечное число либо `null`, если точное значение недоступно. Ошибки запроса проходят наружу. У остальных клиентов — `null` без запроса. Обычные чтения позиций этот метод не вызывают, но сами делают дополнительный запрос на каждый вызов. Binance Futures (`fetchPosition`, `fetchPositionSnapshot`, `fetchPositionList`, `fetchAllPositions`) каждый раз параллельно со `/fapi/v3/positionRisk` читает `/fapi/v1/symbolConfig` — из него плечо и режим маржи позиции. Bybit Linear плечо берёт из записи `/v5/position/list`, а для режима маржи каждый раз параллельно со списком позиций читает `/v5/account/info`; если он отказал, берёт последние успешно прочитанные сведения о счёте, а если их ещё нет — отдаёт позиции с режимом `null`. Доказательство: `src/exchanges/BinanceFutures.ts:590`, `src/exchanges/BaseExchangeClient.ts:389`, `src/exchanges/BinanceFutures.ts:615`, `src/exchanges/BybitLinear.ts:446`, `src/exchanges/BybitLinear.ts:476`.
+
+
+Опциональный третий параметр метода установки плеча: `SetLeverageOptions` с полем `direction?: 'long' | 'short'`. Bybit сохраняет встречную сторону при изолированной двусторонней марже, при общей марже меняет обе. Binance и OKX сохраняют прежнее общее поведение. Неизвестный режим счёта или недоступное плечо встречной стороны у Bybit приводят к отказу до записи.
+
+
+
+`fetchOrderExecutionSummary` поддержан Binance Futures и Bybit Linear; остальные клиенты явно отказывают. Аргументы: символ, номер заявки, обязательные целые начало и конец окна. Окно разбивается на участки до семи суток; каждый дочитывается до конца. Результат — сумма исполненного количества и время первого и последнего исполнения, без подмены временем изменения заявки. Проверяются принадлежность символу и заявке, положительное количество, время внутри окна, отсутствие противоречащих повторов и завершение пагинации. Пустая история возвращает ноль и неизвестное время, а не подтверждение отсутствия исполнения.
+
+
+`addIsolatedPositionMargin(args: AddIsolatedPositionMarginArgs): Promise<void>` увеличивает изолированную маржу у Binance Futures (`/fapi/v1/positionMargin`) и Bybit Linear (`/v5/position/add-margin`). Поля: `symbol`, `positionSide: PositionSideEnum`, конечная положительная `amount` в валюте маржи (проверяется до запроса). Сумма усекается до числа знаков биржи — Bybit 4, Binance 8 — по кратчайшей десятичной записи числа и уходит десятичной строкой без показательной записи (`BaseExchangeClient.formatIsolatedPositionMarginAmount`); ставшая нулём после усечения и число от `1e21` — отказ до запроса. Остальные рынки явно отказывают. Запрос не повторяется при сетевой ошибке или неизвестном исходе; подтверждённый отказ из-за устаревшей временной отметки обрабатывается общим механизмом подписи. После неизвестного исхода вызывающий обязан заблокировать повтор и сверить состояние вручную; собственного ключа однократности у запроса нет.
+
+`fetchOrderExecutionSummary` для Binance USD-M и Bybit linear возвращает все страницы исполнений окна: `executionList` с устойчивым `executionId`, количеством, ценой, фактическим оборотом, временем и комиссией. Возвращённый результат всегда полный: ошибка страницы, упор в потолок страниц, конфликт повторов или неверные данные прерывают чтение исключением. Пустой полный ответ отличается от ошибки (`executionList: []`). `quoteAmount`, `averagePrice`, `feeAmountByAsset` считаются только из исполнений; неизвестная комиссия или её валюта остаётся `null`. Поля расширения необязательны в общем типе для совместимости остальных клиентов.

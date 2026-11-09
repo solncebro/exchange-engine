@@ -1,5 +1,7 @@
 import type {
   BinancePositionRiskRaw,
+  BinanceSetLeverageResponseRaw,
+  BinanceSymbolConfigRaw,
   BinanceLeverageBracketRaw,
   BinanceFundingRateHistoryRaw,
   BinanceFundingInfoRaw,
@@ -25,7 +27,7 @@ import { applyTimeRangeOptions } from '../utils/httpParams';
 import { serializeBinanceOrderIdList } from '../utils/binanceOrderId';
 import type { BinanceEndpoints, BinanceHttpClientArgs } from './BinanceBaseHttpClient';
 import { BinanceBaseHttpClient } from './BinanceBaseHttpClient';
-import type { BinanceAlgoOrderLookupArgs, BinanceUserTradeQueryArgs } from './BinanceFuturesHttpClient.types';
+import type { AddBinanceIsolatedPositionMarginArgs, BinanceAlgoOrderLookupArgs, BinanceUserTradeQueryArgs } from './BinanceFuturesHttpClient.types';
 
 function buildAlgoOrderLookupParams(
   args: BinanceAlgoOrderLookupArgs,
@@ -187,6 +189,10 @@ class BinanceFuturesHttpClient extends BinanceBaseHttpClient {
     );
   }
 
+  async fetchSymbolConfig(symbol?: string): Promise<BinanceSymbolConfigRaw[]> {
+    return this.signedGet<BinanceSymbolConfigRaw[]>('/fapi/v1/symbolConfig', this.buildOptionalSymbolParams(symbol));
+  }
+
   async fetchPositionRisk(symbol?: string): Promise<BinancePositionRiskRaw[]> {
     return this.signedGet<BinancePositionRiskRaw[]>('/fapi/v3/positionRisk', this.buildOptionalSymbolParams(symbol));
   }
@@ -227,6 +233,8 @@ class BinanceFuturesHttpClient extends BinanceBaseHttpClient {
   async fetchUserTrades(args: BinanceUserTradeQueryArgs): Promise<BinanceUserTradeRaw[]> {
     const params: Record<string, string | number | boolean> = this.buildOptionalSymbolParams(args.symbol);
 
+    if (args.orderId !== undefined) params.orderId = args.orderId;
+
     if (args.fromId === undefined) {
       applyTimeRangeOptions(params, args);
     } else {
@@ -240,8 +248,8 @@ class BinanceFuturesHttpClient extends BinanceBaseHttpClient {
     return this.signedGet<BinanceUserTradeRaw[]>('/fapi/v1/userTrades', params);
   }
 
-  async setLeverage(symbol: string, leverage: number): Promise<Record<string, unknown>> {
-    return this.signedPost<Record<string, unknown>>('/fapi/v1/leverage', { symbol, leverage });
+  async setLeverage(symbol: string, leverage: number): Promise<BinanceSetLeverageResponseRaw> {
+    return this.signedPost<BinanceSetLeverageResponseRaw>('/fapi/v1/leverage', { symbol, leverage });
   }
 
   async setMarginType(symbol: string, marginType: string): Promise<Record<string, unknown>> {
@@ -255,14 +263,17 @@ class BinanceFuturesHttpClient extends BinanceBaseHttpClient {
     );
   }
 
-  async modifyPositionMargin(
-    symbol: string,
-    amount: number,
-    type: number,
-  ): Promise<Record<string, unknown>> {
+  async modifyPositionMargin(symbol: string, amount: number, type: number): Promise<Record<string, unknown>> {
     return this.signedPost<Record<string, unknown>>(
       '/fapi/v1/positionMargin',
       { symbol, amount, type },
+    );
+  }
+
+  async addIsolatedPositionMargin(args: AddBinanceIsolatedPositionMarginArgs): Promise<Record<string, unknown>> {
+    return this.signedPost<Record<string, unknown>>(
+      '/fapi/v1/positionMargin',
+      { symbol: args.symbol, amount: args.amount, type: 1, positionSide: args.positionSide.toUpperCase() },
     );
   }
 }

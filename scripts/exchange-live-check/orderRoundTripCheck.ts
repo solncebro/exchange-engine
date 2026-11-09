@@ -1,53 +1,41 @@
 import { OrderSideEnum, OrderTypeEnum, PositionModeEnum, PositionSideEnum, TimeInForceEnum } from '../../src/types/common';
 import type { CreateOrderWebSocketArgs } from '../../src/types/exchange';
 import { describeError } from '../live-support/liveError';
+import { readFreshLastPrice, resolveMinimalOrderAmount } from '../live-support/liveOrder';
 import { printNote } from '../live-support/liveOutput';
 import { formatNumber, joinViolationSample } from './checkSupport';
+import { checkExecutionSymbolIsFree } from './executionSymbolGuard';
 import type { LiveCheck, LiveCheckContext, LiveCheckOutcome } from './liveCheck.types';
 import { cancelOwnOrders } from './orderCleanup';
 
 const TIMEOUT_MS = 180_000;
 const RESTING_PRICE_RATIO = 0.5;
-const NOTIONAL_SAFETY_RATIO = 1.2;
 const RELATIVE_EPSILON = 1e-6;
 const CANCELED_STATUS = 'canceled';
 
-function resolveOrderAmount(context: LiveCheckContext, lastPrice: number): number {
-  const client = context.exchange.futures;
-  const symbol = context.settings.futuresSymbol;
-  const restingPrice = client.priceToPrecision(symbol, lastPrice * RESTING_PRICE_RATIO);
-  const minNotional = client.getMinNotional(symbol);
-  const notionalAmount = minNotional > 0 && restingPrice > 0 ? (minNotional * NOTIONAL_SAFETY_RATIO) / restingPrice : 0;
-  const requestedAmount = Math.max(client.getMinOrderQty(symbol), notionalAmount);
-  const roundedAmount = client.amountToPrecision(symbol, requestedAmount);
-
-  if (roundedAmount >= requestedAmount) {
-    return roundedAmount;
-  }
-
-  const stepSize = Number(client.tradeSymbols.get(symbol)?.filter.stepSize ?? '0');
-
-  return client.amountToPrecision(symbol, requestedAmount + (Number.isFinite(stepSize) ? stepSize : 0));
-}
-
-async function checkOrderRoundTrip(context: LiveCheckContext): Promise<LiveCheckOutcome> {
+async function checkOrderRoundTrip(context: LiveCheckContext, signal: AbortSignal): Promise<LiveCheckOutcome> {
   // Bybit was skipped here with a hard-coded "the key answers 10010" — without asking the exchange.
   // On 17.09.2026 the same run read the Bybit demo balance and position mode with that key, so the
   // reason was stale; a real 10010 now surfaces as a failure with the exchange's own words.
   const client = context.exchange.futures;
-  const symbol = context.settings.futuresSymbol;
+  const symbol = context.settings.executionSymbol;
 
   await client.loadTradeSymbols();
 
-  const tickerBySymbol = await context.readFuturesTickers();
-  const ticker = tickerBySymbol.get(symbol);
+  const occupiedOutcome = await checkExecutionSymbolIsFree(context);
 
-  if (ticker === undefined || ticker.lastPrice <= 0) {
+  if (occupiedOutcome !== null) {
+    return occupiedOutcome;
+  }
+
+  const lastPrice = await readFreshLastPrice(client, symbol);
+
+  if (!(lastPrice > 0)) {
     return { status: 'incomplete', fact: `${symbol}: нет последней цены — не от чего считать цену вдали от рынка` };
   }
 
-  const restingPrice = client.priceToPrecision(symbol, ticker.lastPrice * RESTING_PRICE_RATIO);
-  const amount = resolveOrderAmount(context, ticker.lastPrice);
+  const restingPrice = client.priceToPrecision(symbol, lastPrice * RESTING_PRICE_RATIO);
+  const amount = resolveMinimalOrderAmount({ client, symbol, notionalPrice: restingPrice });
   const clientOrderId = context.buildClientOrderId();
   const positionMode = await client.fetchPositionMode();
   const orderArgs: CreateOrderWebSocketArgs = {
@@ -66,6 +54,9 @@ async function checkOrderRoundTrip(context: LiveCheckContext): Promise<LiveCheck
 
   try {
     const violationList: string[] = [];
+
+    signal.throwIfAborted();
+
     const placedOrder = await client.createOrderWebSocket(orderArgs);
 
     context.showEvidence('поставленная заявка', placedOrder);
@@ -109,7 +100,7 @@ async function checkOrderRoundTrip(context: LiveCheckContext): Promise<LiveCheck
     }
 
     const summaryText =
-      `${symbol}: объём ${formatNumber(expectedAmount)} монет по цене ${formatNumber(restingPrice)} (рынок ${formatNumber(ticker.lastPrice)}), ` +
+      `${symbol}: объём ${formatNumber(expectedAmount)} монет по цене ${formatNumber(restingPrice)} (рынок ${formatNumber(lastPrice)}, прочитан перед пробой), ` +
       `номер ${placedOrder.id}, клиентский номер ${clientOrderId}, режим позиции '${String(positionMode)}'; ` +
       `заявка вернулась объёмом ${formatNumber(placedOrder.amount)}, прочитана ценой ${formatNumber(readOrder.price)}, ` +
       `после отмены статус '${cancelledOrder.status}', открытых с этим номером ${remainingList.filter((order) => order.id === placedOrder.id).length}`;

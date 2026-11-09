@@ -1,8 +1,14 @@
+import { BINANCE_DEMO_FUTURES_BASE_URL } from '../../src/constants/binance';
+import { BYBIT_DEMO_BASE_URL } from '../../src/constants/bybit';
 import { Exchange } from '../../src/exchanges/Exchange';
-import type { ExchangeConfig, TickerBySymbol } from '../../src/types/common';
+import { BinanceFuturesHttpClient } from '../../src/http/BinanceFuturesHttpClient';
+import { BybitHttpClient } from '../../src/http/BybitHttpClient';
+import type { ExchangeConfig, TickerBySymbol, TradeSymbolBySymbol } from '../../src/types/common';
 import { ExchangeNameEnum } from '../../src/types/common';
+import type { ExchangeClient } from '../../src/types/exchange';
 import { readEnvironmentValue, readTextOption } from '../live-support/liveCommandLine';
 import { createLiveLogger } from '../live-support/liveLogger';
+import { OwnPositionLedger } from '../live-support/liveOrder';
 import type { LiveLogRecord } from '../live-support/liveLogger.types';
 import { armSecretRedactor, printEvidence } from '../live-support/liveOutput';
 import type {
@@ -15,6 +21,7 @@ import type { LiveCheckContext } from './liveCheck.types';
 
 const FUTURES_SYMBOL = 'BTCUSDT';
 const SPOT_SYMBOL = 'BTCUSDT';
+const EXECUTION_SYMBOL = 'ETHUSDT';
 const CLIENT_ORDER_ID_PREFIX = 'elc';
 
 export const EXCHANGE_NAME_LIST: ExchangeNameEnum[] = [
@@ -127,6 +134,8 @@ export function createCheckContext(args: CreateCheckContextArgs): LiveCheckConte
   const exchange = createStreamExchange();
   const clientOrderIdPrefix = `${CLIENT_ORDER_ID_PREFIX}${Date.now().toString(36)}`;
 
+  const tradeSymbolLoadByClient = new Map<ExchangeClient, Promise<TradeSymbolBySymbol>>();
+
   let tickerBySymbol: TickerBySymbol | null = null;
   let clientOrderIdCounter = 0;
 
@@ -140,12 +149,29 @@ export function createCheckContext(args: CreateCheckContextArgs): LiveCheckConte
     return tickerBySymbol;
   };
 
+  const readTradeSymbols = async (client: ExchangeClient): Promise<TradeSymbolBySymbol> => {
+    if (client.tradeSymbols.size > 0) {
+      return client.tradeSymbols;
+    }
+
+    const pendingLoad = tradeSymbolLoadByClient.get(client) ?? client.loadTradeSymbols();
+
+    tradeSymbolLoadByClient.set(client, pendingLoad);
+
+    try {
+      return await pendingLoad;
+    } finally {
+      tradeSymbolLoadByClient.delete(client);
+    }
+  };
+
   return {
     exchangeName,
     exchange,
     settings: {
       futuresSymbol: FUTURES_SYMBOL,
       spotSymbol: SPOT_SYMBOL,
+      executionSymbol: EXECUTION_SYMBOL,
       orderBookDepth: ORDER_BOOK_DEPTH_BY_EXCHANGE[exchangeName],
       isOrderAllowed: commandLine.isOrderAllowed,
       clientOrderIdPrefix,
@@ -153,7 +179,15 @@ export function createCheckContext(args: CreateCheckContextArgs): LiveCheckConte
     logger,
     showEvidence: printEvidence,
     readFuturesTickers,
+    readTradeSymbols,
     createStreamExchange,
+    bybitDemoHttpClient: exchangeName === ExchangeNameEnum.Bybit
+      ? new BybitHttpClient({ baseUrl: BYBIT_DEMO_BASE_URL, apiKey: credentials.apiKey, secret: credentials.secret, logger })
+      : null,
+    binanceDemoHttpClient: exchangeName === ExchangeNameEnum.Binance
+      ? new BinanceFuturesHttpClient({ baseUrl: BINANCE_DEMO_FUTURES_BASE_URL, apiKey: credentials.apiKey, secret: credentials.secret, logger })
+      : null,
+    ownPositionLedger: new OwnPositionLedger(EXECUTION_SYMBOL),
     buildClientOrderId: (): string => {
       clientOrderIdCounter += 1;
 

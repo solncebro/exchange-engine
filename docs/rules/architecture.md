@@ -79,7 +79,7 @@ Exchange (фабрика)
 │
 ├── Утилиты (src/utils/, src/precision/, src/constants/)
 │   ├── precision.ts — roundToStep для amount/price
-│   ├── decimalString.ts — точный перевод монет в контракты и обратно (OKX)
+│   ├── decimalString.ts — точный перевод монет в контракты и обратно (OKX), усечение суммы маржи по десятичной записи (`truncateToDecimalString`)
 │   ├── parseJsonPreservingLargeIntegers.ts — общий разбор HTTP/WS с сохранением больших целых чисел точными строками
 │   ├── klineLoader.ts — параллельная загрузка klines чанками
 │   ├── httpParams.ts — applyTimeRangeOptions, buildOptionalParams
@@ -139,4 +139,4 @@ exchange.close()  // → закрывает оба
 - **Spot-классы выбрасывают ошибку** для фьючерсных методов: `"Not supported for spot market"`
 - **Demo mode** — переключается в конструкторе через `isDemoMode`, влияет на URL (у OKX — на WS-адреса и заголовок `x-simulated-trading`), не runtime toggle
 - **tradeSymbols** — `Map` на инстансе, `loadTradeSymbols()` всегда загружает свежие данные (очищает Map перед заполнением)
-- **Уведомления** — `BaseExchangeClient.createNotifyHandler()` оборачивает `onNotify` БЕЗ дополнительной логики: сообщение (включая CRITICAL от WebSocket) просто проксируется в пользовательский callback. Библиотека процесс НЕ завершает — решение о том, что делать с критическим сообщением, принимает потребитель (`src/exchanges/BaseExchangeClient.ts:70-76`; `process.exit` в `src/` отсутствует, сторож — `test/exchanges/BaseExchangeClient.test.ts:35`)
+- **Уведомления** — `BaseExchangeClient.createNotifyHandler()` оборачивает `onNotify` БЕЗ дополнительной логики: сообщение (включая CRITICAL от WebSocket) просто проксируется в пользовательский callback. Библиотека процесс НЕ завершает — решение о том, что делать с критическим сообщением, принимает потребитель (`src/exchanges/BaseExchangeClient.ts:76-85`; `process.exit` в `src/` отсутствует, сторож — `test/exchanges/BaseExchangeClient.test.ts:35`)

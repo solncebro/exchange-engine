@@ -938,7 +938,7 @@ class BybitPublicStream {
         }
 
         if (this.tickerHandlerSet.size > 0 && fullTickerList.length > 0) {
-          const tickerBySymbol = normalizeBybitTickers(fullTickerList);
+          const tickerBySymbol = normalizeBybitTickers(fullTickerList, message.ts);
 
           for (const handler of this.tickerHandlerSet) {
             handler(tickerBySymbol);

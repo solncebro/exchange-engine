@@ -4,6 +4,9 @@ import {
   normalizeBybitKlines,
   normalizeBybitKlineWebSocketMessage,
   normalizeBybitPosition,
+  normalizeBybitPositionList,
+  resolveBybitMarginMode,
+  resolveBybitPositionMarginMode,
   normalizeBybitOrder,
   buildBybitOrderFromCreateResponse,
   normalizeBybitBalances,
@@ -31,6 +34,9 @@ import {
   BYBIT_RAW_KLINE_LIST,
   BYBIT_RAW_WEBSOCKET_KLINE,
   BYBIT_RAW_POSITION,
+  BYBIT_RAW_ACCOUNT_INFO_DEMO_ISOLATED,
+  BYBIT_RAW_POSITION_DEMO_ISOLATED_ACCOUNT_BTCUSDT,
+  BYBIT_RAW_POSITION_DEMO_ISOLATED_ACCOUNT_ETHUSDT_EMPTY,
   BYBIT_RAW_ORDER_RESPONSE,
   BYBIT_RAW_WALLET_BALANCE,
   BYBIT_RAW_WALLET_BALANCE_NO_TOTALS,
@@ -48,6 +54,8 @@ import {
   BYBIT_RAW_TRANSACTION_LOG_SETTLEMENT,
   BYBIT_RAW_RISK_LIMIT_AVAUSDT_LIST,
   BYBIT_RAW_RISK_LIMIT_PAGE_LIST,
+  BYBIT_RAW_TICKER_RESPONSE_ETHUSDT_DEMO,
+  BYBIT_RAW_TICKER_STREAM_SNAPSHOT_ETHUSDT,
 } from '../fixtures/bybitRaw';
 
 describe('normalizeBybitTradeSymbols', () => {
@@ -364,13 +372,21 @@ describe('normalizeBybitTickers', () => {
     expect(result.get('BTCUSDT')!.quoteVolume).toBe(805000000);
   });
 
-  it('preserves timestamp when present', () => {
-    const result = normalizeBybitTickers(BYBIT_RAW_TICKER_LIST);
+  it('takes the timestamp of every entry from the time of the live demo response', () => {
+    jest.spyOn(Date, 'now').mockReturnValue(9999999999999);
+    const result = normalizeBybitTickers(BYBIT_RAW_TICKER_RESPONSE_ETHUSDT_DEMO.result.list, BYBIT_RAW_TICKER_RESPONSE_ETHUSDT_DEMO.time);
 
-    expect(result.get('BTCUSDT')!.timestamp).toBe(1700000000000);
+    expect(result.get('ETHUSDT')!.timestamp).toBe(1793883954764);
   });
 
-  it('falls back to Date.now() when time is missing', () => {
+  it('takes the timestamp of a live stream frame from its ts', () => {
+    jest.spyOn(Date, 'now').mockReturnValue(9999999999999);
+    const result = normalizeBybitTickers([BYBIT_RAW_TICKER_STREAM_SNAPSHOT_ETHUSDT.data], BYBIT_RAW_TICKER_STREAM_SNAPSHOT_ETHUSDT.ts);
+
+    expect(result.get('ETHUSDT')!.timestamp).toBe(1793883952833);
+  });
+
+  it('falls back to Date.now() only when neither the entry nor the response has a time', () => {
     jest.spyOn(Date, 'now').mockReturnValue(9999999999999);
     const result = normalizeBybitTickers(BYBIT_RAW_TICKER_LIST);
 
@@ -495,40 +511,46 @@ describe('normalizeBybitKlineWebSocketMessage', () => {
 
 describe('normalizeBybitPosition', () => {
   it('maps Buy to long', () => {
-    const result = normalizeBybitPosition(BYBIT_RAW_POSITION);
+    const result = normalizeBybitPosition(BYBIT_RAW_POSITION, null);
 
     expect(result.side).toBe(PositionSideEnum.Long);
   });
 
   it('maps Sell to short', () => {
     const raw = { ...BYBIT_RAW_POSITION, side: 'Sell' };
-    const result = normalizeBybitPosition(raw);
+    const result = normalizeBybitPosition(raw, null);
 
     expect(result.side).toBe(PositionSideEnum.Short);
   });
 
   it('falls back to both for unknown side', () => {
     const raw = { ...BYBIT_RAW_POSITION, side: 'None' };
-    const result = normalizeBybitPosition(raw);
+    const result = normalizeBybitPosition(raw, null);
 
     expect(result.side).toBe(PositionSideEnum.Both);
   });
 
-  it('maps tradeMode 0 to cross', () => {
+  it('keeps an unknown margin mode unknown instead of guessing it from tradeMode 0', () => {
     const raw = { ...BYBIT_RAW_POSITION, tradeMode: 0 };
-    const result = normalizeBybitPosition(raw);
+    const result = normalizeBybitPosition(raw, null);
+
+    expect(result.marginMode).toBeNull();
+  });
+
+  it('keeps an unknown margin mode unknown instead of guessing it from tradeMode 1', () => {
+    const result = normalizeBybitPosition(BYBIT_RAW_POSITION, null);
+
+    expect(result.marginMode).toBeNull();
+  });
+
+  it('takes the margin mode it is given, whatever tradeMode says', () => {
+    const result = normalizeBybitPosition({ ...BYBIT_RAW_POSITION, tradeMode: 1 }, MarginModeEnum.Cross);
 
     expect(result.marginMode).toBe(MarginModeEnum.Cross);
   });
 
-  it('maps tradeMode 1 to isolated', () => {
-    const result = normalizeBybitPosition(BYBIT_RAW_POSITION);
-
-    expect(result.marginMode).toBe(MarginModeEnum.Isolated);
-  });
-
   it('parses numeric fields', () => {
-    const result = normalizeBybitPosition(BYBIT_RAW_POSITION);
+    const result = normalizeBybitPosition(BYBIT_RAW_POSITION, null);
 
     expect(result.contracts).toBe(0.1);
     expect(result.entryPrice).toBe(65000);
@@ -540,72 +562,207 @@ describe('normalizeBybitPosition', () => {
 
   it('returns 0 for NaN liquidationPrice', () => {
     const raw = { ...BYBIT_RAW_POSITION, liqPrice: '' };
-    const result = normalizeBybitPosition(raw);
+    const result = normalizeBybitPosition(raw, null);
 
     expect(result.liquidationPrice).toBe(0);
   });
 
   it('returns 0 for NaN contracts when raw size is invalid (defensive)', () => {
     const raw = { ...BYBIT_RAW_POSITION, size: 'abc' };
-    const result = normalizeBybitPosition(raw);
+    const result = normalizeBybitPosition(raw, null);
 
     expect(result.contracts).toBe(0);
   });
 
   it('returns 0 for empty string contracts', () => {
     const raw = { ...BYBIT_RAW_POSITION, size: '' };
-    const result = normalizeBybitPosition(raw);
+    const result = normalizeBybitPosition(raw, null);
 
     expect(result.contracts).toBe(0);
   });
 
   it('returns 0 for Infinity contracts', () => {
     const raw = { ...BYBIT_RAW_POSITION, size: 'Infinity' };
-    const result = normalizeBybitPosition(raw);
+    const result = normalizeBybitPosition(raw, null);
 
     expect(result.contracts).toBe(0);
   });
 
   it('preserves raw data in info', () => {
-    const result = normalizeBybitPosition(BYBIT_RAW_POSITION);
+    const result = normalizeBybitPosition(BYBIT_RAW_POSITION, null);
 
     expect(result.info).toBe(BYBIT_RAW_POSITION);
   });
 
   it('resolves direction=long when side=Buy (oneWay or hedge)', () => {
-    const result = normalizeBybitPosition(BYBIT_RAW_POSITION);
+    const result = normalizeBybitPosition(BYBIT_RAW_POSITION, null);
 
     expect(result.direction).toBe('long');
   });
 
   it('resolves direction=short when side=Sell', () => {
     const raw = { ...BYBIT_RAW_POSITION, side: 'Sell' };
-    const result = normalizeBybitPosition(raw);
+    const result = normalizeBybitPosition(raw, null);
 
     expect(result.direction).toBe('short');
   });
 
   it('falls back to positionIdx when side=None (hedge LONG slot)', () => {
     const raw = { ...BYBIT_RAW_POSITION, side: 'None', positionIdx: 1 };
-    const result = normalizeBybitPosition(raw);
+    const result = normalizeBybitPosition(raw, null);
 
     expect(result.direction).toBe('long');
   });
 
   it('falls back to positionIdx when side=None (hedge SHORT slot)', () => {
     const raw = { ...BYBIT_RAW_POSITION, side: 'None', positionIdx: 2 };
-    const result = normalizeBybitPosition(raw);
+    const result = normalizeBybitPosition(raw, null);
 
     expect(result.direction).toBe('short');
   });
 
   it('returns direction=null when side=None and positionIdx=0 (oneWay empty slot)', () => {
     const raw = { ...BYBIT_RAW_POSITION, side: 'None', positionIdx: 0 };
-    const result = normalizeBybitPosition(raw);
+    const result = normalizeBybitPosition(raw, null);
 
     expect(result.direction).toBeNull();
   });
 });
+describe('resolveBybitMarginMode', () => {
+  it('takes isolated from the live demo account even though the live position reports the deprecated tradeMode 0', () => {
+    const positionList = [BYBIT_RAW_POSITION_DEMO_ISOLATED_ACCOUNT_BTCUSDT];
+
+    expect(BYBIT_RAW_POSITION_DEMO_ISOLATED_ACCOUNT_BTCUSDT.tradeMode).toBe(0);
+    expect(resolveBybitMarginMode(BYBIT_RAW_ACCOUNT_INFO_DEMO_ISOLATED, positionList)).toBe(MarginModeEnum.Isolated);
+    expect(normalizeBybitPosition(BYBIT_RAW_POSITION_DEMO_ISOLATED_ACCOUNT_BTCUSDT, MarginModeEnum.Isolated).marginMode).toBe(MarginModeEnum.Isolated);
+  });
+
+  it.each(['REGULAR_MARGIN', 'PORTFOLIO_MARGIN'])('takes cross from the account mode %s', marginMode => {
+    const accountInfo = { ...BYBIT_RAW_ACCOUNT_INFO_DEMO_ISOLATED, marginMode };
+    const positionList = [{ ...BYBIT_RAW_POSITION_DEMO_ISOLATED_ACCOUNT_BTCUSDT, tradeMode: 1 }];
+
+    expect(resolveBybitMarginMode(accountInfo, positionList)).toBe(MarginModeEnum.Cross);
+  });
+
+  it.each(['CROSS_MARGIN', 'UNKNOWN_MARGIN', undefined])('gives null for the unknown unified account mode %s instead of trusting tradeMode', marginMode => {
+    const accountInfo = { ...BYBIT_RAW_ACCOUNT_INFO_DEMO_ISOLATED, marginMode };
+
+    expect(resolveBybitMarginMode(accountInfo, [{ ...BYBIT_RAW_POSITION_DEMO_ISOLATED_ACCOUNT_BTCUSDT, tradeMode: 1 }])).toBeNull();
+  });
+
+  it('gives null for a unified account without any account mode, even without the account status', () => {
+    expect(resolveBybitMarginMode({}, [{ ...BYBIT_RAW_POSITION, tradeMode: 0 }])).toBeNull();
+  });
+
+  it('checks the classic account before the account mode: a classic account takes tradeMode even with an account mode', () => {
+    const accountInfo = { unifiedMarginStatus: 1, marginMode: 'REGULAR_MARGIN' };
+
+    expect(resolveBybitMarginMode(accountInfo, [{ ...BYBIT_RAW_POSITION, tradeMode: 1 }])).toBe(MarginModeEnum.Isolated);
+    expect(resolveBybitMarginMode({ ...accountInfo, marginMode: 'ISOLATED_MARGIN' }, [{ ...BYBIT_RAW_POSITION, tradeMode: 0 }])).toBe(MarginModeEnum.Cross);
+  });
+
+  it('reads the empty leverage of a portfolio margin position as 0', () => {
+    const position = normalizeBybitPosition({ ...BYBIT_RAW_POSITION_DEMO_ISOLATED_ACCOUNT_BTCUSDT, leverage: '' }, MarginModeEnum.Cross);
+
+    expect(position.leverage).toBe(0);
+  });
+
+  it('uses a consistent tradeMode only on a classic account', () => {
+    const accountInfo = { unifiedMarginStatus: 1 };
+    const isolatedList = [
+      { ...BYBIT_RAW_POSITION, positionIdx: 1, tradeMode: 1 },
+      { ...BYBIT_RAW_POSITION, positionIdx: 2, tradeMode: 1 },
+    ];
+    const mixedList = [
+      { ...BYBIT_RAW_POSITION, positionIdx: 1, tradeMode: 1 },
+      { ...BYBIT_RAW_POSITION, positionIdx: 2, tradeMode: 0 },
+    ];
+
+    expect(resolveBybitMarginMode(accountInfo, isolatedList)).toBe(MarginModeEnum.Isolated);
+    expect(resolveBybitMarginMode(accountInfo, [{ ...BYBIT_RAW_POSITION, tradeMode: 0 }])).toBe(MarginModeEnum.Cross);
+    expect(resolveBybitMarginMode(accountInfo, mixedList)).toBeNull();
+    expect(resolveBybitMarginMode(accountInfo, [])).toBeNull();
+  });
+});
+
+describe('resolveBybitPositionMarginMode', () => {
+  it('gives null without the account information', () => {
+    expect(resolveBybitPositionMarginMode(null, { ...BYBIT_RAW_POSITION, tradeMode: 1 })).toBeNull();
+  });
+
+  it('takes the own tradeMode of the cell on a classic account', () => {
+    const accountInfo = { unifiedMarginStatus: 1, marginMode: 'ISOLATED_MARGIN' };
+
+    expect(resolveBybitPositionMarginMode(accountInfo, { ...BYBIT_RAW_POSITION, tradeMode: 0 })).toBe(MarginModeEnum.Cross);
+    expect(resolveBybitPositionMarginMode(accountInfo, { ...BYBIT_RAW_POSITION, tradeMode: 1 })).toBe(MarginModeEnum.Isolated);
+  });
+
+  it.each([2, -1])('gives null for the tradeMode %s of a classic account instead of reading it as isolated', tradeMode => {
+    expect(resolveBybitPositionMarginMode({ unifiedMarginStatus: 1 }, { ...BYBIT_RAW_POSITION, tradeMode })).toBeNull();
+  });
+
+  it('takes the account mode on a unified account, whatever tradeMode says', () => {
+    expect(resolveBybitPositionMarginMode(BYBIT_RAW_ACCOUNT_INFO_DEMO_ISOLATED, BYBIT_RAW_POSITION_DEMO_ISOLATED_ACCOUNT_BTCUSDT)).toBe(MarginModeEnum.Isolated);
+    expect(resolveBybitPositionMarginMode({ ...BYBIT_RAW_ACCOUNT_INFO_DEMO_ISOLATED, marginMode: 'REGULAR_MARGIN' }, { ...BYBIT_RAW_POSITION, tradeMode: 1 })).toBe(MarginModeEnum.Cross);
+  });
+
+  it('gives null for the unknown mode of a unified account', () => {
+    expect(resolveBybitPositionMarginMode({ ...BYBIT_RAW_ACCOUNT_INFO_DEMO_ISOLATED, marginMode: 'UNKNOWN_MARGIN' }, { ...BYBIT_RAW_POSITION, tradeMode: 1 })).toBeNull();
+  });
+});
+
+describe('normalizeBybitPositionList', () => {
+  it('applies the live isolated account mode to every live position', () => {
+    const result = normalizeBybitPositionList(
+      [BYBIT_RAW_POSITION_DEMO_ISOLATED_ACCOUNT_BTCUSDT, BYBIT_RAW_POSITION_DEMO_ISOLATED_ACCOUNT_ETHUSDT_EMPTY],
+      BYBIT_RAW_ACCOUNT_INFO_DEMO_ISOLATED,
+    );
+
+    expect(result.map(position => position.marginMode)).toEqual([MarginModeEnum.Isolated, MarginModeEnum.Isolated]);
+    expect(result.map(position => position.contracts)).toEqual([0.128, 0]);
+  });
+
+  it('reads the positions of a unified account with an unknown mode as unknown instead of cross by tradeMode 0', () => {
+    const result = normalizeBybitPositionList(
+      [BYBIT_RAW_POSITION_DEMO_ISOLATED_ACCOUNT_BTCUSDT],
+      { ...BYBIT_RAW_ACCOUNT_INFO_DEMO_ISOLATED, marginMode: 'UNKNOWN_MARGIN' },
+    );
+
+    expect(result.map(position => position.marginMode)).toEqual([null]);
+    expect(result.map(position => position.contracts)).toEqual([0.128]);
+  });
+
+  it('reads every position with an unknown margin mode without the account information', () => {
+    const result = normalizeBybitPositionList([{ ...BYBIT_RAW_POSITION, tradeMode: 1 }, { ...BYBIT_RAW_POSITION, symbol: 'ETHUSDT', tradeMode: 0 }], null);
+
+    expect(result.map(position => position.marginMode)).toEqual([null, null]);
+  });
+
+  it('falls back to the own tradeMode of each cell on a classic account whose cells disagree', () => {
+    const result = normalizeBybitPositionList(
+      [
+        { ...BYBIT_RAW_POSITION, positionIdx: 1, tradeMode: 1 },
+        { ...BYBIT_RAW_POSITION, positionIdx: 2, tradeMode: 0 },
+      ],
+      { unifiedMarginStatus: 1 },
+    );
+
+    expect(result.map(position => position.marginMode)).toEqual([MarginModeEnum.Isolated, MarginModeEnum.Cross]);
+  });
+
+  it('resolves a classic account per symbol', () => {
+    const result = normalizeBybitPositionList(
+      [
+        { ...BYBIT_RAW_POSITION, symbol: 'BTCUSDT', tradeMode: 1 },
+        { ...BYBIT_RAW_POSITION, symbol: 'ETHUSDT', tradeMode: 0 },
+      ],
+      { unifiedMarginStatus: 1 },
+    );
+
+    expect(result.map(position => position.marginMode)).toEqual([MarginModeEnum.Isolated, MarginModeEnum.Cross]);
+  });
+});
+
 
 describe('normalizeBybitOrder', () => {
   it('preserves orderId as string', () => {
@@ -1495,10 +1652,12 @@ describe('normalizeBybitMarkPriceList', () => {
     expect(result[0].nextFundingTime).toBe(1700028800000);
   });
 
-  it('preserves timestamp from raw data', () => {
-    const result = normalizeBybitMarkPriceList(BYBIT_RAW_MARK_PRICE_TICKER_LIST);
+  it('takes the timestamp from the time of the live demo tickers response', () => {
+    jest.spyOn(Date, 'now').mockReturnValue(9999999999999);
+    const result = normalizeBybitMarkPriceList(BYBIT_RAW_TICKER_RESPONSE_ETHUSDT_DEMO.result.list, BYBIT_RAW_TICKER_RESPONSE_ETHUSDT_DEMO.time);
 
-    expect(result[0].timestamp).toBe(1700000000000);
+    expect(result[0].markPrice).toBe(2396.42);
+    expect(result[0].timestamp).toBe(1793883954764);
   });
 
   it('handles negative funding rate', () => {

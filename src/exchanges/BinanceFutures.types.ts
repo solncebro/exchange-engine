@@ -1,3 +1,6 @@
+import type { BinancePositionRiskRaw, BinanceUserTradeRaw } from '../normalizers/binanceNormalizer';
+import type { BinancePositionSettings } from '../normalizers/binanceNormalizer.types';
+
 interface BinanceNoopErrorResponseData {
   code?: unknown;
   msg?: unknown;
@@ -24,4 +27,15 @@ interface BinanceModifyBatchOrderParams {
   priceMatch?: string;
 }
 
-export type { AxiosLikeError, BinanceModifyOrderParams, BinanceModifyBatchOrderParams };
+interface BinanceUserTradeHistory {
+  tradeList: BinanceUserTradeRaw[];
+  isComplete: boolean;
+}
+
+interface BinancePositionRiskWithSettings {
+  positionRiskList: BinancePositionRiskRaw[];
+  settingsBySymbol: Map<string, BinancePositionSettings>;
+  symbolConfigFailureReason: string | null;
+}
+
+export type { AxiosLikeError, BinanceModifyOrderParams, BinanceModifyBatchOrderParams, BinancePositionRiskWithSettings, BinanceUserTradeHistory };

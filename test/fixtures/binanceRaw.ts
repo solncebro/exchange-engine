@@ -3,6 +3,7 @@ import type {
   BinanceTicker24hrRaw,
   BinanceWebSocketKlineRaw,
   BinancePositionRiskRaw,
+  BinanceSymbolConfigRaw,
   BinanceOrderResponseRaw,
   BinanceAlgoOrderRaw,
   BinanceAccountRaw,
@@ -197,13 +198,121 @@ export const BINANCE_RAW_POSITION_RISK: BinancePositionRiskRaw = {
   positionSide: 'LONG',
   positionAmt: '0.100',
   entryPrice: '65000.00',
+  breakEvenPrice: '65026.00',
   markPrice: '65500.00',
   unRealizedProfit: '50.00',
-  leverage: '10',
-  marginType: 'ISOLATED',
   liquidationPrice: '60000.00',
-  notional: '6550.00',
   isolatedMargin: '655.00',
+  notional: '6550.00',
+  marginAsset: 'USDT',
+  isolatedWallet: '605.00',
+  initialMargin: '1310.00',
+  maintMargin: '26.20',
+  positionInitialMargin: '1310.00',
+  openOrderInitialMargin: '0',
+  adl: 0,
+  bidNotional: '0',
+  askNotional: '0',
+  updateTime: 1793882043113,
+};
+
+export const BINANCE_RAW_SYMBOL_CONFIG_BTCUSDT: BinanceSymbolConfigRaw = {
+  symbol: 'BTCUSDT',
+  marginType: 'ISOLATED',
+  isAutoAddMargin: false,
+  leverage: 5,
+  maxNotionalValue: '100000000',
+};
+
+export const BINANCE_RAW_SYMBOL_CONFIG_ETHUSDT_ISOLATED: BinanceSymbolConfigRaw = {
+  symbol: 'ETHUSDT',
+  marginType: 'ISOLATED',
+  isAutoAddMargin: false,
+  leverage: 2,
+  maxNotionalValue: '150000000',
+};
+
+export const BINANCE_RAW_SYMBOL_CONFIG_ETHUSDT_CROSSED: BinanceSymbolConfigRaw = {
+  symbol: 'ETHUSDT',
+  marginType: 'CROSSED',
+  isAutoAddMargin: false,
+  leverage: 2,
+  maxNotionalValue: '150000000',
+};
+
+export const BINANCE_RAW_SYMBOL_CONFIG_LIST: BinanceSymbolConfigRaw[] = [
+  { symbol: 'SNTUSDT', marginType: 'CROSSED', isAutoAddMargin: false, leverage: 20, maxNotionalValue: '25000' },
+  BINANCE_RAW_SYMBOL_CONFIG_ETHUSDT_ISOLATED,
+  BINANCE_RAW_SYMBOL_CONFIG_BTCUSDT,
+];
+
+export const BINANCE_RAW_POSITION_RISK_V3_OPEN_CROSS: BinancePositionRiskRaw = {
+  symbol: 'ETHUSDT',
+  positionSide: 'BOTH',
+  positionAmt: '0.010',
+  entryPrice: '2405.63',
+  breakEvenPrice: '2406.592252',
+  markPrice: '2405.27000000',
+  unRealizedProfit: '-0.00360000',
+  liquidationPrice: '0',
+  isolatedMargin: '0',
+  notional: '24.05270000',
+  marginAsset: 'USDT',
+  isolatedWallet: '0',
+  initialMargin: '12.02635000',
+  maintMargin: '0.12026350',
+  positionInitialMargin: '12.02635000',
+  openOrderInitialMargin: '0',
+  adl: 0,
+  bidNotional: '0',
+  askNotional: '0',
+  updateTime: 1793882038915,
+};
+
+export const BINANCE_RAW_POSITION_RISK_V3_OPEN_ISOLATED: BinancePositionRiskRaw = {
+  symbol: 'ETHUSDT',
+  positionSide: 'BOTH',
+  positionAmt: '0.010',
+  entryPrice: '2405.63',
+  breakEvenPrice: '2406.592252',
+  markPrice: '2405.27000000',
+  unRealizedProfit: '-0.00360000',
+  liquidationPrice: '1209.46457487',
+  isolatedMargin: '12.01852748',
+  notional: '24.05270000',
+  marginAsset: 'USDT',
+  isolatedWallet: '12.02212748',
+  initialMargin: '12.02635000',
+  maintMargin: '0.12026350',
+  positionInitialMargin: '12.02635000',
+  openOrderInitialMargin: '0',
+  adl: 0,
+  bidNotional: '0',
+  askNotional: '0',
+  updateTime: 1793882043113,
+};
+
+export const BINANCE_RAW_POSITION_RISK_V3_ZERO_WITH_ORDER_ISOLATED: BinancePositionRiskRaw = {
+  symbol: 'ETHUSDT',
+  positionSide: 'BOTH',
+  positionAmt: '0.000',
+  entryPrice: '0.0',
+  breakEvenPrice: '0.0',
+  markPrice: '2406.93000000',
+  unRealizedProfit: '0.00000000',
+  liquidationPrice: '0',
+  isolatedMargin: '0.00000000',
+  notional: '0',
+  marginAsset: 'USDT',
+  isolatedWallet: '0',
+  initialMargin: '12.03470000',
+  maintMargin: '0',
+  positionInitialMargin: '0',
+  openOrderInitialMargin: '12.03470000',
+  adl: 0,
+  bidNotional: '24.06940000',
+  askNotional: '0',
+  updateTime: 1793882044496,
 };
 
 export const BINANCE_RAW_ORDER_RESPONSE: BinanceOrderResponseRaw = {

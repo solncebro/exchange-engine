@@ -1,3 +1,5 @@
+import type { AddIsolatedPositionMarginArgs } from '../types/exchange';
+import type { SetLeverageOptions } from '../types/exchange';
 import type {
   CancelBatchOrdersResult,
   CreateBatchOrdersResult,
@@ -5,13 +7,17 @@ import type {
   CreateOrderWebSocketArgs,
   ExchangeArgs,
   FetchIncomeArgs,
+  FetchFundingRateHistoryArgs,
   FetchPageWithLimitArgs,
   ModifyBatchOrderArgs,
   ModifyBatchOrdersResult,
   ModifyOrderArgs,
   SetLeverageResult,
 } from '../types/exchange';
-import type { Position, Order, FundingRateHistory, FundingInfo, AccountBalances, MarkPrice, OpenInterest, FeeRate, Income, ClosedPnl, LeverageTier, LeverageTierListBySymbol } from '../types/common';
+import type { AccountTrade, OrderExecutionSummary, Position, Order, FundingRateHistory, FundingInfo, AccountBalances, MarkPrice, OpenInterest, FeeRate, Income, ClosedPnl, LeverageTier, LeverageTierListBySymbol } from '../types/common';
+import type { FetchOrderExecutionSummaryArgs } from '../types/exchange';
+import { buildOrderExecutionWindowList, summarizeOrderExecutionList } from '../utils/orderExecutionSummary';
+import type { OrderExecutionEntry } from '../utils/orderExecutionSummary.types';
 import { MarginModeEnum, PositionModeEnum, OrderTypeEnum, TimeInForceEnum, TriggerByEnum } from '../types/common';
 import { ExchangeError } from '../errors/ExchangeError';
 import { isConditionalOrderType } from '../constants/orderTypes';
@@ -21,9 +27,13 @@ import {
   buildRejectedOrderOutcome,
 } from '../normalizers/batchOrderOutcome';
 import { BinanceFuturesHttpClient } from '../http/BinanceFuturesHttpClient';
-import type { BinanceOrderResponseRaw, BinanceUserTradeRaw } from '../normalizers/binanceNormalizer';
+import type { BinanceOrderResponseRaw, BinancePositionRiskRaw, BinanceUserTradeRaw } from '../normalizers/binanceNormalizer';
+import type { BinancePositionSettings } from '../normalizers/binanceNormalizer.types';
 import {
+  buildBinanceSymbolConfigSettingsBySymbol,
   normalizeBinancePosition,
+  normalizeBinancePositionLeverage,
+  normalizeBinanceAccountTrade,
   normalizeBinanceOrder,
   normalizeBinanceFundingRateHistory,
   normalizeBinanceFundingInfo,
@@ -61,6 +71,7 @@ import {
   BINANCE_ALGO_ORDER_VISIBILITY_GRACE_MS,
   BINANCE_ALGO_ORDER_VISIBILITY_ATTEMPT_COUNT,
   BINANCE_ALGO_ORDER_VISIBILITY_RETRY_DELAY_MS,
+  BINANCE_POSITION_MARGIN_DECIMAL_PLACES,
 } from '../constants/binance';
 import {
   BINANCE_ORDER_SIDE_REVERSE,
@@ -75,7 +86,7 @@ import { sleep } from '../utils/sleep';
 import { BinanceBaseClient } from './BinanceBaseClient';
 import { BaseExchangeClient } from './BaseExchangeClient';
 import { resolveTwoServiceOrderFailure } from './twoServiceOrderLookup';
-import type { AxiosLikeError, BinanceModifyBatchOrderParams, BinanceModifyOrderParams } from './BinanceFutures.types';
+import type { AxiosLikeError, BinanceModifyBatchOrderParams, BinanceModifyOrderParams, BinancePositionRiskWithSettings, BinanceUserTradeHistory } from './BinanceFutures.types';
 
 /** Условные типы, которые принимают срок действия: у них после срабатывания рождается лимит. */
 const BINANCE_ALGO_LIMIT_LIKE_ORDER_TYPE_SET: ReadonlySet<OrderTypeEnum> = new Set([
@@ -127,6 +138,14 @@ function parseBinanceErrorCode(error: unknown): number | null {
   }
 
   return code;
+}
+
+function describeErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function findSymbolListWithoutSettings(rawList: BinancePositionRiskRaw[], settingsBySymbol: Map<string, BinancePositionSettings>): string[] {
+  return [...new Set(rawList.map((raw) => raw.symbol))].filter((symbol) => !settingsBySymbol.has(symbol));
 }
 
 class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
@@ -553,7 +572,7 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
 
   async fetchFundingRateHistory(
     symbol: string,
-    options?: FetchPageWithLimitArgs,
+    options?: FetchFundingRateHistoryArgs,
   ): Promise<FundingRateHistory[]> {
     this.logger.debug(`Fetching funding rate history for ${symbol}`);
     const raw = await this.httpClient.fetchFundingRateHistory(symbol, options);
@@ -568,6 +587,12 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
     return normalizeBinanceFundingInfo(raw);
   }
 
+  async fetchPositionLeverage(symbol: string): Promise<number | null> {
+    const rawList = await this.httpClient.fetchSymbolConfig(symbol);
+
+    return normalizeBinancePositionLeverage(rawList, symbol);
+  }
+
   async fetchPositionMode(): Promise<PositionModeEnum> {
     this.logger.debug('Fetching position mode');
     const raw = await this.httpClient.fetchPositionMode();
@@ -577,14 +602,65 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
 
   async fetchPosition(symbol: string): Promise<Position> {
     this.logger.debug(`Fetching position for ${symbol}`);
-    const rawPositionList = await this.httpClient.fetchPositionRisk(symbol);
-    const position = rawPositionList.find((p) => p.symbol === symbol);
+    const positionRisk = await this.readPositionRiskWithSettings(symbol);
+    const position = positionRisk.positionRiskList.find((p) => p.symbol === symbol);
 
     if (!position) {
       throw new Error(`Position not found for ${symbol}`);
     }
 
-    return normalizeBinancePosition(position);
+    this.warnAboutSymbolListWithoutSettings([position], positionRisk);
+
+    return this.normalizePositionWithSettings(position, positionRisk.settingsBySymbol);
+  }
+
+  private async readPositionRiskWithSettings(symbol: string | undefined): Promise<BinancePositionRiskWithSettings> {
+    const [positionRiskResult, symbolConfigResult] = await Promise.allSettled([
+      this.httpClient.fetchPositionRisk(symbol),
+      this.httpClient.fetchSymbolConfig(symbol),
+    ]);
+
+    if (positionRiskResult.status === 'rejected') {
+      throw positionRiskResult.reason;
+    }
+
+    return {
+      positionRiskList: positionRiskResult.value,
+      settingsBySymbol: symbolConfigResult.status === 'fulfilled'
+        ? buildBinanceSymbolConfigSettingsBySymbol(symbolConfigResult.value)
+        : new Map<string, BinancePositionSettings>(),
+      symbolConfigFailureReason: symbolConfigResult.status === 'rejected'
+        ? describeErrorMessage(symbolConfigResult.reason)
+        : null,
+    };
+  }
+
+  // Вторая версия списка риска не используется: Binance объявила третью версию её заменой, а плечо
+  // и режим маржи живут только в настройке символа. Без неё они «неизвестны» до следующего чтения.
+  // Предупреждение строится по тому сырому списку, который путь чтения нормализует: пустые ячейки
+  // символов с одними заявками отсеиваются раньше и в предупреждение не попадают.
+  private warnAboutSymbolListWithoutSettings(rawList: BinancePositionRiskRaw[], positionRisk: BinancePositionRiskWithSettings): void {
+    const symbolList = findSymbolListWithoutSettings(rawList, positionRisk.settingsBySymbol);
+
+    if (symbolList.length === 0) {
+      return;
+    }
+
+    const symbolListText = symbolList.join(', ');
+
+    if (positionRisk.symbolConfigFailureReason !== null) {
+      this.logger.warn(
+        `[Binance] /fapi/v1/symbolConfig failed (${positionRisk.symbolConfigFailureReason}): leverage and margin mode of ${symbolListText} are unknown`,
+      );
+
+      return;
+    }
+
+    this.logger.warn(`[Binance] /fapi/v1/symbolConfig has no ${symbolListText}: leverage and margin mode are unknown`);
+  }
+
+  private normalizePositionWithSettings(raw: BinancePositionRiskRaw, settingsBySymbol: Map<string, BinancePositionSettings>): Position {
+    return normalizeBinancePosition(raw, settingsBySymbol.get(raw.symbol) ?? null);
   }
 
   async fetchPositionSnapshot(symbol: string, positionIdx?: number): Promise<Position | null> {
@@ -596,8 +672,15 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
     }
 
     this.logger.debug(`Fetching position snapshot for ${symbol} (positionIdx=${positionIdx ?? 'any'})`);
-    const rawPositionList = await this.httpClient.fetchPositionRisk(symbol);
-    const filteredList = rawPositionList.filter((p) => p.symbol === symbol);
+    const positionRisk = await this.readPositionRiskWithSettings(symbol);
+    const filteredList = positionRisk.positionRiskList.filter((p) => p.symbol === symbol);
+    let targetSide = 'BOTH';
+
+    if (positionIdx === 1) {
+      targetSide = 'LONG';
+    } else if (positionIdx === 2) {
+      targetSide = 'SHORT';
+    }
 
     if (filteredList.length === 0) {
       return null;
@@ -619,42 +702,54 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
         return null;
       }
 
-      return normalizeBinancePosition(both);
+      this.warnAboutSymbolListWithoutSettings([both], positionRisk);
+
+      return this.normalizePositionWithSettings(both, positionRisk.settingsBySymbol);
     }
 
-    const targetSide = positionIdx === 1 ? 'LONG' : 'SHORT';
     const matched = filteredList.find((p) => p.positionSide === targetSide);
 
     if (!matched) {
       return null;
     }
 
-    return normalizeBinancePosition(matched);
+    this.warnAboutSymbolListWithoutSettings([matched], positionRisk);
+
+    return this.normalizePositionWithSettings(matched, positionRisk.settingsBySymbol);
   }
 
   async fetchPositionList(symbol: string): Promise<Position[]> {
     this.logger.debug(`Fetching position list for ${symbol}`);
-    const rawPositionList = await this.httpClient.fetchPositionRisk(symbol);
-    const filteredList = rawPositionList.filter((p) => p.symbol === symbol);
+    const positionRisk = await this.readPositionRiskWithSettings(symbol);
+    const filteredList = positionRisk.positionRiskList.filter((p) => p.symbol === symbol);
 
-    return filteredList.map(normalizeBinancePosition);
+    this.warnAboutSymbolListWithoutSettings(filteredList, positionRisk);
+
+    return filteredList.map((raw) => this.normalizePositionWithSettings(raw, positionRisk.settingsBySymbol));
   }
 
   async fetchAllPositions(): Promise<Position[]> {
     this.logger.debug('[Binance] Fetching all positions');
-    const rawPositionList = await this.httpClient.fetchPositionRisk(undefined);
+    const positionRisk = await this.readPositionRiskWithSettings(undefined);
+    const openPositionRiskList = positionRisk.positionRiskList.filter((raw) => Math.abs(parseFloat(raw.positionAmt)) > 0);
 
-    return rawPositionList
-      .filter((raw) => Math.abs(parseFloat(raw.positionAmt)) > 0)
-      .map(normalizeBinancePosition);
+    this.warnAboutSymbolListWithoutSettings(openPositionRiskList, positionRisk);
+
+    return openPositionRiskList.map((raw) => this.normalizePositionWithSettings(raw, positionRisk.settingsBySymbol));
   }
 
-  async setLeverage(leverage: number, symbol: string): Promise<SetLeverageResult> {
+  async addIsolatedPositionMargin(args: AddIsolatedPositionMarginArgs): Promise<void> {
+    const amount = this.formatIsolatedPositionMarginAmount(args.amount, BINANCE_POSITION_MARGIN_DECIMAL_PLACES);
+
+    await this.httpClient.addIsolatedPositionMargin({ symbol: args.symbol, positionSide: args.positionSide, amount });
+  }
+
+  async setLeverage(leverage: number, symbol: string, _options?: SetLeverageOptions): Promise<SetLeverageResult> {
     this.logger.info(`Setting leverage to ${leverage}x for ${symbol}`);
     const raw = await this.httpClient.setLeverage(symbol, leverage);
     // Подтверждение — ТОЛЬКО значение из ответа /fapi/v1/leverage. Ответ без числа не превращается
     // в эхо запроса: вызывающий должен увидеть «не подтверждено» и не полагаться на такое плечо.
-    const confirmed = Number((raw as { leverage?: unknown }).leverage);
+    const confirmed = Number(raw.leverage);
 
     // Плечо всегда ≥ 1: Number(null) даёт 0, и без нижней границы пустое поле сошло бы за факт.
     return { confirmedLeverage: Number.isFinite(confirmed) && confirmed >= 1 ? confirmed : null };
@@ -1014,6 +1109,20 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
     return normalizeBinanceIncomeList(rawList);
   }
 
+  async fetchAccountTrades(symbol: string, options: FetchPageWithLimitArgs): Promise<AccountTrade[]> {
+    const { startTime, endTime } = options;
+
+    if (symbol.trim().length === 0 || startTime === undefined || endTime === undefined
+      || !Number.isFinite(startTime) || !Number.isFinite(endTime) || startTime < 0
+      || endTime < startTime || endTime - startTime > 7 * 24 * 60 * 60 * 1000) {
+      throw new Error('Binance account trades require a symbol and an explicit time window of at most seven days');
+    }
+
+    const rawList = await this.fetchCompleteUserTradeHistory(symbol, { startTime, endTime });
+
+    return rawList.map(normalizeBinanceAccountTrade);
+  }
+
   /**
    * Готовой ручки «итоги закрытия» у Binance нет — собираем их из собственных сделок счёта.
    * Раньше метод не существовал вовсе: базовый класс просто отказывал, и потребитель писал
@@ -1029,8 +1138,17 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
     this.logger.debug(`[Binance] Building closed PnL for ${symbol ?? 'the whole account'} from account trades`);
     // Символ необязателен — проверено живым запросом 08.08.2026: без него вход отвечает
     // сделками всего счёта. Соседняя биржа тоже позволяет его не называть.
-    const rawList = await this.fetchUserTradeHistory(symbol, options);
-    const closedPnlList = buildBinanceClosedPnlList(rawList);
+    const history = await this.fetchUserTradeHistory(symbol, options);
+
+    // Итог закрытия нужен отчётам и журналу даже по очень занятому счёту, поэтому здесь упор в
+    // потолок страниц не отказ, а предупреждение; точным потребителям — fetchCompleteUserTradeHistory.
+    if (!history.isComplete) {
+      this.logger.warn(
+        `[Binance] Account trade history for ${symbol ?? 'the whole account'} hit the ${USER_TRADE_MAX_PAGE_COUNT}-page ceiling — the closed PnL below may be incomplete`,
+      );
+    }
+
+    const closedPnlList = buildBinanceClosedPnlList(history.tradeList);
 
     if (options?.limit === undefined || closedPnlList.length <= options.limit) {
       return closedPnlList;
@@ -1043,15 +1161,31 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
     return closedPnlList.filter((row) => keptSet.has(row));
   }
 
+  async fetchOrderExecutionSummary(args: FetchOrderExecutionSummaryArgs): Promise<OrderExecutionSummary> {
+    const executionList: OrderExecutionEntry[] = [];
+
+    for (const window of buildOrderExecutionWindowList(args)) {
+      const rawList = await this.fetchCompleteUserTradeHistory(args.symbol, window, args.orderId);
+
+      if (rawList.some(raw => !/^\d+$/.test(String(raw.id)) || (typeof raw.id === 'number' && !Number.isSafeInteger(raw.id)))) {
+        throw new Error('Unconfirmed order execution identifier');
+      }
+
+      executionList.push(...rawList.map(raw => ({ id: String(raw.id), symbol: raw.symbol, orderId: String(raw.orderId), amount: Number(raw.qty), price: Number(raw.price), quoteAmount: Number(raw.quoteQty), feeAmount: raw.commission === undefined || raw.commission === '' ? null : Number(raw.commission), feeAsset: raw.commissionAsset?.trim() ? raw.commissionAsset : null, timeMs: raw.time })));
+    }
+
+    return summarizeOrderExecutionList({ ...args, executionList });
+  }
+
   /**
    * Все исполнения счёта за окно. С указанным началом окна идём постранично: биржа отдаёт не
    * больше USER_TRADE_PAGE_SIZE строк за раз, а одна закрывающая заявка на неликвиде столько и
    * даёт. Следующая страница адресуется номером сделки — окно времени с ним сочетать нельзя
    * (запрет документации биржи), поэтому конец окна досекаем у себя.
    */
-  private async fetchUserTradeHistory(symbol?: string, options?: FetchPageWithLimitArgs): Promise<BinanceUserTradeRaw[]> {
+  private async fetchUserTradeHistory(symbol?: string, options?: FetchPageWithLimitArgs, orderId?: string): Promise<BinanceUserTradeHistory> {
     if (options?.startTime === undefined) {
-      return this.httpClient.fetchUserTrades({ symbol, endTime: options?.endTime, limit: USER_TRADE_PAGE_SIZE });
+      return { tradeList: await this.httpClient.fetchUserTrades({ symbol, endTime: options?.endTime, limit: USER_TRADE_PAGE_SIZE }), isComplete: true };
     }
 
     const collectedList: BinanceUserTradeRaw[] = [];
@@ -1061,8 +1195,8 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
     for (let pageIndex = 0; pageIndex < USER_TRADE_MAX_PAGE_COUNT; pageIndex++) {
       const pageList = await this.httpClient.fetchUserTrades(
         fromId === undefined
-          ? { symbol, startTime: options.startTime, endTime: options.endTime, limit: USER_TRADE_PAGE_SIZE }
-          : { symbol, fromId, limit: USER_TRADE_PAGE_SIZE },
+          ? { symbol, startTime: options.startTime, endTime: options.endTime, limit: USER_TRADE_PAGE_SIZE, ...(orderId === undefined ? {} : { orderId }) }
+          : { symbol, fromId, limit: USER_TRADE_PAGE_SIZE, ...(orderId === undefined ? {} : { orderId }) },
       );
 
       const windowEnd = options.endTime ?? Number.POSITIVE_INFINITY;
@@ -1078,7 +1212,7 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
         const id = String(raw.id);
 
         if (/^\d+$/.test(id)) {
-          if (seenIdSet.has(id)) {
+          if (seenIdSet.has(id) && orderId === undefined) {
             continue;
           }
 
@@ -1091,7 +1225,7 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
       // Страница по номеру конца окна не знает: биржа отбирает по нему только первую страницу.
       // Как только исполнения перешагнули конец, дальше заведомо только более поздние.
       if (pageList.length < USER_TRADE_PAGE_SIZE || hasPassedWindowEnd) {
-        return collectedList;
+        return { tradeList: collectedList, isComplete: true };
       }
 
       const lastId = pageList.reduce((latest, raw) => {
@@ -1106,20 +1240,25 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
         return candidate > latest ? candidate : latest;
       }, 0n);
 
-      // Без номера следующую страницу не адресовать — дальше идти нечем, отдаём собранное.
-      if (lastId <= 0n) {
-        return collectedList;
+      if (lastId <= 0n || (fromId !== undefined && lastId < BigInt(fromId))) {
+        throw new Error('Binance account trade history pagination did not advance');
       }
 
       const nextId = lastId + 1n;
       fromId = nextId <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(nextId) : String(nextId);
     }
 
-    this.logger.warn(
-      `[Binance] Account trade history for ${symbol ?? 'the whole account'} hit the ${USER_TRADE_MAX_PAGE_COUNT}-page ceiling — the closed PnL below may be incomplete`,
-    );
+    return { tradeList: collectedList, isComplete: false };
+  }
 
-    return collectedList;
+  private async fetchCompleteUserTradeHistory(symbol: string, options: FetchPageWithLimitArgs, orderId?: string): Promise<BinanceUserTradeRaw[]> {
+    const history = await this.fetchUserTradeHistory(symbol, options, orderId);
+
+    if (!history.isComplete) {
+      throw new Error(`Binance account trade history exceeded the ${USER_TRADE_MAX_PAGE_COUNT}-page completeness limit`);
+    }
+
+    return history.tradeList;
   }
 
   async setPositionMode(mode: PositionModeEnum): Promise<void> {

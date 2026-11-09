@@ -144,12 +144,16 @@ interface FetchSubAccountBalancesArgs {
 | `fetchBalances` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `fetchFeeRate` | ✅ | ❌ | ✅ | ✅ | ⚠️ | ⚠️ |
 | `fetchIncome` | ✅ | ❌ | ✅ | ✅ | ✅ | ✅ |
+| `fetchAccountTrades` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | `fetchClosedPnl` | ✅ | ❌ | ✅ | ✅ | ✅ | ❌ |
+| `fetchOrderExecutionSummary` | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ |
 | `getRateLimitState` | ✅ | ✅ | ⚠️ | ⚠️ | ⚠️ | ⚠️ |
 | `fetchPosition` | ✅ | ❌ | ✅ | ❌ | ✅ | ❌ |
 | `fetchPositionSnapshot` | ✅ | ❌ | ✅ | ❌ | ✅ | ❌ |
 | `fetchPositionList` | ✅ | ❌ | ✅ | ❌ | ✅ | ❌ |
 | `fetchAllPositions` | ✅ | ❌ | ✅ | ❌ | ✅ | ❌ |
+| `fetchPositionLeverage` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| `addIsolatedPositionMargin` | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ |
 | `fetchPositionMode` | ✅ | ❌ | ✅ | ❌ | ✅ | ❌ |
 | `setPositionMode` | ✅ | ❌ | ✅ | ❌ | ✅ | ❌ |
 | `setLeverage` | ✅ | ❌ | ✅ | ❌ | ✅ | ❌ |
@@ -905,6 +909,35 @@ fetchIncome(options?: FetchIncomeArgs): Promise<Income[]>
 
 ---
 
+### `fetchPositionLeverage()`
+
+```typescript
+fetchPositionLeverage(symbol: string): Promise<number | null>
+```
+
+Reads the currently configured Binance Futures leverage from symbol configuration, independently of positionRisk. Positive finite numeric values are returned; absent, invalid, foreign-symbol or ambiguous data returns `null`. Request failures throw. Other clients return `null` without a request. This method does not change leverage. Routine Binance Futures position reads (`fetchPosition`, `fetchPositionSnapshot`, `fetchPositionList`, `fetchAllPositions`) read the same symbol configuration themselves, so their `Position.leverage` and `Position.marginMode` already come from the exchange; when that configuration fails or lacks the symbol, the position is returned with `leverage` 0 and `marginMode` `null` (unknown) and one warning is logged — there is no second source. This method is for reading the leverage alone, without a position read.
+
+### `fetchAccountTrades()`
+
+```typescript
+fetchAccountTrades(symbol: string, options: FetchPageWithLimitArgs): Promise<AccountTrade[]>
+```
+
+Binance Futures: all opening and closing executions in an explicit window of at most seven days. Both time boundaries and symbol are required. `limit` does not truncate executions. Each row has an exact string `id`, `symbol`, trade `side`, optional `positionSide`, `quantity`, `price`, and `timestamp`. Unknown position sides remain absent. Pagination failures and completeness limits throw instead of returning partial history. Other clients explicitly reject the method.
+
+### `fetchOrderExecutionSummary()`
+
+```typescript
+fetchOrderExecutionSummary(args: FetchOrderExecutionSummaryArgs): Promise<OrderExecutionSummary>
+```
+
+Сводка исполнений одной заявки за явное окно времени. Поддержан Binance Futures и Bybit Linear; остальные клиенты явно отказывают. Окно разбивается на участки до семи суток, каждый дочитывается до конца. Результат — сумма исполненного количества и время первого и последнего исполнения, без подмены временем изменения заявки. Проверяются принадлежность символу и заявке, положительное количество, время внутри окна, отсутствие противоречащих повторов и завершение листания. Ошибка страницы, упор в потолок страниц, конфликт повторов или неверные данные прерывают чтение исключением. Пустой полный ответ даёт `executionList: []`, нулевое количество и неизвестное время — это не подтверждение отсутствия исполнения. `quoteAmount`, `averagePrice` и `feeAmountByAsset` считаются только из исполнений; неизвестная комиссия или её валюта остаётся `null`.
+
+| Биржа | Futures | Spot |
+|---|:---:|:---:|
+| Binance | ✅ | ❌ |
+| Bybit | ✅ | ❌ |
+
 ### `fetchClosedPnl()`
 
 ```typescript
@@ -969,6 +1002,8 @@ fetchPosition(symbol: string): Promise<Position>
 
 **Возврат:** `Position` — текущая позиция.
 
+**Режим маржи и плечо позиции (все методы чтения позиций).** Binance Futures: вместе со списком риска (`/fapi/v3/positionRisk`) параллельно читается настройка символа `/fapi/v1/symbolConfig` (вес 5), и `marginMode` с `leverage` берутся из неё — сам v3 этих полей не присылает. Второго источника нет: вторая версия списка риска не используется (Binance объявила v3 её заменой, извещение от 06.08.2024). Если настройка отказала или символа в ней нет, позиция всё равно возвращается — с «неизвестными» плечом и режимом: `leverage` 0, `marginMode` `null`; в журнал — одно предупреждение на вызов со списком таких символов (`[Binance] /fapi/v1/symbolConfig failed (…): leverage and margin mode of … are unknown` или `[Binance] /fapi/v1/symbolConfig has no …: leverage and margin mode are unknown`); следующее удачное чтение даёт настоящие значения. Отказ самого `/fapi/v3/positionRisk` — отказ чтения. Режим «по `isolatedWallet`» не подставляется. Bybit Linear: плечо — из поля `leverage` самой записи `/v5/position/list`, режим маржи — параллельно читается `/v5/account/info`. У классического счёта (`unifiedMarginStatus` 1) режим каждой позиции берётся из `tradeMode` её ячейки (0 — общая, 1 — изолированная); у единого — по режиму счёта: `ISOLATED_MARGIN` — изолированная, `REGULAR_MARGIN` и `PORTFOLIO_MARGIN` — общая (по документации Bybit «In cross margin and portifolio margin modes, margin is shared among all trades», https://bybit-exchange.github.io/docs/v5/acct-mode). Иной или отсутствующий режим единого счёта при чтении позиций даёт `marginMode` `null` (неизвестно) и одно предупреждение на вызов (`[Bybit] margin mode of the unified account is unknown (marginMode=…): positions of … are read with an unknown margin mode`), а при установке плеча с направлением и `setMarginMode` — отказ `ExchangeError` с кодом `MARGIN_MODE_UNKNOWN` до записи: поле `tradeMode` у единого счёта устарело и всегда 0, и подстановка по нему назвала бы изолированную позицию общей. У классического счёта `tradeMode` ячейки не 0 и не 1 тоже даёт `null`, но без предупреждения в журнал. Клиент запоминает последние успешно прочитанные сведения о счёте (и режим, записанный своим успешным `setMarginMode`); если `/v5/account/info` отказал при чтении позиций, режим берётся из запомненного с предупреждением в журнале — это значение счёта, прочитанное раньше, и смену режима в обход библиотеки после него оно не отражает. Нет запомненного (первое чтение клиента) — позиции читаются с `marginMode` `null` и предупреждением `[Bybit] /v5/account/info failed (…) and nothing is remembered yet: positions are read with an unknown margin mode`. Установка плеча с направлением и `setMarginMode` запомненным не пользуются: отказ сведений о счёте — отказ записи. При портфельной марже Bybit плечо позиции не отдаёт — поле приходит пустой строкой («for portfolio margin mode, this field returns "", which means leverage rules are invalid»), и `Position.leverage` тогда 0: это «биржа плеча не сообщила», а не настоящее плечо (живьём не проверялось — портфельной маржи на демо-счёте нет).
+
 | Биржа | Futures | Spot |
 |---|:---:|:---:|
 | Binance | ✅ | ❌ |
@@ -995,6 +1030,8 @@ fetchPositionSnapshot(symbol: string, positionIdx?: number): Promise<Position | 
 | `positionIdx` | `number` | нет | Сторона в режиме хеджирования: `1` — длинная, `2` — короткая. В одностороннем режиме не нужен; в режиме хеджирования без него метод отказывает с ошибкой (Binance Futures, Bybit Linear, OKX Swap) |
 
 **Возврат:** `Promise<Position | null>`.
+
+**Пустая ячейка у Binance Futures.** Снимок строится только по `/fapi/v3/positionRisk`, а он отдаёт символ, только пока по нему есть позиция или открытые заявки. Если по символу нет ни того, ни другого, снимок — `null`: отдельного чтения пустой ячейки нет. Запрошенная сторона, которой нет в ответе, тоже даёт `null`. Доказательство: `src/http/BinanceFuturesHttpClient.ts:197`, `src/exchanges/BinanceFutures.ts:685`, `src/exchanges/BinanceFutures.ts:701`, `src/exchanges/BinanceFutures.ts:710`.
 
 Только фьючерсные рынки (Binance Futures, Bybit Linear, OKX Swap). На спотовых — ошибка `Not supported for spot market`.
 
@@ -1024,13 +1061,26 @@ fetchPositionList(symbol: string): Promise<Position[]>
 fetchAllPositions(): Promise<Position[]>
 ```
 
-Все открытые позиции счёта одним запросом, без перебора инструментов. Нужен при восстановлении состояния после перезапуска процесса.
+Все открытые позиции счёта, без перебора инструментов. Нужен при восстановлении состояния после перезапуска процесса. Bybit Linear читает список страницами по 200 позиций по курсору до пустой страницы (по документации страница по умолчанию — 20 позиций); биржа ставит непустой курсор и на последней заполненной странице, поэтому даже короткий список — два запроса списка плюс сведения о счёте.
 
 **Возврат:** `Promise<Position[]>`.
 
 Только фьючерсные рынки. На спотовых — ошибка `Not supported for spot market`.
 
 ---
+
+### `addIsolatedPositionMargin()`
+
+```typescript
+addIsolatedPositionMargin(args: AddIsolatedPositionMarginArgs): Promise<void>
+```
+
+Увеличивает изолированную маржу позиции. Binance Futures и Bybit Linear; остальные рынки явно отказывают. Запрос не повторяется при сетевой ошибке или неизвестном исходе; у Binance подтверждённый отказ из-за устаревшей временной отметки обрабатывается общим механизмом подписи. После неизвестного исхода вызывающий обязан заблокировать повтор и сверить состояние вручную: собственного ключа однократности у запроса нет. Сумма усекается по своей кратчайшей десятичной записи (лишние знаки отбрасываются, без деления на шаг в плавающей точке) и уходит десятичной строкой без показательной записи: у Bybit — до 4 знаков после точки, у Binance — до 8; сумма, ставшая после усечения нулём, — отказ до запроса, как и нулевая; число от `1e21` десятичной записи не имеет — отказ до запроса. Например, `12.3 * 0.1` уходит как `1.23`, а не `1.2300000000000002`; `874544608.19717` у Bybit — `874544608.1971`, а не `874544608.1971701`; `1e15` — `1000000000000000`; `1e-7` у Binance уходит как `0.0000001`, у Bybit — отказ. У Bybit сторона позиции переводится в номер ячейки (`Both` → 0, `Long` → 1, `Short` → 2); по документации Bybit запрос работает только для позиции в изолированной марже и принимает не больше 4 знаков после точки («Support up to 4 decimal»). Живые отказы демо-счёта 05.11.2026 приходят ошибкой `ExchangeError` с кодом `10001`: сумма с пятью знаками — «params error: margin only supports 4 decimal places» (после усечения библиотека такую сумму не отправляет), ячейка `Long` в одностороннем режиме — «position idx(1) not match position mode(0) in symbol(6)».
+
+| Биржа | Futures | Spot |
+|---|:---:|:---:|
+| Binance | ✅ | ❌ |
+| Bybit | ✅ | ❌ |
 
 ### `fetchPositionMode()`
 
@@ -1101,7 +1151,7 @@ fetchAllLeverageTierList(): Promise<LeverageTierListBySymbol>
 Читают ступени плеча одного инструмента или всех инструментов. Список отсортирован по
 возрастанию верхней границы размера позиции. `LeverageTierListBySymbol` — карта символов
 на списки ступеней. На споте оба метода отвечают отказом «Not supported».
-Доказательство: `src/types/exchange.ts:243`, `src/exchanges/BaseExchangeClient.ts:407`.
+Доказательство: `src/types/exchange.ts:256`, `src/exchanges/BaseExchangeClient.ts:435`.
 
 | Поле ступени | Смысл |
 |---|---|
@@ -1111,13 +1161,13 @@ fetchAllLeverageTierList(): Promise<LeverageTierListBySymbol>
 | `initialMarginRate` | Ставка начальной маржи из биржевых данных; при отсутствии — `null` |
 | `maintenanceMarginRate` | Ставка поддерживающей маржи из биржевых данных; при отсутствии — `null` |
 
-Доказательство структуры: `src/types/common.ts:297`. Ставки для показа человеку переводятся
+Доказательство структуры: `src/types/common.ts:299`. Ставки для показа человеку переводятся
 в проценты умножением на сто. Верхнюю границу OKX вызывающий переводит в стоимость по цене
 инструмента; перед чтением одного символа OKX нужно загрузить инструменты. Обход всех символов
 OKX загружает инструменты сам, если карта пуста, и запрашивает каждое семейство один раз
 в режиме общей маржи. Binance требует подписанного запроса, Bybit дочитывает страницы.
-Доказательство: `src/exchanges/OkxSwap.ts:304`, `src/http/BinanceFuturesHttpClient.ts:194`,
-`src/http/BybitHttpClient.ts:499`.
+Доказательство: `src/exchanges/OkxSwap.ts:321`, `src/http/BinanceFuturesHttpClient.ts:200`,
+`src/http/BybitHttpClient.ts:580`.
 
 ---
 
@@ -1127,7 +1177,7 @@ OKX загружает инструменты сам, если карта пус
 setMarginMode(marginMode: MarginModeEnum, symbol: string): Promise<void>
 ```
 
-Устанавливает режим маржи (Isolated / Cross).
+Устанавливает режим маржи (Isolated / Cross). У Bybit режим единого счёта — свойство всего счёта. Метод сначала читает `/v5/account/info` и позиции символа и ничего не пишет, если режим уже нужный. Режим решается по символу — так же, как у установки плеча с направлением (чтения позиций решают по каждой ячейке отдельно): у классического счёта — по `tradeMode` ячеек символа, если у всех он одинаковый 0 или 1, у единого — по режиму счёта (`PORTFOLIO_MARGIN` считается общей маржой, поэтому запрос `Cross` его не переключает). Отказы до записи (`ExchangeError`): текущий режим не определён (единый счёт с неизвестным или отсутствующим режимом, классический счёт с расходящимися по `tradeMode` ячейками символа, без них или с `tradeMode` не 0 и не 1) — `MARGIN_MODE_UNKNOWN`, вслепую режим счёта не переключается; счёт в портфельной марже и запрос `Isolated` — `PORTFOLIO_MARGIN_SWITCH_REFUSED`: перевод вывел бы из портфельной маржи весь счёт, а вернуть её библиотека не умеет — переводить вручную.
 
 | Параметр | Тип | Обязательный | Описание |
 |---|---|:---:|---|
@@ -1146,7 +1196,7 @@ setMarginMode(marginMode: MarginModeEnum, symbol: string): Promise<void>
 ```typescript
 fetchFundingRateHistory(
   symbol: string,
-  options?: FetchPageWithLimitArgs,
+  options?: FetchFundingRateHistoryArgs,
 ): Promise<FundingRateHistory[]>
 ```
 
@@ -1155,9 +1205,11 @@ fetchFundingRateHistory(
 | Параметр | Тип | Обязательный | Описание |
 |---|---|:---:|---|
 | `symbol` | `string` | да | Торговый символ |
-| `options` | `FetchPageWithLimitArgs` | нет | `startTime`, `endTime`, `limit` |
+| `options` | `FetchFundingRateHistoryArgs` | нет | `startTime`, `endTime`, `limit`, `shouldIncludeMarkPrices` |
 
 **Возврат:** `FundingRateHistory[]` — массив `{ symbol, fundingRate, fundingTime, markPrice }`.
+
+`shouldIncludeMarkPrices: true` у Bybit запрашивает для каждого начисления цену открытия минутного kline цены маркировки с тем же временем начала — открытыми запросами без подписи, с паузой 60 мс между ними. По умолчанию этих дополнительных запросов нет. Если точная запись недоступна, `markPrice` остаётся `null`.
 
 | Биржа | Futures | Spot |
 |---|:---:|:---:|
@@ -2210,6 +2262,8 @@ interface Ticker {
 
 Опциональные поля `markPrice`, `indexPrice`, `fundingRate`, `nextFundingTime` заполняются Bybit tickers для linear-контрактов — Binance их не возвращает в tickers-эндпоинте (используйте `fetchMarkPrice` отдельно).
 
+`timestamp` у Bybit — время ответа биржи: поле `time` ответа `/v5/market/tickers` (у записей списка своего времени нет) или `ts` кадра потока `tickers.{symbol}`; местное время машины подставляется, только если биржа не прислала ни того, ни другого. У Binance — правый край окна суток (`closeTime`).
+
 #### `Kline`
 
 ```typescript
@@ -2335,13 +2389,17 @@ interface TradingFunding {
 interface Position {
   symbol: string;
   side: PositionSideEnum;
+  direction: 'long' | 'short' | null;
   contracts: number;
   entryPrice: number;
   markPrice: number;
   unrealizedPnl: number;
-  leverage: number;
-  marginMode: MarginModeEnum;
+  leverage: number; // 0 — биржа плеча не сообщила
+  marginMode: MarginModeEnum | null; // null — режим неизвестен
   liquidationPrice: number;
+  positionIdx?: number;
+  openedAtMs?: number;
+  updatedAtMs?: number;
   info: Record<string, unknown>; // raw-данные биржи
 }
 ```
@@ -2352,7 +2410,7 @@ interface Position {
 WebSocket сохраняют исходные цифры без округления; не преобразовывайте их в обычное число.
 То же правило действует при постраничном чтении исполнений Binance.
 Доказательство: `src/utils/parseJsonPreservingLargeIntegers.ts:5`,
-`src/normalizers/binanceNormalizer.ts:734`, `src/exchanges/BinanceFutures.ts:1097`.
+`src/normalizers/binanceNormalizer.ts:771`, `src/exchanges/BinanceFutures.ts:1241`.
 
 ```typescript
 interface Order {
@@ -2360,6 +2418,7 @@ interface Order {
   clientOrderId: string;
   symbol: string;
   side: OrderSideEnum;
+  positionSide?: PositionSideEnum;
   type: OrderTypeEnum;
   timeInForce: TimeInForceEnum;
   price: number;
@@ -2577,6 +2636,7 @@ interface FeeRate {
 ```typescript
 interface Income {
   symbol: string;
+  positionSide?: PositionSideEnum;
   incomeType: string;
   /** Тот же вид, общими словами: по нему потребитель раскладывает ОДИН ответ на три потока. */
   kind: IncomeKind;
@@ -2599,6 +2659,8 @@ interface ClosedPnl {
   symbol: string;
   orderId: string;
   side: OrderSideEnum;
+  positionSide?: PositionSideEnum;
+  isTradingFeeComplete?: boolean;
   quantity: number;
   entryPrice: number;
   exitPrice: number;
@@ -2607,7 +2669,48 @@ interface ClosedPnl {
 }
 ```
 
-`closedPnl` — чистый после торговых комиссий, без фандинга (см. `fetchClosedPnl()`).
+`isTradingFeeComplete: false` предупреждает, что часть торговых комиссий неизвестна; итог вычитает лишь известные комиссии. Отсутствие признака не подтверждает полноту. Binance сохраняет сторону позиции из исполнений и учитывает комиссию в долларовых активах `USDT`, `USDC`, `BNFCR` (`BINANCE_USD_COMMISSION_ASSET_LIST`); иной актив (например BNB) даёт `isTradingFeeComplete = false`.
+
+`closedPnl` — чистый после известных торговых комиссий, без фандинга (см. `fetchClosedPnl()`).
+
+#### `AccountTrade`
+
+```typescript
+interface AccountTrade {
+  id: string; // точный строковый номер исполнения
+  symbol: string;
+  side: OrderSideEnum;
+  positionSide?: PositionSideEnum;
+  quantity: number;
+  price: number;
+  timestamp: number;
+}
+```
+
+#### `OrderExecution` и `OrderExecutionSummary`
+
+```typescript
+interface OrderExecution {
+  executionId: string;
+  orderId: string;
+  amount: number;
+  price: number;
+  quoteAmount: number;
+  feeAmount: number | null;
+  feeAsset: string | null;
+  timestamp: number;
+}
+
+interface OrderExecutionSummary {
+  executionList?: OrderExecution[];
+  quoteAmount?: number;
+  averagePrice?: number | null;
+  feeAmountByAsset?: Record<string, number>;
+  filledAmount: number;
+  firstFillTimeMs?: number | null;
+  lastFillTimeMs: number | null;
+}
+```
 
 #### `WebSocketConnectionInfo`
 
@@ -2765,6 +2868,43 @@ interface FetchPageWithLimitArgs {
   startTime?: number;
   endTime?: number;
   limit?: number;
+}
+```
+
+#### `FetchFundingRateHistoryArgs`
+
+```typescript
+interface FetchFundingRateHistoryArgs extends FetchPageWithLimitArgs {
+  shouldIncludeMarkPrices?: boolean;
+}
+```
+
+#### `AddIsolatedPositionMarginArgs`
+
+```typescript
+interface AddIsolatedPositionMarginArgs {
+  symbol: string;
+  positionSide: PositionSideEnum;
+  amount: number; // конечная, положительная, в валюте маржи
+}
+```
+
+#### `FetchOrderExecutionSummaryArgs`
+
+```typescript
+interface FetchOrderExecutionSummaryArgs {
+  symbol: string;
+  orderId: string;
+  startTime: number; // целое, миллисекунды
+  endTime: number;   // целое, миллисекунды
+}
+```
+
+#### `SetLeverageOptions`
+
+```typescript
+interface SetLeverageOptions {
+  direction?: 'long' | 'short';
 }
 ```
 
@@ -2933,3 +3073,7 @@ try {
   }
 }
 ```
+
+
+Опциональный третий параметр метода установки плеча: `SetLeverageOptions` с полем `direction?: 'long' | 'short'`. Bybit сохраняет встречную сторону при изолированной двусторонней марже, при общей марже меняет обе. Binance и OKX сохраняют прежнее общее поведение. У Bybit отказ до записи (`ExchangeError`): режим не определён (неизвестный или отсутствующий режим единого счёта; у классического счёта ячейки символа расходятся по `tradeMode`, их нет или `tradeMode` не 0 и не 1) — `MARGIN_MODE_UNKNOWN`; портфельная маржа — `LEVERAGE_PORTFOLIO_MARGIN_UNSUPPORTED` (документация Bybit о плече позиции при портфельной марже: «leverage rules are invalid», https://bybit-exchange.github.io/docs/v5/position); неполная пара ячеек при изолированной марже — `LEVERAGE_POSITION_MODE_UNKNOWN`; нечитаемое плечо встречной стороны — `LEVERAGE_OPPOSITE_SIDE_UNKNOWN`.
+

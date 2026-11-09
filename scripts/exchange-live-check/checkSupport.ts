@@ -1,3 +1,6 @@
+import { describeError } from '../live-support/liveError';
+import type { LiveCheckOutcome } from './liveCheck.types';
+
 const VIOLATION_SAMPLE_LIMIT = 4;
 const MAX_REPRESENTABLE_DATE_MS = 8.64e15;
 
@@ -30,4 +33,17 @@ export function formatTimestamp(value: number): string {
   }
 
   return new Date(value).toISOString();
+}
+
+export async function describeLibraryRefusal(call: () => Promise<unknown>, methodLabel: string): Promise<LiveCheckOutcome> {
+  try {
+    await call();
+  } catch (error) {
+    return {
+      status: 'notApplicable',
+      fact: `библиотека у этой биржи ${methodLabel} не поддерживает (матрица поддержки) и отказывает явно, не обращаясь к бирже: '${describeError(error)}'`,
+    };
+  }
+
+  return { status: 'diverged', fact: `матрица поддержки обещает отказ, а ${methodLabel} ответил без исключения` };
 }

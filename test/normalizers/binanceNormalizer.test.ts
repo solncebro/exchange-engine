@@ -4,6 +4,7 @@ import {
   normalizeBinanceKlines,
   normalizeBinanceKlineWebSocketMessage,
   normalizeBinancePosition,
+  buildBinanceSymbolConfigSettingsBySymbol,
   normalizeBinanceOrder,
   normalizeBinanceBalances,
   normalizeBinanceFuturesBalances,
@@ -20,6 +21,7 @@ import {
   parseBinanceOrderRateLimit,
 } from '../../src/normalizers/binanceNormalizer';
 import { TradeSymbolTypeEnum, PositionSideEnum, MarginModeEnum } from '../../src/types/common';
+import type { BinancePositionSettings } from '../../src/normalizers/binanceNormalizer.types';
 import {
   BINANCE_RAW_EXCHANGE_INFO,
   BINANCE_RAW_EXCHANGE_INFO_SETTLE_VARIANTS,
@@ -27,6 +29,12 @@ import {
   BINANCE_RAW_KLINE_LIST,
   BINANCE_RAW_WEBSOCKET_KLINE,
   BINANCE_RAW_POSITION_RISK,
+  BINANCE_RAW_POSITION_RISK_V3_OPEN_CROSS,
+  BINANCE_RAW_POSITION_RISK_V3_OPEN_ISOLATED,
+  BINANCE_RAW_POSITION_RISK_V3_ZERO_WITH_ORDER_ISOLATED,
+  BINANCE_RAW_SYMBOL_CONFIG_ETHUSDT_CROSSED,
+  BINANCE_RAW_SYMBOL_CONFIG_ETHUSDT_ISOLATED,
+  BINANCE_RAW_SYMBOL_CONFIG_LIST,
   BINANCE_RAW_ORDER_RESPONSE,
   BINANCE_RAW_ACCOUNT,
   BINANCE_RAW_FUTURES_ACCOUNT,
@@ -370,77 +378,82 @@ describe('normalizeBinanceKlineWebSocketMessage', () => {
 });
 
 describe('normalizeBinancePosition', () => {
+  const BTCUSDT_SETTINGS: BinancePositionSettings = { leverage: 5, marginMode: MarginModeEnum.Isolated };
+
   it('maps LONG to long', () => {
-    const result = normalizeBinancePosition(BINANCE_RAW_POSITION_RISK);
+    const result = normalizeBinancePosition(BINANCE_RAW_POSITION_RISK, BTCUSDT_SETTINGS);
 
     expect(result.side).toBe(PositionSideEnum.Long);
   });
 
   it('maps SHORT to short', () => {
     const raw = { ...BINANCE_RAW_POSITION_RISK, positionSide: 'SHORT' };
-    const result = normalizeBinancePosition(raw);
+    const result = normalizeBinancePosition(raw, BTCUSDT_SETTINGS);
 
     expect(result.side).toBe(PositionSideEnum.Short);
   });
 
   it('maps BOTH to both', () => {
     const raw = { ...BINANCE_RAW_POSITION_RISK, positionSide: 'BOTH' };
-    const result = normalizeBinancePosition(raw);
+    const result = normalizeBinancePosition(raw, BTCUSDT_SETTINGS);
 
     expect(result.side).toBe(PositionSideEnum.Both);
   });
 
   it('falls back to both for unknown side', () => {
     const raw = { ...BINANCE_RAW_POSITION_RISK, positionSide: 'UNKNOWN' };
-    const result = normalizeBinancePosition(raw);
+    const result = normalizeBinancePosition(raw, BTCUSDT_SETTINGS);
 
     expect(result.side).toBe(PositionSideEnum.Both);
   });
 
-  it('returns zero leverage when the response has no leverage field', () => {
-    const raw = { ...BINANCE_RAW_POSITION_RISK };
+  it('takes leverage and margin mode only from the settings it is given', () => {
+    const result = normalizeBinancePosition(BINANCE_RAW_POSITION_RISK_V3_OPEN_ISOLATED, { leverage: 3, marginMode: MarginModeEnum.Cross });
 
-    delete raw.leverage;
-
-    const result = normalizeBinancePosition(raw);
-
-    expect(result.leverage).toBe(0);
-  });
-
-  it('returns zero leverage when the leverage field is not a number', () => {
-    const raw = { ...BINANCE_RAW_POSITION_RISK, leverage: '' };
-    const result = normalizeBinancePosition(raw);
-
-    expect(result.leverage).toBe(0);
-  });
-
-  it('maps ISOLATED marginType', () => {
-    const result = normalizeBinancePosition(BINANCE_RAW_POSITION_RISK);
-
-    expect(result.marginMode).toBe(MarginModeEnum.Isolated);
-  });
-
-  it('maps CROSSED marginType to cross', () => {
-    const raw = { ...BINANCE_RAW_POSITION_RISK, marginType: 'CROSSED' };
-    const result = normalizeBinancePosition(raw);
-
+    expect(result.leverage).toBe(3);
     expect(result.marginMode).toBe(MarginModeEnum.Cross);
   });
 
+  it('reads unknown settings as leverage 0 and margin mode null instead of guessing', () => {
+    const result = normalizeBinancePosition(BINANCE_RAW_POSITION_RISK_V3_OPEN_ISOLATED, null);
+
+    expect(result.contracts).toBe(0.01);
+    expect(result.leverage).toBe(0);
+    expect(result.marginMode).toBeNull();
+  });
+
+  it('reads the live v3 open entries with the settings built from the live symbol configuration', () => {
+    const isolatedSettings: BinancePositionSettings = { leverage: 2, marginMode: MarginModeEnum.Isolated };
+    const crossSettings: BinancePositionSettings = { leverage: 2, marginMode: MarginModeEnum.Cross };
+
+    expect(buildBinanceSymbolConfigSettingsBySymbol([BINANCE_RAW_SYMBOL_CONFIG_ETHUSDT_ISOLATED]).get('ETHUSDT')).toEqual(isolatedSettings);
+    expect(buildBinanceSymbolConfigSettingsBySymbol([BINANCE_RAW_SYMBOL_CONFIG_ETHUSDT_CROSSED]).get('ETHUSDT')).toEqual(crossSettings);
+
+    const isolatedResult = normalizeBinancePosition(BINANCE_RAW_POSITION_RISK_V3_ZERO_WITH_ORDER_ISOLATED, isolatedSettings);
+    const crossResult = normalizeBinancePosition(BINANCE_RAW_POSITION_RISK_V3_OPEN_CROSS, crossSettings);
+
+    expect(isolatedResult.contracts).toBe(0);
+    expect(isolatedResult.marginMode).toBe(MarginModeEnum.Isolated);
+    expect(isolatedResult.leverage).toBe(2);
+    expect(crossResult.contracts).toBe(0.01);
+    expect(crossResult.marginMode).toBe(MarginModeEnum.Cross);
+    expect(crossResult.leverage).toBe(2);
+  });
+
   it('parses numeric fields', () => {
-    const result = normalizeBinancePosition(BINANCE_RAW_POSITION_RISK);
+    const result = normalizeBinancePosition(BINANCE_RAW_POSITION_RISK, BTCUSDT_SETTINGS);
 
     expect(result.contracts).toBe(0.1);
     expect(result.entryPrice).toBe(65000);
     expect(result.markPrice).toBe(65500);
     expect(result.unrealizedPnl).toBe(50);
-    expect(result.leverage).toBe(10);
+    expect(result.leverage).toBe(5);
     expect(result.liquidationPrice).toBe(60000);
   });
 
   it('returns positive contracts for negative positionAmt (Binance hedge SHORT convention)', () => {
     const raw = { ...BINANCE_RAW_POSITION_RISK, positionSide: 'SHORT', positionAmt: '-10.5' };
-    const result = normalizeBinancePosition(raw);
+    const result = normalizeBinancePosition(raw, BTCUSDT_SETTINGS);
 
     expect(result.contracts).toBe(10.5);
     expect(result.side).toBe(PositionSideEnum.Short);
@@ -448,84 +461,104 @@ describe('normalizeBinancePosition', () => {
 
   it('returns positive contracts for negative positionAmt with small decimals', () => {
     const raw = { ...BINANCE_RAW_POSITION_RISK, positionAmt: '-0.001' };
-    const result = normalizeBinancePosition(raw);
+    const result = normalizeBinancePosition(raw, BTCUSDT_SETTINGS);
 
     expect(result.contracts).toBe(0.001);
   });
 
   it('returns 0 for NaN contracts when raw positionAmt is invalid (defensive)', () => {
     const raw = { ...BINANCE_RAW_POSITION_RISK, positionAmt: 'abc' };
-    const result = normalizeBinancePosition(raw);
+    const result = normalizeBinancePosition(raw, BTCUSDT_SETTINGS);
 
     expect(result.contracts).toBe(0);
   });
 
   it('returns 0 for empty string positionAmt', () => {
     const raw = { ...BINANCE_RAW_POSITION_RISK, positionAmt: '' };
-    const result = normalizeBinancePosition(raw);
+    const result = normalizeBinancePosition(raw, BTCUSDT_SETTINGS);
 
     expect(result.contracts).toBe(0);
   });
 
   it('returns 0 for Infinity positionAmt', () => {
     const raw = { ...BINANCE_RAW_POSITION_RISK, positionAmt: 'Infinity' };
-    const result = normalizeBinancePosition(raw);
+    const result = normalizeBinancePosition(raw, BTCUSDT_SETTINGS);
 
     expect(result.contracts).toBe(0);
   });
 
   it('returns 0 for NaN liquidationPrice', () => {
     const raw = { ...BINANCE_RAW_POSITION_RISK, liquidationPrice: '' };
-    const result = normalizeBinancePosition(raw);
+    const result = normalizeBinancePosition(raw, BTCUSDT_SETTINGS);
 
     expect(result.liquidationPrice).toBe(0);
   });
 
   it('preserves raw data in info', () => {
-    const result = normalizeBinancePosition(BINANCE_RAW_POSITION_RISK);
+    const result = normalizeBinancePosition(BINANCE_RAW_POSITION_RISK, BTCUSDT_SETTINGS);
 
     expect(result.info).toBe(BINANCE_RAW_POSITION_RISK);
   });
 
   it('resolves direction=long when positionSide=LONG', () => {
-    const result = normalizeBinancePosition(BINANCE_RAW_POSITION_RISK);
+    const result = normalizeBinancePosition(BINANCE_RAW_POSITION_RISK, BTCUSDT_SETTINGS);
 
     expect(result.direction).toBe('long');
   });
 
   it('resolves direction=short when positionSide=SHORT', () => {
     const raw = { ...BINANCE_RAW_POSITION_RISK, positionSide: 'SHORT' };
-    const result = normalizeBinancePosition(raw);
+    const result = normalizeBinancePosition(raw, BTCUSDT_SETTINGS);
 
     expect(result.direction).toBe('short');
   });
 
   it('resolves direction=long when positionSide=BOTH and positionAmt > 0 (oneWay long)', () => {
     const raw = { ...BINANCE_RAW_POSITION_RISK, positionSide: 'BOTH', positionAmt: '0.5' };
-    const result = normalizeBinancePosition(raw);
+    const result = normalizeBinancePosition(raw, BTCUSDT_SETTINGS);
 
     expect(result.direction).toBe('long');
   });
 
   it('resolves direction=short when positionSide=BOTH and positionAmt < 0 (oneWay short)', () => {
     const raw = { ...BINANCE_RAW_POSITION_RISK, positionSide: 'BOTH', positionAmt: '-0.5' };
-    const result = normalizeBinancePosition(raw);
+    const result = normalizeBinancePosition(raw, BTCUSDT_SETTINGS);
 
     expect(result.direction).toBe('short');
   });
 
   it('returns direction=null when positionSide=BOTH and positionAmt=0 (empty slot)', () => {
     const raw = { ...BINANCE_RAW_POSITION_RISK, positionSide: 'BOTH', positionAmt: '0' };
-    const result = normalizeBinancePosition(raw);
+    const result = normalizeBinancePosition(raw, BTCUSDT_SETTINGS);
 
     expect(result.direction).toBeNull();
   });
 
   it('returns direction=null when positionAmt is non-finite', () => {
     const raw = { ...BINANCE_RAW_POSITION_RISK, positionSide: 'BOTH', positionAmt: 'abc' };
-    const result = normalizeBinancePosition(raw);
+    const result = normalizeBinancePosition(raw, BTCUSDT_SETTINGS);
 
     expect(result.direction).toBeNull();
+  });
+});
+
+describe('buildBinanceSymbolConfigSettingsBySymbol', () => {
+  it('reads the live symbol configuration list: ISOLATED and CROSSED with numeric leverage', () => {
+    const settingsBySymbol = buildBinanceSymbolConfigSettingsBySymbol(BINANCE_RAW_SYMBOL_CONFIG_LIST);
+
+    expect([...settingsBySymbol.entries()]).toEqual([
+      ['SNTUSDT', { leverage: 20, marginMode: MarginModeEnum.Cross }],
+      ['ETHUSDT', { leverage: 2, marginMode: MarginModeEnum.Isolated }],
+      ['BTCUSDT', { leverage: 5, marginMode: MarginModeEnum.Isolated }],
+    ]);
+  });
+
+  it.each([
+    ['no leverage', { ...BINANCE_RAW_SYMBOL_CONFIG_ETHUSDT_ISOLATED, leverage: undefined }],
+    ['zero leverage', { ...BINANCE_RAW_SYMBOL_CONFIG_ETHUSDT_ISOLATED, leverage: 0 }],
+    ['an unknown margin type', { ...BINANCE_RAW_SYMBOL_CONFIG_ETHUSDT_ISOLATED, marginType: 'PORTFOLIO' }],
+  ])('gives no settings for an entry with %s instead of guessing', (_name, raw) => {
+    expect(buildBinanceSymbolConfigSettingsBySymbol([raw]).has('ETHUSDT')).toBe(false);
   });
 });
 

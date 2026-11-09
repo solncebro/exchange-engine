@@ -120,3 +120,14 @@ order, openOrders, allOrders, account, listenKey
 
 Подсчёты главного счёта на том же адресе api.binance.com (подпись, пересдача при −1021, общий на адрес сторож — от предка). Методы: `fetchSubAccountListPage(page, limit)` → `GET /sapi/v1/sub-account/list`; `createUniversalTransfer(params)` → `POST /sapi/v1/sub-account/universalTransfer` (параметры в строке запроса, вес 360 на пользователя, право ключа «internal transfer»); `fetchUniversalTransferHistory(params)` → `GET` того же пути по `clientTranId` (+ `fromEmail` ИЛИ `toEmail`, оба сразу биржа не принимает; окно 7 дней); `fetchSubAccountSpotAssets(email)` → `GET /sapi/v4/sub-account/assets` (вес 60); `fetchSubAccountUsdtFuturesAccount(email)` → `GET /sapi/v2/sub-account/futures/account?futuresType=1`. Ответы `/sapi` несут свои заголовки веса (не `x-mbx-used-weight-1m`), сторож запросов их не считает.
 
+
+`BinanceFuturesHttpClient.fetchSymbolConfig(symbol?)` читает подписанный `/fapi/v1/symbolConfig`: с символом — одну запись, без символа — все символы счёта (живой ответ демо-счёта 05.11.2026: 744 записи). Вес по документации Binance — «Weight(IP): 5» (описание метода `symbol_configuration` в официальном `binance-connector-python`, ссылка на раздел «Symbol Configuration (USER_DATA)»), как и у `/fapi/v3/positionRisk`. Сырая запись `BinanceSymbolConfigRaw` остаётся в биржевом слое. Доказательство: `src/http/BinanceFuturesHttpClient.ts:192`.
+
+Вторую версию списка риска позиций клиент не читает: Binance объявила `/fapi/v3/positionRisk` её заменой (извещение от 06.08.2024), плечо и режим маржи позиции берутся из `/fapi/v1/symbolConfig`. `setLeverage(symbol, leverage)` типизирует ответ `/fapi/v1/leverage` как `BinanceSetLeverageResponseRaw` (`leverage`, `maxNotionalValue`, `symbol`); подтверждённым плечо считается только при конечном числе не меньше 1. Доказательство: `src/http/BinanceFuturesHttpClient.ts:251`, `src/normalizers/binanceNormalizer.ts:274`, `src/exchanges/BinanceFutures.ts:745`.
+
+
+Чтение `fetchUserTrades` принимает необязательный `orderId` для истории конкретной заявки. В `fetchOrderExecutionSummary` номер передаётся на каждой странице; при продолжении по `fromId` временные параметры исключаются, конечная граница проверяется по полученным исполнениям.
+
+Метод изменения маржи передаёт только увеличение (`type=1`) и явную сторону позиции (`BOTH`, `LONG` или `SHORT`); сетевые ошибки не вызывают повторной отправки.
+
+`addIsolatedPositionMargin(args: AddBinanceIsolatedPositionMarginArgs)` — отдельный типизированный путь увеличения маржи со стороной позиции; `amount` — десятичная строка, уже усечённая до 8 знаков в `BinanceFutures.addIsolatedPositionMargin` (`BINANCE_POSITION_MARGIN_DECIMAL_PLACES`), поэтому в подписанный запрос не попадают ни `1.2300000000000002`, ни `1e-7`. Прежний низкоуровневый `modifyPositionMargin` сохранён для совместимости.

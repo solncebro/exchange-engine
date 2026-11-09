@@ -1,4 +1,5 @@
 import type { FetchPageWithLimitArgs } from '../types/exchange';
+import type { PositionSideEnum } from '../types/common';
 
 /**
  * Адресация условной заявки в Algo-службе. Символ не передаётся — ни чтение, ни отмена
@@ -13,7 +14,14 @@ export interface BinanceAlgoOrderLookupArgs {
 /** Запрос собственных сделок: символ Binance требует обязательно, окно — необязательно. */
 export interface BinanceUserTradeQueryArgs extends FetchPageWithLimitArgs {
   symbol?: string;
+  orderId?: string;
   /** Номер сделки, С КОТОРОГО отдавать страницу (по возрастанию) — ключ постраничного добора.
    *  Документация биржи запрещает сочетать его с `startTime`/`endTime`. */
   fromId?: number | string;
+}
+
+export interface AddBinanceIsolatedPositionMarginArgs {
+  symbol: string;
+  positionSide: PositionSideEnum;
+  amount: string;
 }

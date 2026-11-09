@@ -28,6 +28,12 @@ import type {
 } from '../types/common';
 import { TradeSymbolTypeEnum, PositionSideEnum, MarginModeEnum, TimeInForceEnum, OrderSideEnum, OrderTypeEnum } from '../types/common';
 import { BYBIT_POSITION_SIDE, BYBIT_ORDER_STATUS, BYBIT_ORDER_SIDE, BYBIT_ORDER_TYPE, BYBIT_TIME_IN_FORCE } from '../constants/mappings';
+import {
+  BYBIT_CLASSIC_ACCOUNT_STATUS,
+  BYBIT_CROSS_MARGIN_MODE,
+  BYBIT_ISOLATED_MARGIN_MODE,
+  BYBIT_PORTFOLIO_MARGIN_MODE,
+} from '../constants/bybit';
 import { parseOrderBookLevel, toOrderBookRawLevelList } from './normalizerUtils';
 import { buildPlacedOrderOutcome, buildRejectedOrderOutcome } from './batchOrderOutcome';
 import type { CreateOrderItemResult, CreateOrderWebSocketArgs } from '../types/exchange';
@@ -148,6 +154,7 @@ export type BybitKlineMessageRaw = BybitWebSocketMessageRaw<BybitWebSocketKlineR
 export type BybitTradeMessageRaw = BybitWebSocketMessageRaw<BybitPublicTradeDataRaw>;
 
 export interface BybitPositionRaw {
+  updatedTime?: string;
   symbol: string;
   side: string;
   size: string;
@@ -161,7 +168,14 @@ export interface BybitPositionRaw {
   [key: string]: unknown;
 }
 
+export interface BybitAccountInfoRaw {
+  marginMode?: string;
+  unifiedMarginStatus?: number;
+  [key: string]: unknown;
+}
+
 export interface BybitOrderResponseRaw {
+  positionIdx?: number;
   orderId: string;
   orderLinkId: string;
   symbol: string;
@@ -443,7 +457,7 @@ export function normalizeBybitTradeSymbols(rawList: BybitInstrumentInfoRaw[]): T
   return result;
 }
 
-export function normalizeBybitTickers(rawList: BybitTickerRaw[]): TickerBySymbol {
+export function normalizeBybitTickers(rawList: BybitTickerRaw[], responseTimestamp?: number): TickerBySymbol {
   const result = new Map<string, Ticker>();
 
   for (const raw of rawList) {
@@ -456,7 +470,7 @@ export function normalizeBybitTickers(rawList: BybitTickerRaw[]): TickerBySymbol
       priceChangePercent: parseFloat(raw.price24hPcnt) * 100,
       volume: parseFloat(raw.volume24h ?? '0'),
       quoteVolume: parseFloat(raw.turnover24h ?? '0'),
-      timestamp: raw.time ?? Date.now(),
+      timestamp: raw.time ?? responseTimestamp ?? Date.now(),
     };
 
     if (raw.markPrice !== undefined) {
@@ -562,27 +576,86 @@ function resolveBybitDirection(raw: BybitPositionRaw): 'long' | 'short' | null {
   return null;
 }
 
-export function normalizeBybitPosition(raw: BybitPositionRaw): Position {
+export function isBybitClassicAccount(accountInfo: BybitAccountInfoRaw): boolean {
+  return accountInfo.unifiedMarginStatus === BYBIT_CLASSIC_ACCOUNT_STATUS;
+}
+
+export function isBybitPortfolioMarginAccount(accountInfo: BybitAccountInfoRaw): boolean {
+  return !isBybitClassicAccount(accountInfo) && accountInfo.marginMode === BYBIT_PORTFOLIO_MARGIN_MODE;
+}
+
+export function resolveBybitAccountMarginMode(accountMarginMode: string | undefined): MarginModeEnum | null {
+  if (accountMarginMode === BYBIT_ISOLATED_MARGIN_MODE) {
+    return MarginModeEnum.Isolated;
+  }
+
+  if (accountMarginMode === BYBIT_CROSS_MARGIN_MODE || accountMarginMode === BYBIT_PORTFOLIO_MARGIN_MODE) {
+    return MarginModeEnum.Cross;
+  }
+
+  // Неизвестный режим единого счёта не угадывается по устаревшему tradeMode: «неизвестно» честнее.
+  return null;
+}
+
+export function resolveBybitMarginMode(accountInfo: BybitAccountInfoRaw, symbolPositionList: BybitPositionRaw[]): MarginModeEnum | null {
+  if (!isBybitClassicAccount(accountInfo)) {
+    return resolveBybitAccountMarginMode(accountInfo.marginMode);
+  }
+
+  const firstTradeMode = symbolPositionList[0]?.tradeMode;
+  const hasReliableTradeMode = (firstTradeMode === 0 || firstTradeMode === 1) &&
+    symbolPositionList.every(position => position.tradeMode === firstTradeMode);
+
+  if (!hasReliableTradeMode) {
+    return null;
+  }
+
+  return firstTradeMode === 1 ? MarginModeEnum.Isolated : MarginModeEnum.Cross;
+}
+
+export function resolveBybitPositionMarginMode(accountInfo: BybitAccountInfoRaw | null, raw: BybitPositionRaw): MarginModeEnum | null {
+  if (accountInfo === null) {
+    return null;
+  }
+
+  if (!isBybitClassicAccount(accountInfo)) {
+    return resolveBybitAccountMarginMode(accountInfo.marginMode);
+  }
+
+  if (raw.tradeMode === 0) {
+    return MarginModeEnum.Cross;
+  }
+
+  return raw.tradeMode === 1 ? MarginModeEnum.Isolated : null;
+}
+
+export function normalizeBybitPosition(raw: BybitPositionRaw, marginMode: MarginModeEnum | null): Position {
   const side = BYBIT_POSITION_SIDE[raw.side] ?? PositionSideEnum.Both;
   const direction = resolveBybitDirection(raw);
-  const marginMode: MarginModeEnum = raw.tradeMode === 0 ? MarginModeEnum.Cross : MarginModeEnum.Isolated;
   const liquidationPriceRaw = parseFloat(raw.liqPrice);
+  const leverageRaw = parseFloat(raw.leverage);
   const contractsRaw = parseFloat(raw.size);
+  const updatedAtMs = Number(raw.updatedTime);
 
   return {
     symbol: raw.symbol,
     side,
     direction,
     contracts: Number.isFinite(contractsRaw) ? contractsRaw : 0,
+    updatedAtMs: Number.isFinite(updatedAtMs) && updatedAtMs > 0 ? updatedAtMs : undefined,
     entryPrice: parseFloat(raw.avgPrice),
     markPrice: parseFloat(raw.markPrice),
     unrealizedPnl: parseFloat(raw.unrealisedPnl),
-    leverage: parseFloat(raw.leverage),
+    leverage: Number.isFinite(leverageRaw) ? leverageRaw : 0,
     marginMode,
     liquidationPrice: isNaN(liquidationPriceRaw) ? 0 : liquidationPriceRaw,
     positionIdx: raw.positionIdx,
     info: raw,
   };
+}
+
+export function normalizeBybitPositionList(rawList: BybitPositionRaw[], accountInfo: BybitAccountInfoRaw | null): Position[] {
+  return rawList.map(raw => normalizeBybitPosition(raw, resolveBybitPositionMarginMode(accountInfo, raw)));
 }
 
 /**
@@ -612,6 +685,12 @@ function resolveBybitOrderType(raw: BybitOrderResponseRaw): OrderTypeEnum {
   return isLimitLike ? OrderTypeEnum.StopLimit : OrderTypeEnum.StopMarket;
 }
 
+const BYBIT_ORDER_POSITION_SIDE_BY_INDEX: Partial<Record<number, PositionSideEnum>> = {
+  0: PositionSideEnum.Both,
+  1: PositionSideEnum.Long,
+  2: PositionSideEnum.Short,
+};
+
 export function normalizeBybitOrder(raw: BybitOrderResponseRaw): Order {
   const status = BYBIT_ORDER_STATUS[raw.orderStatus] ?? raw.orderStatus.toLowerCase();
 
@@ -620,6 +699,7 @@ export function normalizeBybitOrder(raw: BybitOrderResponseRaw): Order {
     clientOrderId: raw.orderLinkId ?? '',
     symbol: raw.symbol,
     side: BYBIT_ORDER_SIDE[raw.side] ?? OrderSideEnum.Buy,
+    positionSide: typeof raw.positionIdx === 'number' ? BYBIT_ORDER_POSITION_SIDE_BY_INDEX[raw.positionIdx] : undefined,
     type: resolveBybitOrderType(raw),
     isConditional: (raw.stopOrderType ?? '') !== '',
     timeInForce: BYBIT_TIME_IN_FORCE[raw.timeInForce] ?? TimeInForceEnum.Gtc,
@@ -642,6 +722,7 @@ export function buildBybitOrderFromCreateResponse(args: CreateOrderWebSocketArgs
     clientOrderId: args.clientOrderId ?? '',
     symbol: args.symbol,
     side: args.side,
+    positionSide: args.positionSide,
     type: args.type,
     timeInForce: args.timeInForce ?? TimeInForceEnum.Gtc,
     price: args.price ?? 0,
@@ -983,14 +1064,14 @@ export function normalizeBybitPublicTradeFromStream(rawList: BybitPublicTradeDat
   });
 }
 
-export function normalizeBybitMarkPriceList(rawList: BybitTickerRaw[]): MarkPrice[] {
+export function normalizeBybitMarkPriceList(rawList: BybitTickerRaw[], responseTimestamp?: number): MarkPrice[] {
   return rawList.map((raw) => ({
     symbol: raw.symbol,
     markPrice: parseFloat(raw.markPrice ?? '0'),
     indexPrice: raw.indexPrice !== undefined ? parseFloat(raw.indexPrice) : undefined,
     lastFundingRate: parseFloat(raw.fundingRate ?? '0'),
     nextFundingTime: parseFloat(raw.nextFundingTime ?? '0'),
-    timestamp: raw.time ?? Date.now(),
+    timestamp: raw.time ?? responseTimestamp ?? Date.now(),
   }));
 }
 
@@ -1088,15 +1169,18 @@ function bybitGrossPnl(raw: BybitClosedPnlRaw, side: OrderSideEnum): number {
 export function normalizeBybitClosedPnlList(rawList: BybitClosedPnlRaw[]): ClosedPnl[] {
   return rawList.map((raw) => {
     const side = BYBIT_ORDER_SIDE[raw.side] ?? OrderSideEnum.Buy;
+    const openingFee = parseFloat(raw.openFee);
+    const closingFee = parseFloat(raw.closeFee);
 
     return {
       symbol: raw.symbol,
       orderId: raw.orderId,
+      isTradingFeeComplete: Number.isFinite(openingFee) && Number.isFinite(closingFee),
       side,
       quantity: parseFloat(raw.qty),
       entryPrice: parseFloat(raw.avgEntryPrice),
       exitPrice: parseFloat(raw.avgExitPrice),
-      closedPnl: bybitGrossPnl(raw, side) - parseFloat(raw.openFee) - parseFloat(raw.closeFee),
+      closedPnl: bybitGrossPnl(raw, side) - (Number.isFinite(openingFee) ? openingFee : 0) - (Number.isFinite(closingFee) ? closingFee : 0),
       timestamp: parseFloat(raw.createdTime),
     };
   });

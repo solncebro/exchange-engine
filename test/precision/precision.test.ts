@@ -190,3 +190,116 @@ describe('on-grid guard at large step counts', () => {
     expect(priceToPrecision(withTick('0.01'), 111848.689, 'down')).toBe(111848.68);
   });
 });
+
+
+describe('nearest half-step stability', () => {
+  it('rounds the same planned HYPER stop identically for its actual fills and one recovered position', () => {
+    const symbol = {
+      ...BTCUSDT_TRADE_SYMBOL,
+      filter: { ...BTCUSDT_TRADE_SYMBOL.filter, tickSize: '0.00001' },
+    };
+    const quantityList = [
+    8464, 4333, 19306, 1928, 1928, 82, 82, 82, 3957, 1638, 82, 82,
+    3859, 2405, 82, 8426, 82, 1638, 82, 240, 82, 82, 2405, 85,
+    2774, 3719, 498, 27886, 1550, 82, 169, 82, 349, 82, 619, 4545,
+    1126, 23499, 1287, 559, 1033, 82, 82, 2405, 82, 82, 2035, 82,
+    2405, 82, 3974, 4557, 4557, 4163, 4636, 386, 321, 321, 321, 321,
+    321, 321, 321, 321, 4761, 24388, 32103, 802, 1605, 981, 28715, 891,
+    268, 161, 82, 1289, 453, 268, 82, 82, 82, 82, 82, 2405,
+    82, 81, 4630, 82, 82, 2247, 600, 82, 2405, 2035, 82, 82,
+    1019, 82, 2247, 82, 2405, 82, 82, 1753, 82, 2035, 82, 2247,
+    1186,
+    ];
+    const entryPrice = 0.0623;
+    const amountUsdList = quantityList.map((quantity) => quantity * entryPrice);
+    const totalAmountUsd = amountUsdList.reduce((total, amountUsd) => total + amountUsd, 0);
+    const weightedPrice = amountUsdList.reduce((total, amountUsd) => total + entryPrice * amountUsd, 0) / totalAmountUsd;
+    const recoveredAmountUsd = 288925 * entryPrice;
+    const recoveredPrice = entryPrice * recoveredAmountUsd / recoveredAmountUsd;
+
+    expect(quantityList).toHaveLength(109);
+    expect(quantityList.reduce((total, quantity) => total + quantity, 0)).toBe(288925);
+    expect(priceToPrecision(symbol, weightedPrice * 1.15)).toBe(0.07165);
+    expect(priceToPrecision(symbol, recoveredPrice * 1.15)).toBe(0.07165);
+    expect(priceToPrecision(symbol, entryPrice * 1.15)).toBe(0.07165);
+  });
+
+  it.each([
+    { tickSize: '0.00000001', halfStepCount: 7164.5, lowerPrice: 0.00007164, upperPrice: 0.00007165 },
+    { tickSize: '0.00001', halfStepCount: 7164.5, lowerPrice: 0.07164, upperPrice: 0.07165 },
+    { tickSize: '0.1', halfStepCount: 987654321.5, lowerPrice: 98765432.1, upperPrice: 98765432.2 },
+    { tickSize: '1', halfStepCount: 7164.5, lowerPrice: 7164, upperPrice: 7165 },
+  ])('keeps nearest halves stable for tick $tickSize without changing directed rounding', ({ tickSize, halfStepCount, lowerPrice, upperPrice }) => {
+    const symbol = {
+      ...BTCUSDT_TRADE_SYMBOL,
+      filter: { ...BTCUSDT_TRADE_SYMBOL.filter, tickSize },
+    };
+    const tick = Number(tickSize);
+    const halfPrice = halfStepCount * tick;
+
+    for (const value of [halfPrice * (1 - Number.EPSILON), halfPrice, halfPrice * (1 + Number.EPSILON)]) {
+      expect(priceToPrecision(symbol, value)).toBe(upperPrice);
+      expect(priceToPrecision(symbol, value, 'up')).toBe(upperPrice);
+      expect(priceToPrecision(symbol, value, 'down')).toBe(lowerPrice);
+    }
+
+    expect(priceToPrecision(symbol, (halfStepCount - 0.001) * tick)).toBe(lowerPrice);
+    expect(priceToPrecision(symbol, (halfStepCount + 0.001) * tick)).toBe(upperPrice);
+  });
+
+  it.each([
+    { price: 0.071645, tickSize: '0.00001', expected: 0.07165 },
+    { price: 0.07164499999999999, tickSize: '0.00001', expected: 0.07165 },
+    { price: 0.00007164499999999998, tickSize: '0.00000001', expected: 0.00007165 },
+    { price: 98765432.14999999, tickSize: '0.1', expected: 98765432.2 },
+    { price: 7164.499999999998, tickSize: '1', expected: 7165 },
+  ])('rounds the exact changelog half-step value $price at tick $tickSize up to $expected', ({ price, tickSize, expected }) => {
+    const symbol = {
+      ...BTCUSDT_TRADE_SYMBOL,
+      filter: { ...BTCUSDT_TRADE_SYMBOL.filter, tickSize },
+    };
+
+    expect(priceToPrecision(symbol, price)).toBe(expected);
+  });
+
+  it.each([
+    { price: 0.071645, tickSize: '0.00001', lowerPrice: 0.07164, upperPrice: 0.07165 },
+    { price: 0.07164499999999999, tickSize: '0.00001', lowerPrice: 0.07164, upperPrice: 0.07165 },
+    { price: 0.00007164499999999998, tickSize: '0.00000001', lowerPrice: 0.00007164, upperPrice: 0.00007165 },
+    { price: 98765432.14999999, tickSize: '0.1', lowerPrice: 98765432.1, upperPrice: 98765432.2 },
+    { price: 7164.499999999998, tickSize: '1', lowerPrice: 7164, upperPrice: 7165 },
+  ])('keeps directed rounding of $price at tick $tickSize on the neighbouring grid points', ({ price, tickSize, lowerPrice, upperPrice }) => {
+    const symbol = {
+      ...BTCUSDT_TRADE_SYMBOL,
+      filter: { ...BTCUSDT_TRADE_SYMBOL.filter, tickSize },
+    };
+
+    expect(priceToPrecision(symbol, price, 'up')).toBe(upperPrice);
+    expect(priceToPrecision(symbol, price, 'down')).toBe(lowerPrice);
+  });
+
+  it('preserves nearest rounding toward positive infinity at negative halves', () => {
+    const symbol = {
+      ...BTCUSDT_TRADE_SYMBOL,
+      filter: { ...BTCUSDT_TRADE_SYMBOL.filter, tickSize: '0.00001' },
+    };
+    const halfPrice = -0.0623 * 1.15;
+
+    expect(priceToPrecision(symbol, halfPrice * (1 + Number.EPSILON))).toBe(-0.07164);
+    expect(priceToPrecision(symbol, halfPrice)).toBe(-0.07164);
+    expect(priceToPrecision(symbol, halfPrice * (1 - Number.EPSILON))).toBe(-0.07164);
+    expect(priceToPrecision(symbol, halfPrice, 'up')).toBe(-0.07164);
+    expect(priceToPrecision(symbol, halfPrice, 'down')).toBe(-0.07165);
+  });
+
+  it('does not promote a quarter step when large step counts make the noise allowance overlap', () => {
+    const symbol = {
+      ...BTCUSDT_TRADE_SYMBOL,
+      filter: { ...BTCUSDT_TRADE_SYMBOL.filter, tickSize: '1' },
+    };
+
+    expect(priceToPrecision(symbol, 1e15 + 0.25)).toBe(1e15);
+    expect(priceToPrecision(symbol, 1e15)).toBe(1e15);
+    expect(priceToPrecision(symbol, 1e15 + 0.75)).toBe(1e15 + 1);
+  });
+});

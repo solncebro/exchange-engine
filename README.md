@@ -4,15 +4,25 @@ Universal TypeScript client library for cryptocurrency trading on Binance, Bybit
 
 ## Latest Release
 
-Текущая версия: `0.26.1`
+Текущая версия: `0.27.0`
+
+- **Новые методы `ExchangeClient`:** настроенное плечо позиции (`fetchPositionLeverage`), добавление изолированной маржи (`addIsolatedPositionMargin`, Binance Futures и Bybit Linear; сумма усекается до 8 и 4 знаков), исполнения счёта за окно (`fetchAccountTrades`, Binance Futures) и сводка исполнений заявки (`fetchOrderExecutionSummary`, Binance Futures и Bybit Linear).
+- **Плечо с направлением у Bybit:** `setLeverage(leverage, symbol, { direction })` при изолированной двусторонней марже сохраняет плечо встречной стороны, при общей меняет обе; когда данных для этого недостаточно — отказ до записи.
+- **Режим маржи и плечо позиции — настоящие или «неизвестно»:** Binance берёт их из `/fapi/v1/symbolConfig` (второго источника нет: устаревшая вторая версия списка риска позиций не используется); Bybit берёт плечо из записи позиции, режим — из `/v5/account/info`, а при его отказе — из последних успешно прочитанных сведений о счёте. Если биржа их не сообщила (отказ настройки или сведений о счёте без запомненного, символа нет в настройке, неизвестный режим единого счёта Bybit), позиция всё равно читается — с плечом 0 и режимом `null`, в журнал одно предупреждение; подставленного значения нет. Установка режима маржи и плеча с направлением у Bybit при неизвестном режиме отказывает до записи.
+- **Итоги закрытых позиций:** признак `isTradingFeeComplete`; у Binance вычитается только комиссия в `USDT`, `USDC` и `BNFCR`.
+- **Исправления:** Bybit `fetchAllPositions` больше не теряет позиции сверх 20, отметка времени тикеров и цены маркировки Bybit — от биржи, округление на точной половине шага — вверх.
+
+Подробности и доказательства — в `CHANGELOG.md`, раздел `[0.27.0]`.
+
+Предыдущий выпуск: `0.26.1`.
 
 - **Точные номера заявок и сделок:** большие целые номера в ответах HTTP и сообщениях WebSocket сохраняются строками без округления.
 - **История исполнений Binance:** переход между страницами, удаление повторов и порядок сделок с одинаковым временем учитывают точные большие номера.
 - **Публичное чтение OKX без ключей:** можно оставить ключ, секрет и кодовую фразу пустыми. Для закрытых HTTP-запросов нужен полный набор реквизитов; проверка выполняется до отправки.
 
-Доказательство: `src/utils/parseJsonPreservingLargeIntegers.ts:5`, `src/exchanges/BinanceFutures.ts:1078`, `src/exchanges/BinanceFutures.ts:1097`, `src/http/OkxHttpClient.ts:103` и `src/http/OkxHttpClient.ts:124`.
+Доказательство: `src/utils/parseJsonPreservingLargeIntegers.ts:5`, `src/exchanges/BinanceFutures.ts:1208`, `src/exchanges/BinanceFutures.ts:1241`, `src/http/OkxHttpClient.ts:103` и `src/http/OkxHttpClient.ts:124`.
 
-Предыдущий выпуск: `0.26.0`.
+Ранее в `0.26.0`:
 
 - **Округление по шагу инструмента:** направление можно выбрать — к ближайшему значению, вверх или вниз.
 - **Ступени плеча:** единое чтение ограничений позиции и требований к марже на Binance, Bybit и OKX.
@@ -284,7 +294,7 @@ interface Position {
   markPrice: number;
   unrealizedPnl: number;
   leverage: number;
-  marginMode: 'isolated' | 'cross';
+  marginMode: 'isolated' | 'cross' | null; // null — биржа не вернула режим маржи (плечо тогда 0)
   liquidationPrice: number;
   info: Record<string, unknown>; // raw exchange data
 }

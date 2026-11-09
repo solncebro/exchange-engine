@@ -8,6 +8,7 @@ import type {
   Order,
   Balance,
   AccountBalances,
+  AccountTrade,
   FundingRateHistory,
   FundingInfo,
   OrderBook,
@@ -29,6 +30,8 @@ import type { OrderRateLimit } from '../types/exchange';
 import { BINANCE_POSITION_SIDE, BINANCE_POSITION_IDX, BINANCE_ORDER_SIDE, BINANCE_ORDER_TYPE, BINANCE_ORDER_STATUS, BINANCE_ALGO_STATUS, BINANCE_TIME_IN_FORCE, resolveBinanceIncomeKind } from '../constants/mappings';
 import { parseOrderBookLevel } from './normalizerUtils';
 import { isConditionalOrderType } from '../constants/orderTypes';
+import { BINANCE_USD_COMMISSION_ASSET_LIST } from '../constants/binance';
+import type { BinanceClosingGroup, BinanceOpeningPool, BinancePositionSettings } from './binanceNormalizer.types';
 
 interface BinancePriceFilterRaw {
   filterType: 'PRICE_FILTER';
@@ -260,22 +263,38 @@ export interface BinanceContinuousKlineMessageRaw {
   k: BinanceWebSocketKlineRaw;
 }
 
+export interface BinanceSymbolConfigRaw {
+  symbol: string;
+  marginType: string;
+  isAutoAddMargin: boolean;
+  leverage?: number;
+  maxNotionalValue: string;
+}
+
+export interface BinanceSetLeverageResponseRaw {
+  leverage: number;
+  maxNotionalValue: string;
+  symbol: string;
+}
+
 export interface BinancePositionRiskRaw {
+  updateTime?: number;
   symbol: string;
   positionSide: string;
   positionAmt: string;
   entryPrice: string;
   markPrice: string;
   unRealizedProfit: string;
-  leverage?: string;
-  marginType: string;
   liquidationPrice: string;
   notional: string;
   isolatedMargin: string;
+  isolatedWallet?: string;
   [key: string]: unknown;
 }
 
 export interface BinanceOrderResponseRaw {
+  positionSide?: string;
+  closePosition?: boolean;
   orderId: number | string;
   clientOrderId: string;
   symbol: string;
@@ -658,26 +677,75 @@ function resolveBinanceDirection(raw: BinancePositionRiskRaw): 'long' | 'short' 
   return amt > 0 ? 'long' : 'short';
 }
 
-export function normalizeBinancePosition(raw: BinancePositionRiskRaw): Position {
+export function normalizeBinancePositionLeverage(rawList: BinanceSymbolConfigRaw[], symbol: string): number | null {
+  const matchingList = rawList.filter((raw) => raw.symbol === symbol);
+
+  if (matchingList.length !== 1) {
+    return null;
+  }
+
+  const leverage = matchingList[0].leverage;
+
+  return typeof leverage === 'number' && Number.isFinite(leverage) && leverage > 0 ? leverage : null;
+}
+
+function resolveBinanceMarginTypeMode(marginType: unknown): MarginModeEnum | null {
+  if (typeof marginType !== 'string') {
+    return null;
+  }
+
+  const upperMarginType = marginType.toUpperCase();
+
+  if (upperMarginType === 'ISOLATED') {
+    return MarginModeEnum.Isolated;
+  }
+
+  return upperMarginType === 'CROSSED' || upperMarginType === 'CROSS' ? MarginModeEnum.Cross : null;
+}
+
+function buildBinancePositionSettings(leverage: number, marginType: unknown): BinancePositionSettings | null {
+  const marginMode = resolveBinanceMarginTypeMode(marginType);
+
+  if (marginMode === null || !Number.isFinite(leverage) || leverage <= 0) {
+    return null;
+  }
+
+  return { leverage, marginMode };
+}
+
+export function buildBinanceSymbolConfigSettingsBySymbol(rawList: BinanceSymbolConfigRaw[]): Map<string, BinancePositionSettings> {
+  const settingsBySymbol = new Map<string, BinancePositionSettings>();
+
+  for (const raw of rawList) {
+    const settings = buildBinancePositionSettings(typeof raw.leverage === 'number' ? raw.leverage : NaN, raw.marginType);
+
+    if (settings !== null) {
+      settingsBySymbol.set(raw.symbol, settings);
+    }
+  }
+
+  return settingsBySymbol;
+}
+
+export function normalizeBinancePosition(raw: BinancePositionRiskRaw, settings: BinancePositionSettings | null): Position {
   const side = BINANCE_POSITION_SIDE[raw.positionSide] ?? PositionSideEnum.Both;
   const direction = resolveBinanceDirection(raw);
-  const marginMode: MarginModeEnum = raw.marginType === 'ISOLATED' ? MarginModeEnum.Isolated : MarginModeEnum.Cross;
   const liquidationPriceRaw = parseFloat(raw.liquidationPrice);
   const rawContracts = parseFloat(raw.positionAmt);
   const safeContracts = Number.isFinite(rawContracts) ? Math.abs(rawContracts) : 0;
-  const rawLeverage = parseFloat(raw.leverage ?? '');
-  const safeLeverage = Number.isFinite(rawLeverage) ? rawLeverage : 0;
+  const updatedAtMs = Number(raw.updateTime);
 
   return {
     symbol: raw.symbol,
     side,
     direction,
     contracts: safeContracts,
+    updatedAtMs: Number.isFinite(updatedAtMs) && updatedAtMs > 0 ? updatedAtMs : undefined,
     entryPrice: parseFloat(raw.entryPrice),
     markPrice: parseFloat(raw.markPrice),
     unrealizedPnl: parseFloat(raw.unRealizedProfit),
-    leverage: safeLeverage,
-    marginMode,
+    leverage: settings?.leverage ?? 0,
+    marginMode: settings?.marginMode ?? null,
     liquidationPrice: isNaN(liquidationPriceRaw) ? 0 : liquidationPriceRaw,
     // Какая из двух сторон — сведения, которые уже есть в ответе, поэтому заполняются ЗДЕСЬ,
     // на всех путях чтения сразу: раньше три метода дописывали это вручную, а четвёртый
@@ -688,6 +756,14 @@ export function normalizeBinancePosition(raw: BinancePositionRiskRaw): Position 
   };
 }
 
+function normalizeBinanceOrderPositionSide(positionSide: string | undefined): PositionSideEnum | undefined {
+  if (positionSide === undefined || !Object.hasOwn(BINANCE_POSITION_SIDE, positionSide)) {
+    return undefined;
+  }
+
+  return BINANCE_POSITION_SIDE[positionSide];
+}
+
 export function normalizeBinanceOrder(raw: BinanceOrderResponseRaw): Order {
   const type = BINANCE_ORDER_TYPE[raw.type] ?? raw.type.toLowerCase() as never;
 
@@ -696,6 +772,7 @@ export function normalizeBinanceOrder(raw: BinanceOrderResponseRaw): Order {
     clientOrderId: raw.clientOrderId ?? '',
     symbol: raw.symbol,
     side: BINANCE_ORDER_SIDE[raw.side] ?? OrderSideEnum.Buy,
+    positionSide: normalizeBinanceOrderPositionSide(raw.positionSide),
     type,
     // Условность — свойство ТИПА заявки, а не её цены срабатывания. Раньше защитные
     // заявки отбирались условием «цена срабатывания больше нуля», и заявка с нулевой
@@ -710,6 +787,7 @@ export function normalizeBinanceOrder(raw: BinanceOrderResponseRaw): Order {
     filledQuoteAmount: parseFloat(raw.cumQuote ?? '0'),
     status: BINANCE_ORDER_STATUS[raw.status] ?? raw.status.toLowerCase(),
     reduceOnly: raw.reduceOnly ?? false,
+    closePosition: raw.closePosition,
     timestamp: raw.time ?? raw.updateTime,
     updatedTimestamp: raw.updateTime,
   };
@@ -764,6 +842,7 @@ export function normalizeBinanceAlgoOrder(raw: BinanceAlgoOrderRaw): Order {
     clientOrderId: raw.clientAlgoId ?? '',
     symbol: raw.symbol,
     side: BINANCE_ORDER_SIDE[raw.side] ?? OrderSideEnum.Buy,
+    positionSide: normalizeBinanceOrderPositionSide(raw.positionSide),
     type: BINANCE_ORDER_TYPE[raw.orderType] ?? raw.orderType.toLowerCase() as never,
     timeInForce: BINANCE_TIME_IN_FORCE[raw.timeInForce ?? ''] ?? TimeInForceEnum.Gtc,
     price: parseFiniteFloat(raw.price),
@@ -1024,32 +1103,37 @@ export interface BinanceUserTradeRaw {
   time: number;
 }
 
-/**
- * Итог закрытия из собственных сделок счёта. Готовой ручки у Binance нет, а у Bybit есть, и
- * потребитель обязан получать одно и то же — включая СМЫСЛ полей:
- *
- * - `closedPnl` — итог ЧИСТЫЙ, после комиссии (у Bybit он приходит таким же — сверено
- *   арифметикой на примере из их документации). Binance отдаёт валовой, поэтому комиссия
- *   вычитается здесь.
- * - `entryPrice` — у Binance его в сделках нет вовсе, поэтому он выводится из тождества
- *   «валовой итог = (вход − выход) × объём» для шорта и наоборот для лонга. Так сохраняется
- *   свойство, на которое опираются потребители: валовой минус чистый равен комиссии.
- *
- * Заполнения, ничего не закрывшие (открытие позиции), пропускаются — у них нулевой итог.
- */
-interface BinanceClosingGroup {
-  fillList: BinanceUserTradeRaw[];
-  /** Доля комиссии ОТКРЫТИЯ, приходящаяся на закрытый этой заявкой объём. */
-  openingCommission: number;
+export function normalizeBinanceAccountTrade(raw: BinanceUserTradeRaw): AccountTrade {
+  const side = BINANCE_ORDER_SIDE[raw.side];
+  const quantity = Number(raw.qty);
+  const price = Number(raw.price);
+
+  if (!Object.hasOwn(BINANCE_ORDER_SIDE, raw.side) || !Number.isFinite(quantity) || quantity <= 0
+    || !Number.isFinite(price) || price <= 0 || !Number.isFinite(raw.time) || raw.time < 0) {
+    throw new Error('Binance account trade contains invalid execution data');
+  }
+
+  return {
+    id: String(raw.id),
+    symbol: raw.symbol,
+    side,
+    positionSide: normalizeBinanceOrderPositionSide(raw.positionSide),
+    quantity,
+    price,
+    timestamp: raw.time,
+  };
+}
+
+function isBinanceClosingTrade(raw: BinanceUserTradeRaw): boolean {
+  return parseFloat(raw.realizedPnl) !== 0
+    || (raw.positionSide === 'LONG' && raw.side === 'SELL')
+    || (raw.positionSide === 'SHORT' && raw.side === 'BUY');
 }
 
 export function buildBinanceClosedPnlList(rawList: BinanceUserTradeRaw[]): ClosedPnl[] {
-  const groupByOrderId = new Map<string, BinanceClosingGroup>();
-  // Комиссию за вход биржа берёт в момент открытия, когда закрывать ещё нечего. Копим её и
-  // раздаём закрывающим заявкам пропорционально закрытому объёму — иначе итог сделки
-  // окажется завышен ровно на комиссию входа (замерено на живом счёте: 7.03$ за неделю).
-  let openingCommissionPool = 0;
-  let openQuantityPool = 0;
+  const groupBySymbolOrderId = new Map<string, BinanceClosingGroup>();
+  const openingPoolBySymbolPositionSideDirection = new Map<string, BinanceOpeningPool>();
+  const closingOrderKeySet = new Set(rawList.filter(isBinanceClosingTrade).map((raw) => `${raw.symbol}:${raw.orderId}`));
 
   const chronologicalList = [...rawList].sort((left, right) => {
     const timeDifference = left.time - right.time;
@@ -1081,34 +1165,71 @@ export function buildBinanceClosedPnlList(rawList: BinanceUserTradeRaw[]): Close
 
   for (const raw of chronologicalList) {
     const quantity = parseFloat(raw.qty);
+    const commission = parseFloat(raw.commission);
+    const isCommissionKnown = BINANCE_USD_COMMISSION_ASSET_LIST.some((asset) => asset === raw.commissionAsset) && Number.isFinite(commission);
+    const knownCommission = isCommissionKnown ? commission : 0;
+    const openingDirection = raw.side === 'BUY' ? PositionSideEnum.Long : PositionSideEnum.Short;
+    const closingDirection = raw.side === 'BUY' ? PositionSideEnum.Short : PositionSideEnum.Long;
+    const openingKey = `${raw.symbol}:${raw.positionSide}:${openingDirection}`;
+    const closingKey = `${raw.symbol}:${raw.positionSide}:${closingDirection}`;
+    const closingPool = openingPoolBySymbolPositionSideDirection.get(closingKey);
+    const orderKey = `${raw.symbol}:${raw.orderId}`;
+    const isClosing = isBinanceClosingTrade(raw)
+      || closingOrderKeySet.has(orderKey)
+      || (closingPool !== undefined && closingPool.quantity > 0);
 
-    if (parseFloat(raw.realizedPnl) === 0) {
-      openingCommissionPool += parseFloat(raw.commission);
-      openQuantityPool += quantity;
+    if (!isClosing) {
+      const openingPool = openingPoolBySymbolPositionSideDirection.get(openingKey) ?? { commission: 0, quantity: 0, isTradingFeeComplete: true };
+
+      if (openingPool.quantity === 0) {
+        openingPool.commission = 0;
+        openingPool.isTradingFeeComplete = true;
+      }
+
+      openingPool.isTradingFeeComplete = openingPool.isTradingFeeComplete && isCommissionKnown;
+      openingPool.commission += knownCommission;
+      openingPool.quantity += quantity;
+      openingPoolBySymbolPositionSideDirection.set(openingKey, openingPool);
 
       continue;
     }
 
-    const openingShare = openQuantityPool > 0
-      ? openingCommissionPool * Math.min(quantity / openQuantityPool, 1)
+    const quantityTolerance = closingPool === undefined
+      ? 0
+      : Number.EPSILON * Math.max(closingPool.quantity, quantity) * 8;
+    const isTradingFeeComplete = closingPool !== undefined
+      && closingPool.quantity + quantityTolerance >= quantity
+      && closingPool.isTradingFeeComplete
+      && isCommissionKnown;
+    const openingShare = closingPool !== undefined && closingPool.quantity > 0
+      ? closingPool.commission * Math.min(quantity / closingPool.quantity, 1)
       : 0;
-    openingCommissionPool -= openingShare;
-    openQuantityPool = Math.max(openQuantityPool - quantity, 0);
 
-    const orderId = String(raw.orderId);
-    const group = groupByOrderId.get(orderId);
+    if (closingPool !== undefined) {
+      closingPool.commission -= openingShare;
+      closingPool.quantity = Math.max(closingPool.quantity - quantity, 0);
+    }
+
+    const group = groupBySymbolOrderId.get(orderKey);
 
     if (group === undefined) {
-      groupByOrderId.set(orderId, { fillList: [raw], openingCommission: openingShare });
+      groupBySymbolOrderId.set(orderKey, {
+        fillList: [raw],
+        openingCommission: openingShare,
+        closingCommission: knownCommission,
+        isTradingFeeComplete,
+      });
     } else {
       group.fillList.push(raw);
       group.openingCommission += openingShare;
+      group.closingCommission += knownCommission;
+      group.isTradingFeeComplete = group.isTradingFeeComplete && isTradingFeeComplete;
     }
   }
 
   const closedPnlList: ClosedPnl[] = [];
 
-  for (const [orderId, group] of groupByOrderId) {
+  for (const group of groupBySymbolOrderId.values()) {
     const { fillList } = group;
     const quantity = fillList.reduce((sum, raw) => sum + parseFloat(raw.qty), 0);
 
@@ -1117,7 +1238,7 @@ export function buildBinanceClosedPnlList(rawList: BinanceUserTradeRaw[]): Close
     }
 
     const grossPnl = fillList.reduce((sum, raw) => sum + parseFloat(raw.realizedPnl), 0);
-    const commission = fillList.reduce((sum, raw) => sum + parseFloat(raw.commission), 0) + group.openingCommission;
+    const commission = group.closingCommission + group.openingCommission;
     const exitPrice = fillList.reduce((sum, raw) => sum + parseFloat(raw.price) * parseFloat(raw.qty), 0) / quantity;
     const side = BINANCE_ORDER_SIDE[fillList[0].side] ?? OrderSideEnum.Buy;
     // Закрывающая покупка закрывает шорт, закрывающая продажа — лонг.
@@ -1127,7 +1248,9 @@ export function buildBinanceClosedPnlList(rawList: BinanceUserTradeRaw[]): Close
 
     closedPnlList.push({
       symbol: fillList[0].symbol,
-      orderId,
+      orderId: String(fillList[0].orderId),
+      positionSide: normalizeBinanceOrderPositionSide(fillList[0].positionSide),
+      isTradingFeeComplete: group.isTradingFeeComplete,
       side,
       quantity,
       entryPrice,

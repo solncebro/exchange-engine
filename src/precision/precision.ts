@@ -29,7 +29,7 @@ export type StepRounding = 'nearest' | 'up' | 'down';
 const GRID_NOISE_SHARE = 1e-9;
 
 /** The one place of grid math: every price/amount rounding goes through here. */
-function roundToStep(value: number, step: string, rounding: StepRounding = 'nearest'): number {
+export function roundToStep(value: number, step: string, rounding: StepRounding = 'nearest'): number {
   const stepValue = parseFloat(step);
 
   if (stepValue === 0 || Number.isNaN(stepValue)) {
@@ -42,8 +42,17 @@ function roundToStep(value: number, step: string, rounding: StepRounding = 'near
   // 2.96151 / 0.0001 can come out as 29615.099999999996; an on-grid value must not hop a whole step.
   // The division's own float error grows with the step count (above ~2^23 steps it exceeds a fixed
   // tolerance), so the tolerance scales with the magnitude.
-  const isOnGrid = Math.abs(stepCount - nearestCount) <= GRID_NOISE_SHARE + Math.abs(stepCount) * 4 * Number.EPSILON;
+  const stepCountNoise = GRID_NOISE_SHARE + Math.abs(stepCount) * 4 * Number.EPSILON;
+  const isOnGrid = Math.abs(stepCount - nearestCount) <= stepCountNoise;
   let gridCount = nearestCount;
+
+  if (rounding === 'nearest' && !isOnGrid && stepCountNoise < 0.25) {
+    const halfCount = Math.floor(stepCount) + 0.5;
+
+    if (Math.abs(stepCount - halfCount) <= stepCountNoise) {
+      gridCount = Math.round(halfCount);
+    }
+  }
 
   if (!isOnGrid && rounding === 'up') {
     gridCount = Math.ceil(stepCount);

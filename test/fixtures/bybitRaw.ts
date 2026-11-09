@@ -1,4 +1,5 @@
 import type {
+  BybitAccountInfoRaw,
   BybitInstrumentInfoRaw,
   BybitTickerRaw,
   BybitWebSocketKlineRaw,
@@ -55,7 +56,7 @@ export const BYBIT_RAW_INSTRUMENT_LIST: BybitInstrumentInfoRaw[] = [
 ];
 
 export const BYBIT_RAW_TICKER_LIST: BybitTickerRaw[] = [
-  { symbol: 'BTCUSDT', lastPrice: '65432.10', prevPrice24h: '63900.00', highPrice24h: '66000.00', lowPrice24h: '63500.00', price24hPcnt: '0.0235', volume24h: '12345.67', turnover24h: '805000000.00', time: 1700000000000 },
+  { symbol: 'BTCUSDT', lastPrice: '65432.10', prevPrice24h: '63900.00', highPrice24h: '66000.00', lowPrice24h: '63500.00', price24hPcnt: '0.0235', volume24h: '12345.67', turnover24h: '805000000.00' },
   { symbol: 'ETHUSDT', lastPrice: '3456.78', prevPrice24h: '3498.78', highPrice24h: '3550.00', lowPrice24h: '3400.00', price24hPcnt: '-0.0120', volume24h: '98765.43', turnover24h: '340000000.00' },
 ];
 
@@ -87,6 +88,122 @@ export const BYBIT_RAW_POSITION: BybitPositionRaw = {
   tradeMode: 1,
   liqPrice: '60000.00',
   positionIdx: 1,
+};
+
+export const BYBIT_RAW_ACCOUNT_INFO_DEMO_ISOLATED: BybitAccountInfoRaw = {
+  marginMode: 'ISOLATED_MARGIN',
+  updatedTime: '1772287133000',
+  unifiedMarginStatus: 3,
+  dcpStatus: 'OFF',
+  timeWindow: 0,
+  smpGroup: 0,
+  isMasterTrader: false,
+  spotHedgingStatus: 'OFF',
+};
+
+export const BYBIT_RAW_POSITION_DEMO_ISOLATED_ACCOUNT_BTCUSDT: BybitPositionRaw = {
+  symbol: 'BTCUSDT',
+  leverage: '5',
+  breakEvenPrice: '69253.72287297',
+  autoAddMargin: 0,
+  avgPrice: '69482.94585922',
+  liqPrice: '55770.4',
+  riskLimitValue: '300000',
+  takeProfit: '',
+  positionValue: '10216.16896',
+  isReduceOnly: false,
+  positionIMByMp: '1782.67669351',
+  tpslMode: 'Full',
+  riskId: 1,
+  trailingStop: '0',
+  liqPriceByMp: '55770.4',
+  unrealisedPnl: '1322.35189001',
+  markPrice: '79813.82',
+  adlRankIndicator: 2,
+  cumRealisedPnl: '31.59050382',
+  positionMM: '37.62663707',
+  createdTime: '1772287132368',
+  positionIdx: 0,
+  openTime: 0,
+  positionIM: '1782.67669351',
+  positionMMByMp: '37.62663707',
+  seq: 140679412961193,
+  updatedTime: '1793865600065',
+  side: 'Buy',
+  bustPrice: '',
+  positionBalance: '1782.67669351',
+  leverageSysUpdatedTime: '',
+  curRealisedPnl: '34.21600433',
+  size: '0.128',
+  positionStatus: 'Normal',
+  mmrSysUpdatedTime: '',
+  stopLoss: '',
+  tradeMode: 0,
+  sessionAvgPrice: '',
+  netDeltaRatio: '',
+};
+
+export const BYBIT_RAW_POSITION_DEMO_ISOLATED_ACCOUNT_ETHUSDT_EMPTY: BybitPositionRaw = {
+  symbol: 'ETHUSDT',
+  leverage: '2',
+  breakEvenPrice: '',
+  autoAddMargin: 0,
+  avgPrice: '0',
+  liqPrice: '',
+  riskLimitValue: '300000',
+  takeProfit: '',
+  positionValue: '',
+  isReduceOnly: false,
+  positionIMByMp: '',
+  tpslMode: 'Full',
+  riskId: 11,
+  trailingStop: '0',
+  unrealisedPnl: '',
+  markPrice: '2397.02',
+  adlRankIndicator: 0,
+  cumRealisedPnl: '-13.81737139',
+  positionMM: '',
+  createdTime: '1772326200551',
+  positionIdx: 0,
+  openTime: 0,
+  positionIM: '',
+  positionMMByMp: '',
+  seq: 140679412961413,
+  updatedTime: '1793879791998',
+  side: '',
+  bustPrice: '',
+  positionBalance: '0',
+  leverageSysUpdatedTime: '',
+  curRealisedPnl: '0',
+  size: '0',
+  positionStatus: 'Normal',
+  mmrSysUpdatedTime: '',
+  stopLoss: '',
+  tradeMode: 0,
+  sessionAvgPrice: '',
+  netDeltaRatio: '',
+};
+
+export const BYBIT_RAW_POSITION_LIST_LIVE_DEMO_CURSOR = 'BTCUSDT%2C1793865600065%2C0';
+
+export const BYBIT_RAW_POSITION_LIST_PAGE_DEMO_BTCUSDT = {
+  retCode: 0,
+  retMsg: 'OK',
+  result: {
+    nextPageCursor: BYBIT_RAW_POSITION_LIST_LIVE_DEMO_CURSOR,
+    category: 'linear',
+    list: [BYBIT_RAW_POSITION_DEMO_ISOLATED_ACCOUNT_BTCUSDT],
+  },
+  retExtInfo: {},
+  time: 1793886208324,
+};
+
+export const BYBIT_RAW_POSITION_LIST_END_PAGE_DEMO = {
+  retCode: 0,
+  retMsg: 'OK',
+  result: { nextPageCursor: '', category: 'linear', list: [] },
+  retExtInfo: {},
+  time: 1793886209062,
 };
 
 export const BYBIT_RAW_ORDER_RESPONSE: BybitOrderResponseRaw = {
@@ -193,8 +310,8 @@ export const BYBIT_RAW_ORDER_BOOK_STREAM: BybitOrderBookRaw = {
 };
 
 export const BYBIT_RAW_MARK_PRICE_TICKER_LIST: BybitTickerRaw[] = [
-  { symbol: 'BTCUSDT', lastPrice: '65432.10', prevPrice24h: '63900.00', highPrice24h: '66000.00', lowPrice24h: '63500.00', price24hPcnt: '0.0235', volume24h: '12345.67', turnover24h: '805000000.00', markPrice: '65450.50', indexPrice: '65440.20', fundingRate: '0.0001', nextFundingTime: '1700028800000', time: 1700000000000 },
-  { symbol: 'ETHUSDT', lastPrice: '3456.78', prevPrice24h: '3498.78', highPrice24h: '3550.00', lowPrice24h: '3400.00', price24hPcnt: '-0.0120', volume24h: '98765.43', turnover24h: '340000000.00', markPrice: '3458.30', indexPrice: '3457.10', fundingRate: '-0.00005', nextFundingTime: '1700028800000', time: 1700000000000 },
+  { symbol: 'BTCUSDT', lastPrice: '65432.10', prevPrice24h: '63900.00', highPrice24h: '66000.00', lowPrice24h: '63500.00', price24hPcnt: '0.0235', volume24h: '12345.67', turnover24h: '805000000.00', markPrice: '65450.50', indexPrice: '65440.20', fundingRate: '0.0001', nextFundingTime: '1700028800000' },
+  { symbol: 'ETHUSDT', lastPrice: '3456.78', prevPrice24h: '3498.78', highPrice24h: '3550.00', lowPrice24h: '3400.00', price24hPcnt: '-0.0120', volume24h: '98765.43', turnover24h: '340000000.00', markPrice: '3458.30', indexPrice: '3457.10', fundingRate: '-0.00005', nextFundingTime: '1700028800000' },
 ];
 
 export const BYBIT_RAW_OPEN_INTEREST: BybitOpenInterestRaw = {
@@ -353,3 +470,159 @@ export const BYBIT_RAW_RISK_LIMIT_PAGE_LIST: BybitRiskLimitRaw[] = [
   { id: 2, symbol: '1000000BABYDOGEUSDT', riskLimitValue: '50000', maintenanceMargin: '0.025', initialMargin: '0.05', isLowestRisk: 0, maxLeverage: '20.00', mmDeduction: '125' },
   { id: 3, symbol: '1000000BABYDOGEUSDT', riskLimitValue: '75000', maintenanceMargin: '0.03', initialMargin: '0.06', isLowestRisk: 0, maxLeverage: '16.67', mmDeduction: '375' },
 ];
+
+/** Живой ответ `/v5/market/funding/history` (BTCUSDT, 04.11.2026), открытый запрос без подписи. */
+export const BYBIT_RAW_FUNDING_HISTORY_RESPONSE_BTCUSDT = {
+  retCode: 0,
+  retMsg: 'OK',
+  result: {
+    category: 'linear',
+    list: [
+      { symbol: 'BTCUSDT', fundingRate: '0.0000747', fundingRateTimestamp: '1793721600000' },
+      { symbol: 'BTCUSDT', fundingRate: '0.0001', fundingRateTimestamp: '1793692800000' },
+    ],
+  },
+  retExtInfo: {},
+  time: 1793736605713,
+};
+
+/** Живые ответы `/v5/market/mark-price-kline` (BTCUSDT, минуты двух начислений выше, 04.11.2026), открытый запрос без подписи. */
+export const BYBIT_RAW_MARK_PRICE_KLINE_RESPONSE_BTCUSDT_1793721600000 = {
+  retCode: 0,
+  retMsg: 'OK',
+  result: { symbol: 'BTCUSDT', category: 'linear', list: [['1793721600000', '77660.1', '77693.7', '77600.1', '77600.1']] },
+  retExtInfo: {},
+  time: 1793736610258,
+};
+
+export const BYBIT_RAW_MARK_PRICE_KLINE_RESPONSE_BTCUSDT_1793692800000 = {
+  retCode: 0,
+  retMsg: 'OK',
+  result: { symbol: 'BTCUSDT', category: 'linear', list: [['1793692800000', '76782.73', '76800', '76781.93', '76781.93']] },
+  retExtInfo: {},
+  time: 1793736700450,
+};
+
+export const BYBIT_RAW_TICKER_RESPONSE_ETHUSDT_DEMO = {
+  retCode: 0,
+  retMsg: 'OK',
+  result: {
+    category: 'linear',
+    list: [
+      {
+        symbol: 'ETHUSDT',
+        lastPrice: '2396.35',
+        indexPrice: '2397.22',
+        markPrice: '2396.42',
+        prevPrice24h: '2312.82',
+        price24hPcnt: '0.036116',
+        highPrice24h: '2451.35',
+        lowPrice24h: '2310.71',
+        prevPrice1h: '2421.07',
+        openInterest: '780828.83',
+        openInterestValue: '1871193824.79',
+        singleOpenInterest: '390414.42',
+        singleOpenInterestValue: '935596924.38',
+        turnover24h: '3017341648.8065',
+        volume24h: '1250798.5000',
+        fundingRate: '0.0001',
+        nextFundingTime: '1793894400000',
+        predictedDeliveryPrice: '',
+        basisRate: '',
+        deliveryFeeRate: '',
+        deliveryTime: '0',
+        ask1Size: '16.12',
+        bid1Price: '2396.32',
+        ask1Price: '2396.33',
+        bid1Size: '0.01',
+        basis: '',
+        preOpenPrice: '',
+        preQty: '',
+        curPreListingPhase: '',
+        fundingIntervalHour: '8',
+        basisRateYear: '',
+        fundingCap: '0.00333',
+      },
+    ],
+  },
+  retExtInfo: {},
+  time: 1793883954764,
+};
+
+export const BYBIT_RAW_TICKER_STREAM_SNAPSHOT_ETHUSDT = {
+  topic: 'tickers.ETHUSDT',
+  type: 'snapshot',
+  data: {
+    symbol: 'ETHUSDT',
+    tickDirection: 'ZeroPlusTick',
+    price24hPcnt: '0.035956',
+    lastPrice: '2395.98',
+    prevPrice24h: '2312.82',
+    highPrice24h: '2451.35',
+    lowPrice24h: '2310.71',
+    prevPrice1h: '2421.07',
+    markPrice: '2396.07',
+    indexPrice: '2396.87',
+    openInterest: '780728.43',
+    openInterestValue: '1870679969.27',
+    turnover24h: '3017149855.4382',
+    volume24h: '1250718.4600',
+    fundingIntervalHour: '8',
+    fundingCap: '0.00333',
+    singleOpenInterest: '390364.22',
+    singleOpenInterestValue: '935339996.62',
+    nextFundingTime: '1793894400000',
+    fundingRate: '0.0001',
+    bid1Price: '2395.97',
+    bid1Size: '86.24',
+    ask1Price: '2395.98',
+    ask1Size: '13.46',
+    preOpenPrice: '',
+    preQty: '',
+    curPreListingPhase: '',
+  },
+  cs: 469404327617,
+  ts: 1793883952833,
+};
+
+export const BYBIT_RAW_ADD_MARGIN_RESPONSE_ETHUSDT_DEMO = {
+  retCode: 0,
+  retMsg: 'OK',
+  result: {
+    category: 'linear',
+    positionIdx: 0,
+    riskId: 11,
+    riskLimitValue: '300000',
+    symbol: 'ETHUSDT',
+    size: '0.01',
+    positionValue: '23.96370000',
+    avgPrice: '2396.37000000',
+    liqPrice: '1101.77',
+    bustPrice: '1098.13',
+    markPrice: '2396.43',
+    leverage: '2.00',
+    autoAddMargin: 0,
+    positionStatus: 'Normal',
+    positionIM: '12.98844002',
+    positionMM: '0.08567221',
+    unrealisedPnl: '0.00060000',
+    cumRealisedPnl: '-13.94821867',
+    takeProfit: '0.0',
+    stopLoss: '0.0',
+    trailingStop: '0.0',
+    createdTime: '1772326200551',
+    updatedTime: '1793883961344',
+  },
+  retExtInfo: {},
+  time: 1793883961345,
+};
+
+export const BYBIT_RAW_ADD_MARGIN_REFUSAL_FIVE_DECIMALS = {
+  retCode: 10001,
+  retMsg: 'params error: margin only supports 4 decimal places',
+};
+
+export const BYBIT_RAW_ADD_MARGIN_REFUSAL_POSITION_IDX_MISMATCH = {
+  retCode: 10001,
+  retMsg: 'position idx(1) not match position mode(0) in symbol(6)',
+};

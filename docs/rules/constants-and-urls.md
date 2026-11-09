@@ -26,6 +26,8 @@
 | BINANCE_SUB_ACCOUNT_*_PATH | пути подсчётов `/sapi/...` (0.26.0): список, универсальный перевод (он же история), активы спота v4, счёт фьючерсов v2 |
 | BINANCE_SUB_ACCOUNT_USDT_FUTURES_TYPE | 1 — `futuresType` для USDT-фьючерсов подсчёта |
 | BINANCE_SUB_ACCOUNT_LIST_PAGE_LIMIT / _MAX_PAGE_COUNT | 200 / 50 — страница списка подсчётов и потолок страниц |
+| BINANCE_USD_COMMISSION_ASSET_LIST | долларовые активы комиссии (`USDT`, `USDC`, `BNFCR`), в которых комиссия исполнения считается известной; `src/constants/binance.ts` |
+| BINANCE_POSITION_MARGIN_DECIMAL_PLACES | 8 — знаков после точки у суммы `/fapi/v1/positionMargin`: сумма добавляемой маржи усекается до 8 знаков |
 
 ## Bybit URL (src/constants/bybit.ts)
 
@@ -45,6 +47,16 @@
 | BYBIT_TRANSACTION_LOG_MAX_LIMIT | 50 (максимум `limit` для `/v5/account/transaction-log`, `fetchIncome` клампит к этому значению) |
 | BYBIT_INSTRUMENTS_MAX_PAGE_COUNT | 20 — потолок страниц в `fetchAllInstrumentsInfo`; страница = 1000 записей, всех инструментов на порядок меньше, поэтому потолок ничего не отсекает, а останавливает бесконечный курсор |
 | BYBIT_FUNDING_INCOME_TYPE_SET | `Set(['FUNDING', 'SETTLEMENT'])` — типы записи журнала, несущие начисление фандинга (нулевой `cashFlow`, сумма в поле `funding`); общий список для `BybitBaseClient.fetchIncome` (фильтрация) и `normalizeBybitIncomeList` (чтение суммы) |
+| BYBIT_ISOLATED_MARGIN_MODE, BYBIT_CROSS_MARGIN_MODE, BYBIT_PORTFOLIO_MARGIN_MODE | `'ISOLATED_MARGIN'`, `'REGULAR_MARGIN'`, `'PORTFOLIO_MARGIN'` — все значения `marginMode` из документации `/v5/account/info`; `resolveBybitAccountMarginMode` даёт по ним изолированную или общую (последние два) маржу, иное значение — `null` (неизвестно: чтение позиций отдаёт режим `null`, пути записи отказывают `MARGIN_MODE_UNKNOWN`); первые два шлёт `BybitLinear.setMarginMode`, на `PORTFOLIO_MARGIN` он запрос `Isolated` отклоняет (`PORTFOLIO_MARGIN_SWITCH_REFUSED`) |
+| BYBIT_POSITION_MARGIN_DECIMAL_PLACES | 4 — знаков после точки у суммы `/v5/position/add-margin` («Support up to 4 decimal»), сумма усекается до 4 знаков |
+| BYBIT_POSITION_LIST_PAGE_LIMIT | 200 — страница `/v5/position/list` в `fetchAllPositionList` (по документации «[1, 200]. Default: 20») |
+| BYBIT_POSITION_LIST_PAGE_INTERVAL_MS | 60 ms — пауза между страницами позиций |
+| BYBIT_POSITION_LIST_MAX_PAGE_COUNT | 20 — потолок страниц позиций. Последняя заполненная страница тоже отдаёт непустой курсор, конец виден только по следующей пустой странице, поэтому вмещается 19 полных страниц — 3800 позиций; 3801-я — отказ, а не неполный список |
+| BYBIT_ORDER_EXECUTION_PAGE_LIMIT | 100 — страница `/v5/execution/list` в `fetchAllOrderExecutionList` (по документации «[1, 100]. Default: 50») |
+| BYBIT_ORDER_EXECUTION_PAGE_INTERVAL_MS | 60 ms — пауза между страницами исполнений и между семидневными окнами `fetchOrderExecutionSummary` |
+| BYBIT_ORDER_EXECUTION_MAX_PAGE_COUNT | 1000 — потолок страниц исполнений в одном окне; дальше отказ |
+| BYBIT_MARGIN_MODE_UNKNOWN_ERROR_CODE | `'MARGIN_MODE_UNKNOWN'` — код `ExchangeError` только на путях записи (`setMarginMode`, плечо с направлением), когда текущий режим маржи не определён: режим единого счёта не из трёх известных или отсутствует, ячейки символа классического счёта расходятся по `tradeMode`, их нет или `tradeMode` не 0 и не 1. Чтение позиций этим кодом не отказывает — режим тогда `null` |
+| BYBIT_CLASSIC_ACCOUNT_STATUS | 1 — `unifiedMarginStatus` классического счёта: только на нём режим маржи берётся из `tradeMode` позиций |
 
 ## Конвертация интервалов Bybit
 
@@ -192,7 +204,10 @@ roundToStep(value, step, rounding = 'nearest'): number   — ЕДИНСТВЕН�
 
 amountToPrecision(tradeSymbol, amount, rounding = 'nearest'): number → roundToStep(amount, filter.stepSize, rounding)
 priceToPrecision(tradeSymbol, price, rounding = 'nearest'): number → roundToStep(price, filter.tickSize, rounding)
+BaseExchangeClient.formatIsolatedPositionMarginAmount(amount, decimalPlaces) → truncateToDecimalString(amount, decimalPlaces) (усечение кратчайшей десятичной записи числа, без деления на шаг)
 ```
+
+При округлении к ближайшему машинная погрешность около половины шага устраняется тем же допуском, если значение находится вне целой сетки и допуск меньше четверти шага. Точная половина округляется в сторону положительной бесконечности. Направленное округление не меняется.
 
 Отдельных функций «округлить вверх» / «округлить вниз» не заводить — направление передаётся аргументом. Без шага инструмента направление не действует: количество отбрасывает дробную часть, цена режется до `MAX_PRICE_DECIMAL_PLACES` знаков, как раньше.
 

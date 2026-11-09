@@ -55,11 +55,32 @@ export interface FetchBybitKlineArgs {
   options?: FetchPageWithLimitArgs;
 }
 
+export interface FetchBybitMarkPriceKlineArgs {
+  category: string;
+  symbol: string;
+  start: number;
+  end: number;
+}
+
 export interface SetBybitLeverageArgs {
   category: string;
   symbol: string;
   buyLeverage: number;
   sellLeverage: number;
+}
+
+export interface SetBybitPositionModeArgs {
+  category: string;
+  mode: number;
+  coin?: string;
+  symbol?: string;
+}
+
+export interface AddBybitPositionMarginArgs {
+  category: string;
+  symbol: string;
+  margin: string;
+  positionIdx: number;
 }
 
 export interface SwitchBybitIsolatedArgs {
@@ -78,6 +99,14 @@ export interface BybitListResult<T> {
 
 export interface BybitListResponse<T> {
   result: BybitListResult<T>;
+  time?: number;
+}
+
+export interface FetchAllBybitCursorPagesArgs<T> {
+  label: string;
+  maxPageCount: number;
+  pageIntervalMs: number;
+  readPage: (cursor: string | undefined) => Promise<BybitListResponse<T>>;
 }
 
 export interface BybitCancelBatchOrderRaw {
