@@ -1,11 +1,16 @@
 import axios from 'axios';
 import { BybitHttpClient } from '../../src/http/BybitHttpClient';
-import { BYBIT_INSTRUMENTS_MAX_PAGE_COUNT } from '../../src/constants/bybit';
+import { BYBIT_INSTRUMENTS_MAX_PAGE_COUNT, BYBIT_INSTRUMENTS_PAGE_LIMIT } from '../../src/constants/bybit';
 import type { ExchangeLogger } from '../../src/types/common';
 import { createMockLogger } from '../fixtures/mockLogger';
 import { createMockAxiosInstance } from '../fixtures/mockAxios';
 
 jest.mock('axios');
+
+/** Полная страница: короче предела — последняя, листание идёт только по полным. */
+function buildFullInstrumentPage(): Array<{ symbol: string }> {
+  return Array.from({ length: BYBIT_INSTRUMENTS_PAGE_LIMIT }, (_, index) => ({ symbol: `S${index}` }));
+}
 const mockedAxios = axios as jest.Mocked<typeof axios>;
 
 describe('BybitHttpClient — walking the instrument pages has a ceiling', () => {
@@ -31,18 +36,18 @@ describe('BybitHttpClient — walking the instrument pages has a ceiling', () =>
   it('stops at the page ceiling instead of following an endless cursor', async () => {
     // Курсор, который биржа отдаёт бесконечно: без потолка цикл не закончится никогда.
     mockInstance.get.mockResolvedValue({
-      data: { retCode: 0, result: { list: [{ symbol: 'BTCUSDT' }], nextPageCursor: 'more' } },
+      data: { retCode: 0, result: { list: buildFullInstrumentPage(), nextPageCursor: 'more' } },
     });
 
     const result = await client.fetchAllInstrumentsInfo('spot');
 
     expect(mockInstance.get).toHaveBeenCalledTimes(BYBIT_INSTRUMENTS_MAX_PAGE_COUNT);
-    expect(result).toHaveLength(BYBIT_INSTRUMENTS_MAX_PAGE_COUNT);
+    expect(result).toHaveLength(BYBIT_INSTRUMENTS_MAX_PAGE_COUNT * BYBIT_INSTRUMENTS_PAGE_LIMIT);
   });
 
   it('says out loud that the returned instrument list is partial', async () => {
     mockInstance.get.mockResolvedValue({
-      data: { retCode: 0, result: { list: [{ symbol: 'BTCUSDT' }], nextPageCursor: 'more' } },
+      data: { retCode: 0, result: { list: buildFullInstrumentPage(), nextPageCursor: 'more' } },
     });
 
     await client.fetchAllInstrumentsInfo('spot');
@@ -55,7 +60,7 @@ describe('BybitHttpClient — walking the instrument pages has a ceiling', () =>
   it('keeps walking every real page and stays silent when the cursor runs out', async () => {
     mockInstance.get
       .mockResolvedValueOnce({
-        data: { retCode: 0, result: { list: [{ symbol: 'BTCUSDT' }], nextPageCursor: 'second' } },
+        data: { retCode: 0, result: { list: buildFullInstrumentPage(), nextPageCursor: 'second' } },
       })
       .mockResolvedValueOnce({
         data: { retCode: 0, result: { list: [{ symbol: 'ETHUSDT' }], nextPageCursor: '' } },
@@ -64,7 +69,19 @@ describe('BybitHttpClient — walking the instrument pages has a ceiling', () =>
     const result = await client.fetchAllInstrumentsInfo('spot');
 
     expect(mockInstance.get).toHaveBeenCalledTimes(2);
-    expect(result.map((instrument) => instrument.symbol)).toEqual(['BTCUSDT', 'ETHUSDT']);
+    expect(result).toHaveLength(BYBIT_INSTRUMENTS_PAGE_LIMIT + 1);
+    expect(result.at(-1)?.symbol).toBe('ETHUSDT');
     expect(logger.warn).not.toHaveBeenCalled();
+  });
+
+  it('stops on a page shorter than the limit even when it carries a cursor', async () => {
+    mockInstance.get.mockResolvedValueOnce({
+      data: { retCode: 0, result: { list: [{ symbol: 'BTCUSDT' }], nextPageCursor: 'more' } },
+    });
+
+    const result = await client.fetchAllInstrumentsInfo('spot');
+
+    expect(mockInstance.get).toHaveBeenCalledTimes(1);
+    expect(result.map((instrument) => instrument.symbol)).toEqual(['BTCUSDT']);
   });
 });

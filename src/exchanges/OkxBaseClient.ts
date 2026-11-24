@@ -1,5 +1,6 @@
 import type {
   CancelBatchOrdersResult,
+  CancelOrderResult,
   CreateBatchOrdersResult,
   CreateOrderItemResult,
   CreateOrderWebSocketArgs,
@@ -1401,7 +1402,12 @@ abstract class OkxBaseClient extends BaseExchangeClient {
     }
   }
 
-  async cancelOrder(symbol: string, orderId: string): Promise<Order> {
+  /**
+   * Исход — ответ биржи на саму отмену: она отвечает лишь номером, поэтому исполненный до снятия
+   * объём неизвестен (`null`), и заявка после отмены не перечитывается. Ноль на его месте сказал
+   * бы вызывающему «ничего не исполнилось» — именно так когда-то продавали вдвое больше.
+   */
+  async cancelOrder(symbol: string, orderId: string): Promise<CancelOrderResult> {
     this.logger.debug(`[OKX] Cancelling order ${orderId} for ${symbol}`);
     const knownKind = this.conditionalOrderRegistry.lookup(symbol, orderId);
 
@@ -1429,11 +1435,11 @@ abstract class OkxBaseClient extends BaseExchangeClient {
       }
     }
 
-    // Отмена подтверждена обычной книгой — происхождение известно. Без пометки перечитывание
-    // опрашивало бы обе службы, а при совпадении номеров отвечало бы «номер неоднозначен».
+    // Отмена подтверждена обычной книгой — происхождение известно. Без пометки следующее чтение
+    // по номеру опрашивало бы обе службы, а при совпадении номеров отвечало бы «номер неоднозначен».
     this.conditionalOrderRegistry.record(symbol, orderId, 'plain');
 
-    return this.readOrderAfterOkxCancel(symbol, orderId, () => this.getOrder(symbol, orderId));
+    return { orderId, isCancelled: true, filledAmount: null };
   }
 
   private async cancelOkxPlainOrder(symbol: string, orderId: string): Promise<void> {
@@ -1448,7 +1454,7 @@ abstract class OkxBaseClient extends BaseExchangeClient {
     await this.httpClient.cancelOrder({ instId, ordId: orderId });
   }
 
-  private async cancelOkxConditionalOrder(symbol: string, orderId: string): Promise<Order> {
+  private async cancelOkxConditionalOrder(symbol: string, orderId: string): Promise<CancelOrderResult> {
     const instId = this.symbolMap.resolveInstId(symbol);
     const response = await this.httpClient.cancelAlgoOrders([{ algoId: orderId, instId }]);
     const item = response.data[0];
@@ -1461,31 +1467,7 @@ abstract class OkxBaseClient extends BaseExchangeClient {
       );
     }
 
-    return this.readOrderAfterOkxCancel(symbol, orderId, () => this.readOkxAlgoOrder(symbol, orderId));
-  }
-
-  /**
-   * Отмена возвращает лишь расписку, поэтому состояние перечитывается. Не удалось перечитать —
-   * наружу уходит ошибка с причиной и с прямым указанием, что отмена УЖЕ прошла. Прежде на этом
-   * месте собиралась заявка-выдумка (сторона «покупка», объём 0, исполнено 0), из которой правдой
-   * были только обозначение, номер и состояние: по ней нельзя отличить «сняли, ничего не
-   * исполнилось» от «сняли остаток, половина уже продана», и вызывающий продавал вдвое больше.
-   * У Bybit этот приём убран сознательно (`BybitBaseClient.cancelOrder` перечитывает и отказ не
-   * подменяет) — теперь так же и здесь.
-   */
-  private async readOrderAfterOkxCancel(symbol: string, orderId: string, read: () => Promise<Order>): Promise<Order> {
-    try {
-      return await read();
-    } catch (error) {
-      const errorText = toOkxErrorText(error);
-      this.logger.warn(`[OKX] Order ${orderId} was cancelled, but reading it back failed: ${errorText}`);
-
-      throw new ExchangeError(
-        `OKX: order ${orderId} for ${symbol} was cancelled, but reading its final state failed: ${errorText}`,
-        'OKX_CANCELLED_ORDER_UNREADABLE',
-        'OKX',
-      );
-    }
+    return { orderId, isCancelled: true, filledAmount: null };
   }
 
   private buildOkxNothingToChangeError(orderId: string): ExchangeError {
@@ -1733,7 +1715,7 @@ abstract class OkxBaseClient extends BaseExchangeClient {
    * ответах, поэтому спрашиваем оба. Валюта расчёта — свойство инструмента, а не запроса,
    * поэтому отбираем сами; у спота её нет вовсе, там возвращается всё.
    */
-  async fetchOpenConditionalOrders(settleCoin: string): Promise<Order[]> {
+  async fetchOpenConditionalOrders(settleCoin: string, symbol?: string): Promise<Order[]> {
     this.logger.debug('[OKX] Fetching open conditional orders');
 
     // Без загруженных инструментов валюту расчёта не с чем сверить, и отбор выбросил бы ВСЁ:
@@ -1746,7 +1728,9 @@ abstract class OkxBaseClient extends BaseExchangeClient {
       );
     }
 
-    const { rawList, failureList } = await this.fetchAllOpenOkxAlgoOrders();
+    const { rawList, failureList } = await this.fetchAllOpenOkxAlgoOrders(
+      symbol !== undefined ? this.symbolMap.resolveInstId(symbol) : undefined,
+    );
 
     // Неполный список условных заявок опаснее отказа: вызывающий не увидит своей защиты и решит,
     // что её нет. Поэтому отказ хоть по одному виду — честный отказ целиком, а не короткий список.

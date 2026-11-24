@@ -11,7 +11,6 @@ import { cancelOwnOrders } from './orderCleanup';
 const TIMEOUT_MS = 180_000;
 const RESTING_PRICE_RATIO = 0.5;
 const RELATIVE_EPSILON = 1e-6;
-const CANCELED_STATUS = 'canceled';
 
 async function checkOrderRoundTrip(context: LiveCheckContext, signal: AbortSignal): Promise<LiveCheckOutcome> {
   // Bybit was skipped here with a hard-coded "the key answers 10010" — without asking the exchange.
@@ -87,10 +86,10 @@ async function checkOrderRoundTrip(context: LiveCheckContext, signal: AbortSigna
       violationList.push('поставленной заявки нет в списке открытых');
     }
 
-    const cancelledOrder = await client.cancelOrder(symbol, placedOrder.id);
+    const cancelOutcome = await client.cancelOrder(symbol, placedOrder.id);
 
-    if (cancelledOrder.status !== CANCELED_STATUS) {
-      violationList.push(`после отмены статус '${cancelledOrder.status}', а не '${CANCELED_STATUS}'`);
+    if (!cancelOutcome.isCancelled || cancelOutcome.orderId !== placedOrder.id) {
+      violationList.push(`исход отмены ${JSON.stringify(cancelOutcome)} не подтверждает снятие заявки ${placedOrder.id}`);
     }
 
     const remainingList = await client.fetchOpenOrders(symbol);
@@ -103,7 +102,7 @@ async function checkOrderRoundTrip(context: LiveCheckContext, signal: AbortSigna
       `${symbol}: объём ${formatNumber(expectedAmount)} монет по цене ${formatNumber(restingPrice)} (рынок ${formatNumber(lastPrice)}, прочитан перед пробой), ` +
       `номер ${placedOrder.id}, клиентский номер ${clientOrderId}, режим позиции '${String(positionMode)}'; ` +
       `заявка вернулась объёмом ${formatNumber(placedOrder.amount)}, прочитана ценой ${formatNumber(readOrder.price)}, ` +
-      `после отмены статус '${cancelledOrder.status}', открытых с этим номером ${remainingList.filter((order) => order.id === placedOrder.id).length}`;
+      `исход отмены ${JSON.stringify(cancelOutcome)}, открытых с этим номером ${remainingList.filter((order) => order.id === placedOrder.id).length}`;
 
     if (violationList.length > 0) {
       return { status: 'diverged', fact: `${summaryText}; нарушений ${violationList.length}: ${joinViolationSample(violationList)}` };

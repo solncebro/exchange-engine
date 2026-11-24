@@ -1,5 +1,6 @@
 import type {
   CancelBatchOrdersResult,
+  CancelOrderResult,
   CancelOrderItemResult,
   CreateBatchOrdersResult,
   CreateOrderWebSocketArgs,
@@ -34,6 +35,7 @@ import { ExchangeError } from '../errors/ExchangeError';
 import type { PublicStreamLike } from '../types/stream';
 import { buildBatchItemResult } from '../normalizers/batchOrderOutcome';
 import { BybitHttpClient } from '../http/BybitHttpClient';
+import type { SymbolLimitFilterArgs } from '../http/BybitHttpClient.types';
 import type { BybitTransactionLogRaw } from '../normalizers/bybitNormalizer';
 import {
   normalizeBybitTradeSymbols,
@@ -348,11 +350,16 @@ abstract class BybitBaseClient extends BaseExchangeClient {
     return orderParams;
   }
 
-  async cancelOrder(symbol: string, orderId: string): Promise<Order> {
+  /**
+   * Исход — сам ответ биржи на отмену: она отвечает лишь номером (живой ответ демо 23.11.2026),
+   * поэтому исполненный до снятия объём неизвестен. Перечитывать заявку ради него не нужно: за
+   * исполнением следит поток счёта, а «уже нет» (110001) бросается ошибкой с этим кодом.
+   */
+  async cancelOrder(symbol: string, orderId: string): Promise<CancelOrderResult> {
     this.logger.debug(`[Bybit] Cancelling order ${orderId} for ${symbol}`);
     await this.httpClient.cancelOrder({ category: this.category, symbol, orderId });
 
-    return this.getOrder(symbol, orderId);
+    return { orderId, isCancelled: true, filledAmount: null };
   }
 
   async getOrder(symbol: string, orderId: string): Promise<Order> {
@@ -395,13 +402,19 @@ abstract class BybitBaseClient extends BaseExchangeClient {
     throw new Error(`Order with client id ${clientOrderId} not found for ${symbol}`);
   }
 
-  /** Без символа фьючерсам Bybit обязательно нужна валюта расчётов — иначе биржа отвечает 10001 (живой ответ 18.09.2026). */
-  private openOrdersScope(symbol?: string): { symbol: string } | { settleCoin: string } | Record<string, never> {
+  /**
+   * Без символа фьючерсам Bybit обязательно нужна валюта расчётов — иначе биржа отвечает 10001 (живой ответ 18.09.2026).
+   * Без фильтра биржа отдаёт в этом списке и условные заявки (живой ответ демо 23.11.2026) — а
+   * обычный список, как у Binance и OKX, только про обычные: условные читает fetchOpenConditionalOrders.
+   */
+  private openOrdersScope(symbol?: string): SymbolLimitFilterArgs {
     if (symbol !== undefined) {
-      return { symbol };
+      return { symbol, orderFilter: OrderFilterEnum.Order };
     }
 
-    return this.category === 'linear' ? { settleCoin: BYBIT_LINEAR_SETTLE_COIN } : {};
+    return this.category === 'linear'
+      ? { settleCoin: BYBIT_LINEAR_SETTLE_COIN, orderFilter: OrderFilterEnum.Order }
+      : { orderFilter: OrderFilterEnum.Order };
   }
 
   async fetchOpenOrders(symbol?: string): Promise<Order[]> {
@@ -411,14 +424,22 @@ abstract class BybitBaseClient extends BaseExchangeClient {
     return rawList.map(normalizeBybitOrder);
   }
 
-  async fetchOpenConditionalOrders(settleCoin: string): Promise<Order[]> {
-    this.logger.debug('[Bybit] Fetching open conditional (stop) orders');
+  /** Инструмент сужает запрос сам — монета расчёта при нём не нужна, как и у openOrdersScope. */
+  private conditionalOrdersScope(settleCoin: string, symbol?: string): SymbolLimitFilterArgs {
+    if (symbol !== undefined) {
+      return { symbol, orderFilter: OrderFilterEnum.StopOrder };
+    }
+
     // У спота вход списка заявок монету расчёта не принимает (документация open-order: «spot: not
     // supported») — там фильтр по условным заявкам идёт без неё.
-    const scope = this.category === 'spot'
+    return this.category === 'spot'
       ? { orderFilter: OrderFilterEnum.StopOrder }
       : { settleCoin, orderFilter: OrderFilterEnum.StopOrder };
-    const rawList = await this.httpClient.fetchAllOpenOrders(this.category, scope);
+  }
+
+  async fetchOpenConditionalOrders(settleCoin: string, symbol?: string): Promise<Order[]> {
+    this.logger.debug('[Bybit] Fetching open conditional (stop) orders');
+    const rawList = await this.httpClient.fetchAllOpenOrders(this.category, this.conditionalOrdersScope(settleCoin, symbol));
 
     return rawList.map(normalizeBybitOrder);
   }

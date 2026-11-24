@@ -69,6 +69,7 @@ Binance банит IP по совокупному весу запросов (`RE
 ### Общие эндпоинты (реализованы в base):
 - `fetchExchangeInfo()` → `BinanceExchangeInfoRaw` — GET `endpoints.exchangeInfo`
 - `fetchTickers()` → `BinanceTicker24hrRaw[]` — GET `endpoints.ticker24hr`
+- `fetchTicker(symbol)` → `BinanceTicker24hrRaw` (объект) — GET `endpoints.ticker24hr` с `symbol`
 - `fetchOrderBook(symbol, limit?)` → `BinanceOrderBookRaw` — GET `endpoints.depth`
 - `fetchKlines(symbol, interval, options?)` → GET `endpoints.klines`
 - `fetchTrades(symbol, limit?)` → `BinancePublicTradeRaw[]` — GET `endpoints.trades`

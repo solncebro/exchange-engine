@@ -5,6 +5,11 @@ import { createMockAxiosInstance } from '../fixtures/mockAxios';
 import { BYBIT_RAW_MARK_PRICE_KLINE_RESPONSE_BTCUSDT_1793721600000 } from '../fixtures/bybitRaw';
 
 jest.mock('axios');
+
+/** Страница из `count` строк — длина страницы теперь решает, последняя ли она. */
+function buildRowList(count: number, prefix: string): Array<{ symbol: string }> {
+  return Array.from({ length: count }, (_, index) => ({ symbol: `${prefix}${index}` }));
+}
 // Пауза между страницами журнала операций в тестах не нужна — листание проверяется по запросам.
 jest.mock('../../src/utils/sleep', () => ({ sleep: jest.fn().mockResolvedValue(undefined) }));
 const mockedAxios = axios as jest.Mocked<typeof axios>;
@@ -137,7 +142,7 @@ describe('BybitHttpClient', () => {
     it('paginates Trading and PreLaunch independently using nextPageCursor', async () => {
       mockInstance.get
         .mockResolvedValueOnce({
-          data: { retCode: 0, result: { list: [{ symbol: 'BTCUSDT' }], nextPageCursor: 'tradingCursor' } },
+          data: { retCode: 0, result: { list: [{ symbol: 'BTCUSDT' }, ...buildRowList(999, 'T')], nextPageCursor: 'tradingCursor' } },
         })
         .mockResolvedValueOnce({
           data: { retCode: 0, result: { list: [{ symbol: 'ETHUSDT' }], nextPageCursor: '' } },
@@ -154,7 +159,7 @@ describe('BybitHttpClient', () => {
       expect(mockInstance.get.mock.calls[1][1].params.status).toBe('Trading');
       expect(mockInstance.get.mock.calls[2][1].params.status).toBe('PreLaunch');
       expect(mockInstance.get.mock.calls[2][1].params.cursor).toBeUndefined();
-      expect(result.map((r) => r.symbol)).toEqual(['BTCUSDT', 'ETHUSDT', 'MEGAUSDT']);
+      expect(result.map((r) => r.symbol)).toEqual(['BTCUSDT', ...buildRowList(999, 'T').map((row) => row.symbol), 'ETHUSDT', 'MEGAUSDT']);
     });
   });
 
@@ -383,31 +388,51 @@ describe('BybitHttpClient', () => {
   });
 
   describe('fetchAllOpenOrders', () => {
-    it('follows nextPageCursor across three one-order pages until an empty page ends the list', async () => {
+    it('follows nextPageCursor across full pages of 50 and stops on the shorter one', async () => {
       mockInstance.get
-        .mockResolvedValueOnce({ data: { result: { list: [{ symbol: '1' }], nextPageCursor: 'c1' } } })
-        .mockResolvedValueOnce({ data: { result: { list: [{ symbol: '2' }], nextPageCursor: 'c2' } } })
-        .mockResolvedValueOnce({ data: { result: { list: [{ symbol: '3' }], nextPageCursor: 'c3' } } })
-        .mockResolvedValueOnce({ data: { result: { list: [], nextPageCursor: '' } } });
+        .mockResolvedValueOnce({ data: { result: { list: buildRowList(50, 'a'), nextPageCursor: 'c1' } } })
+        .mockResolvedValueOnce({ data: { result: { list: buildRowList(50, 'b'), nextPageCursor: 'c2' } } })
+        .mockResolvedValueOnce({ data: { result: { list: buildRowList(1, 'c'), nextPageCursor: 'c3' } } });
 
       const result = await client.fetchAllOpenOrders('linear', { settleCoin: 'USDT' });
 
-      expect(result.map((row: any) => row.symbol)).toEqual(['1', '2', '3']);
-      expect(mockInstance.get).toHaveBeenCalledTimes(4);
-      expect(mockInstance.get.mock.calls.map(([, options]) => options.params.cursor)).toEqual([undefined, 'c1', 'c2', 'c3']);
+      expect(result).toHaveLength(101);
+      expect(mockInstance.get).toHaveBeenCalledTimes(3);
+      expect(mockInstance.get.mock.calls.map(([, options]) => options.params.cursor)).toEqual([undefined, 'c1', 'c2']);
       expect(mockInstance.get.mock.calls.every(([, options]) => options.params.limit === 50)).toBe(true);
     });
 
+    // Живой ответ демо 23.11.2026: одна заявка при пределе 50 приходит с непустым курсором, а
+    // следующая страница пуста. Короткая страница — последняя: второго запроса нет.
+    it('reads one order with a live cursor in one request — a page shorter than 50 is the last one', async () => {
+      mockInstance.get.mockResolvedValueOnce({
+        data: {
+          retCode: 0, retMsg: 'OK',
+          result: {
+            nextPageCursor: '4c1ca6ce-d3b5-4e7a-8b82-e2d7b5f5950b%3A1795449318223%2C4c1ca6ce-d3b5-4e7a-8b82-e2d7b5f5950b%3A1795449318223',
+            category: 'linear',
+            list: [{ symbol: 'DOGEUSDT', orderType: 'Limit', orderLinkId: 'lchkmwtg2rcy3', orderId: '4c1ca6ce-d3b5-4e7a-8b82-e2d7b5f5950b' }],
+          },
+          retExtInfo: {}, time: 1795449320000,
+        },
+      });
+
+      const result = await client.fetchAllOpenOrders('linear', { symbol: 'DOGEUSDT', orderFilter: 'Order' });
+
+      expect(result).toHaveLength(1);
+      expect(mockInstance.get).toHaveBeenCalledTimes(1);
+    });
+
     // Живой ответ 18.09.2026: непустой курсор стоит и на последней ЗАПОЛНЕННОЙ странице —
-    // конец узнаётся по пустому списку следующей страницы, а не по одному курсору.
-    it('stops on a non-empty page whose cursor is followed by an empty page', async () => {
+    // после полной страницы конец узнаётся по пустому списку следующей.
+    it('stops on the empty page behind a full page with a cursor', async () => {
       mockInstance.get
-        .mockResolvedValueOnce({ data: { result: { list: [{ symbol: '1' }, { symbol: '2' }, { symbol: '3' }], nextPageCursor: 'c1' } } })
+        .mockResolvedValueOnce({ data: { result: { list: buildRowList(50, 'a'), nextPageCursor: 'c1' } } })
         .mockResolvedValueOnce({ data: { result: { list: [], nextPageCursor: '' } } });
 
       const result = await client.fetchAllOpenOrders('linear', { settleCoin: 'USDT' });
 
-      expect(result.map((row: any) => row.symbol)).toEqual(['1', '2', '3']);
+      expect(result).toHaveLength(50);
       expect(mockInstance.get).toHaveBeenCalledTimes(2);
     });
 
@@ -421,7 +446,7 @@ describe('BybitHttpClient', () => {
     });
 
     it('throws instead of paging on when the exchange repeats the same cursor', async () => {
-      mockInstance.get.mockResolvedValue({ data: { result: { list: [{ symbol: 'x' }], nextPageCursor: 'same' } } });
+      mockInstance.get.mockResolvedValue({ data: { result: { list: buildRowList(50, 'x'), nextPageCursor: 'same' } } });
 
       await expect(client.fetchAllOpenOrders('linear', { settleCoin: 'USDT' })).rejects.toThrow('open orders handed out a page cursor it had already handed out');
       expect(mockInstance.get).toHaveBeenCalledTimes(2);
@@ -432,7 +457,7 @@ describe('BybitHttpClient', () => {
       mockInstance.get.mockImplementation(async () => {
         pageCount++;
 
-        return { data: { result: { list: [{ symbol: `S${pageCount}` }], nextPageCursor: pageCount % 2 === 0 ? 'A' : 'B' } } };
+        return { data: { result: { list: buildRowList(50, `S${pageCount}`), nextPageCursor: pageCount % 2 === 0 ? 'A' : 'B' } } };
       });
 
       await expect(client.fetchAllOpenOrders('linear', { settleCoin: 'USDT' })).rejects.toThrow('already handed out');
@@ -463,9 +488,12 @@ describe('BybitHttpClient', () => {
       expect(mockInstance.get).toHaveBeenCalledTimes(2);
     });
 
+    // Курсор стоит и на последней странице, поэтому 20 страниц вмещают до 3999 позиций: 19 полных
+    // и одну короче (или пустую). 4000 — это 20 полных страниц, конец за ними не виден.
     it.each([
       [3800, 3800, null],
-      [3801, null, 'reached the page count limit (20)'],
+      [3999, 3999, null],
+      [4000, null, 'reached the page count limit (20)'],
     ])('reads %s positions when even the last filled page hands out a cursor: %s read, refusal %s', async (total, expectedLength, expectedError) => {
       let servedCount = 0;
       let pageCount = 0;
@@ -492,15 +520,24 @@ describe('BybitHttpClient', () => {
   describe('fetchAllOrderExecutionList', () => {
     it('reads execution pages of 100 by cursor through the common traversal until the empty page', async () => {
       mockInstance.get
-        .mockResolvedValueOnce({ data: { result: { list: [{ execId: '1' }], nextPageCursor: 'c1' } } })
+        .mockResolvedValueOnce({ data: { result: { list: Array.from({ length: 100 }, (_, index) => ({ execId: String(index) })), nextPageCursor: 'c1' } } })
         .mockResolvedValueOnce({ data: { result: { list: [], nextPageCursor: 'c2' } } });
 
       const result = await client.fetchAllOrderExecutionList({ symbol: 'BTCUSDT', orderId: '77', startTime: 1000, endTime: 5000 });
 
-      expect(result.map((row: any) => row.execId)).toEqual(['1']);
+      expect(result).toHaveLength(100);
       expect(mockInstance.get.mock.calls.map(([path]) => path)).toEqual(['/v5/execution/list', '/v5/execution/list']);
       expect(mockInstance.get.mock.calls.map(([, options]) => options.params.cursor)).toEqual([undefined, 'c1']);
       expect(mockInstance.get.mock.calls.every(([, options]) => options.params.limit === 100 && options.params.category === 'linear' && options.params.orderId === '77')).toBe(true);
+    });
+
+    it('stops on a page shorter than 100 even when it carries a cursor', async () => {
+      mockInstance.get.mockResolvedValueOnce({ data: { result: { list: [{ execId: '1' }], nextPageCursor: 'c1' } } });
+
+      const result = await client.fetchAllOrderExecutionList({ symbol: 'BTCUSDT', orderId: '77', startTime: 1000, endTime: 5000 });
+
+      expect(result.map((row: any) => row.execId)).toEqual(['1']);
+      expect(mockInstance.get).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -795,15 +832,36 @@ describe('BybitHttpClient', () => {
     // it, sent `cursor=null` 73 times in two seconds and got 10006 — every funding read and report failed.
     it('stops on a null cursor — the way the exchange really ends the log', async () => {
       mockInstance.get
-        .mockResolvedValueOnce({ data: { result: { list: [{ symbol: '1' }], nextPageCursor: 'c1' } } })
+        .mockResolvedValueOnce({ data: { result: { list: buildRowList(50, 'a'), nextPageCursor: 'c1' } } })
         .mockResolvedValueOnce({ data: { result: { list: [], nextPageCursor: null } } })
         .mockResolvedValue({ data: { result: { list: [{ symbol: 'must not be read' }], nextPageCursor: null } } });
 
       const result = await client.fetchAllTransactionLog({ category: 'linear', limit: 50 });
 
-      expect(result.map((row) => row.symbol)).toEqual(['1']);
+      expect(result).toHaveLength(50);
       expect(mockInstance.get).toHaveBeenCalledTimes(2);
       expect(mockInstance.get.mock.calls.map(([, options]) => options.params.cursor)).toEqual([undefined, 'c1']);
+    });
+
+    // Живой ответ демо 23.11.2026: 5 записей при пределе 50 — с курсором, null приходит лишь на
+    // следующей, пустой странице. Короткая страница — последняя.
+    it('reads a short live page in one request although it carries a cursor', async () => {
+      mockInstance.get.mockResolvedValueOnce({ data: { retCode: 0, result: { list: buildRowList(5, 'a'), nextPageCursor: '4635%3A0%2C4592%3A0' } } });
+
+      const result = await client.fetchAllTransactionLog({ category: 'linear', limit: 50, startTime: 1795445723488, endTime: 1795449323488 });
+
+      expect(result).toHaveLength(5);
+      expect(mockInstance.get).toHaveBeenCalledTimes(1);
+    });
+
+    it('without an ordered page size ends by the cursor only', async () => {
+      mockInstance.get
+        .mockResolvedValueOnce({ data: { result: { list: buildRowList(5, 'a'), nextPageCursor: 'c1' } } })
+        .mockResolvedValueOnce({ data: { result: { list: [], nextPageCursor: null } } });
+
+      await client.fetchAllTransactionLog({ category: 'linear' });
+
+      expect(mockInstance.get).toHaveBeenCalledTimes(2);
     });
 
     it('throws instead of paging on when the exchange repeats the same cursor', async () => {

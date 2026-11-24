@@ -67,6 +67,7 @@ export interface SetBybitLeverageArgs {
   symbol: string;
   buyLeverage: number;
   sellLeverage: number;
+  signal?: AbortSignal;
 }
 
 export interface SetBybitPositionModeArgs {
@@ -102,11 +103,20 @@ export interface BybitListResponse<T> {
   time?: number;
 }
 
+export interface ResolveNextBybitPageCursorArgs {
+  pageEntryCount: number;
+  /** Заказанный размер страницы; не задан — конец только по курсору. */
+  pageLimit: number | undefined;
+  nextPageCursor: string | null | undefined;
+}
+
 export interface FetchAllBybitCursorPagesArgs<T> {
   label: string;
+  /** Размер страницы, который просим у биржи: страница короче него — последняя. */
+  pageLimit: number;
   maxPageCount: number;
   pageIntervalMs: number;
-  readPage: (cursor: string | undefined) => Promise<BybitListResponse<T>>;
+  readPage: (cursor: string | undefined, limit: number) => Promise<BybitListResponse<T>>;
 }
 
 export interface BybitCancelBatchOrderRaw {

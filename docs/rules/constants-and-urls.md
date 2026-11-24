@@ -51,7 +51,7 @@
 | BYBIT_POSITION_MARGIN_DECIMAL_PLACES | 4 — знаков после точки у суммы `/v5/position/add-margin` («Support up to 4 decimal»), сумма усекается до 4 знаков |
 | BYBIT_POSITION_LIST_PAGE_LIMIT | 200 — страница `/v5/position/list` в `fetchAllPositionList` (по документации «[1, 200]. Default: 20») |
 | BYBIT_POSITION_LIST_PAGE_INTERVAL_MS | 60 ms — пауза между страницами позиций |
-| BYBIT_POSITION_LIST_MAX_PAGE_COUNT | 20 — потолок страниц позиций. Последняя заполненная страница тоже отдаёт непустой курсор, конец виден только по следующей пустой странице, поэтому вмещается 19 полных страниц — 3800 позиций; 3801-я — отказ, а не неполный список |
+| BYBIT_POSITION_LIST_MAX_PAGE_COUNT | 20 — потолок страниц позиций. Последняя страница тоже отдаёт непустой курсор, конец виден по странице короче 200, поэтому вмещается до 3999 позиций (19 полных страниц и одна короче); больше — отказ, а не неполный список |
 | BYBIT_ORDER_EXECUTION_PAGE_LIMIT | 100 — страница `/v5/execution/list` в `fetchAllOrderExecutionList` (по документации «[1, 100]. Default: 50») |
 | BYBIT_ORDER_EXECUTION_PAGE_INTERVAL_MS | 60 ms — пауза между страницами исполнений и между семидневными окнами `fetchOrderExecutionSummary` |
 | BYBIT_ORDER_EXECUTION_MAX_PAGE_COUNT | 1000 — потолок страниц исполнений в одном окне; дальше отказ |
@@ -192,7 +192,7 @@ countDecimalPlaces("1") → 0
 
 StepRounding = 'nearest' | 'up' | 'down'   (экспортируется из пакета)
 
-roundToStep(value, step, rounding = 'nearest'): number   — ЕДИНСТВЕННОЕ место математики сетки
+roundToStep(value, step, rounding = 'nearest'): number   — ЕДИНСТВЕННОЕ место математики сетки (экспортируется из корня пакета; `step` — строка)
   1. stepValue = parseFloat(step)
   2. Если stepValue === 0 или NaN → возвращает value
   3. decimals = countDecimalPlaces(step)

@@ -200,11 +200,11 @@ class OkxHttpClient extends BaseHttpClient {
     );
   }
 
-  private async signedPost<T>(path: string, body: HttpPostBody): Promise<OkxApiResponse<T>> {
+  private async signedPost<T>(path: string, body: HttpPostBody, signal?: AbortSignal): Promise<OkxApiResponse<T>> {
     return this.signedRequest(async () => {
       const bodyText = JSON.stringify(body);
       const headers = this.buildSignedHeaders('POST', path, bodyText);
-      const response = await this.post<OkxApiResponse<T>>(path, body, headers);
+      const response = await this.post<OkxApiResponse<T>>(path, body, headers, signal);
 
       if (response.code === String(OKX_STALE_TIMESTAMP_ERROR_CODE)) {
         throw new ExchangeError(`OKX API error ${response.code}: ${response.msg}`, OKX_STALE_TIMESTAMP_ERROR_CODE, 'OKX');
@@ -432,7 +432,7 @@ class OkxHttpClient extends BaseHttpClient {
       ...this.buildOkxOptionalParams({ posSide: args.posSide }),
     };
 
-    const response = await this.signedPost<OkxSetLeverageRaw>('/api/v5/account/set-leverage', body);
+    const response = await this.signedPost<OkxSetLeverageRaw>('/api/v5/account/set-leverage', body, args.signal);
 
     this.validateResponse(response);
 

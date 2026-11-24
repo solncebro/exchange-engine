@@ -15,6 +15,7 @@ import {
   BINANCE_RAW_FUNDING_RATE_HISTORY_LIST,
   BINANCE_RAW_EXCHANGE_INFO,
   BINANCE_RAW_TICKER_LIST,
+  BINANCE_RAW_SINGLE_FUTURES_TICKER,
   BINANCE_RAW_KLINE_LIST,
   BINANCE_RAW_FUTURES_ACCOUNT,
   BINANCE_RAW_ORDER_RESPONSE,
@@ -688,6 +689,25 @@ describe('BinanceFutures', () => {
 
       expect(result.confirmedLeverage).toBeNull();
     });
+
+    it('hands the caller\'s signal to the request', async () => {
+      const { client, mockInstance } = createClient();
+      const controller = new AbortController();
+      mockInstance.post.mockResolvedValue({ data: { symbol: 'BTCUSDT', leverage: 20 } });
+
+      await client.setLeverage(20, 'BTCUSDT', { signal: controller.signal });
+
+      expect(mockInstance.post.mock.calls[0][2].signal).toBe(controller.signal);
+    });
+
+    it('sends nothing once the caller\'s signal fired', async () => {
+      const { client, mockInstance } = createClient();
+      const controller = new AbortController();
+      controller.abort(new Error('caller deadline'));
+
+      await expect(client.setLeverage(20, 'BTCUSDT', { signal: controller.signal })).rejects.toThrow('caller deadline');
+      expect(mockInstance.post).not.toHaveBeenCalled();
+    });
   });
 
   describe('fetchFundingRateHistory', () => {
@@ -849,6 +869,35 @@ describe('BinanceFutures', () => {
       expect(btc!.symbol).toBe('BTCUSDT');
       expect(btc!.lastPrice).toBe(78516.3);
       expect(btc!.priceChangePercent).toBe(0.062);
+    });
+  });
+
+  describe('fetchTicker', () => {
+    it('requests one symbol and normalizes the single-object response', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: BINANCE_RAW_SINGLE_FUTURES_TICKER });
+
+      const ticker = await client.fetchTicker('BTCUSDT');
+
+      expect(mockInstance.get).toHaveBeenCalledWith('/fapi/v1/ticker/24hr', expect.objectContaining({ params: { symbol: 'BTCUSDT' } }));
+      expect(ticker).toEqual({
+        symbol: 'BTCUSDT',
+        lastPrice: 64908.6,
+        openPrice: 64924.4,
+        highPrice: 65679.2,
+        lowPrice: 63871,
+        priceChangePercent: -0.024,
+        volume: 181744.424,
+        quoteVolume: 11761524996.39,
+        timestamp: 1794856641058,
+      });
+    });
+
+    it('rejects a response for another symbol', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: BINANCE_RAW_SINGLE_FUTURES_TICKER });
+
+      await expect(client.fetchTicker('ETHUSDT')).rejects.toThrow(/ETHUSDT/);
     });
   });
 
@@ -1424,15 +1473,14 @@ describe('BinanceFutures', () => {
   });
 
   describe('cancelOrder', () => {
-    it('returns normalized order', async () => {
+    it('returns the outcome from the cancel answer itself', async () => {
       const { client, mockInstance } = createClient();
-      mockInstance.delete.mockResolvedValue({ data: BINANCE_RAW_ORDER_RESPONSE });
+      mockInstance.delete.mockResolvedValue({ data: { ...BINANCE_RAW_ORDER_RESPONSE, status: 'CANCELED', executedQty: '0.000' } });
 
       const result = await client.cancelOrder('BTCUSDT', '12345');
 
-      expect(result.id).toBe('123456789');
-      expect(result.symbol).toBe('BTCUSDT');
-      expect(result.side).toBe(OrderSideEnum.Buy);
+      expect(result).toEqual({ orderId: '123456789', isCancelled: true, filledAmount: 0 });
+      expect(mockInstance.get).not.toHaveBeenCalled();
     });
   });
 

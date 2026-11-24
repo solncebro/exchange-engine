@@ -36,15 +36,16 @@ describe('BinanceSpot', () => {
   });
 
   describe('cancelOrder', () => {
-    it('returns normalized order', async () => {
+    it('returns the outcome from the cancel answer itself', async () => {
       const { client, mockInstance } = createClient();
-      mockInstance.delete.mockResolvedValue({ data: BINANCE_RAW_ORDER_RESPONSE });
+      mockInstance.delete.mockResolvedValue({ data: { ...BINANCE_RAW_ORDER_RESPONSE, status: 'CANCELED', executedQty: '0.040' } });
 
       const result = await client.cancelOrder('BTCUSDT', '12345');
 
-      expect(result.id).toBe('123456789');
-      expect(result.symbol).toBe('BTCUSDT');
-      expect(result.side).toBe(OrderSideEnum.Buy);
+      expect(result.orderId).toBe('123456789');
+      expect(result.isCancelled).toBe(true);
+      expect(result.filledAmount).toBeCloseTo(0.04, 9);
+      expect(mockInstance.get).not.toHaveBeenCalled();
     });
   });
 
@@ -100,6 +101,28 @@ describe('BinanceSpot', () => {
       const result = await client.fetchOpenConditionalOrders('USDT');
 
       expect(result).toHaveLength(0);
+    });
+
+    it('asks the exchange for the one symbol when it is given', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: [] });
+
+      await client.fetchOpenConditionalOrders('USDT', 'BTCUSDT');
+
+      const [, options] = mockInstance.get.mock.calls[0];
+
+      expect(options.params.symbol).toBe('BTCUSDT');
+    });
+
+    it('asks for every symbol when none is given', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: [] });
+
+      await client.fetchOpenConditionalOrders('USDT');
+
+      const [, options] = mockInstance.get.mock.calls[0];
+
+      expect(options.params.symbol).toBeUndefined();
     });
   });
 

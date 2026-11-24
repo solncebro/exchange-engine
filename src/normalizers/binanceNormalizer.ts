@@ -26,7 +26,7 @@ import type {
   LeverageTierListBySymbol,
 } from '../types/common';
 import { TradeSymbolTypeEnum, PositionSideEnum, MarginModeEnum, TimeInForceEnum, OrderSideEnum } from '../types/common';
-import type { OrderRateLimit } from '../types/exchange';
+import type { CancelOrderResult, OrderRateLimit } from '../types/exchange';
 import { BINANCE_POSITION_SIDE, BINANCE_POSITION_IDX, BINANCE_ORDER_SIDE, BINANCE_ORDER_TYPE, BINANCE_ORDER_STATUS, BINANCE_ALGO_STATUS, BINANCE_TIME_IN_FORCE, resolveBinanceIncomeKind } from '../constants/mappings';
 import { parseOrderBookLevel } from './normalizerUtils';
 import { isConditionalOrderType } from '../constants/orderTypes';
@@ -790,6 +790,29 @@ export function normalizeBinanceOrder(raw: BinanceOrderResponseRaw): Order {
     closePosition: raw.closePosition,
     timestamp: raw.time ?? raw.updateTime,
     updatedTimestamp: raw.updateTime,
+  };
+}
+
+/**
+ * Ответ Binance на постановку несёт принятый объём и состояние: закрывающую заявку больше позиции
+ * биржа урезает уже здесь (живой ответ демо 23.11.2026: просили 206, `origQty` 103). Отмечаем это
+ * только у постановки — у прочитанной заявки «принятого» объёма нет.
+ */
+export function markBinancePlacementAnswer(order: Order): Order {
+  return { ...order, acceptedAmount: order.amount, acceptedStatus: order.status };
+}
+
+/**
+ * Ответ Binance на отмену обычной заявки — сама заявка, исполненный объём в ней есть. Нет поля —
+ * объём неизвестен: ноль здесь означал бы «ничего не исполнилось», а это была бы выдумка.
+ */
+export function normalizeBinanceCancelOrderResult(raw: BinanceOrderResponseRaw): CancelOrderResult {
+  const filledAmount = typeof raw.executedQty === 'string' ? parseFloat(raw.executedQty) : Number.NaN;
+
+  return {
+    orderId: String(raw.orderId),
+    isCancelled: true,
+    filledAmount: Number.isFinite(filledAmount) ? filledAmount : null,
   };
 }
 

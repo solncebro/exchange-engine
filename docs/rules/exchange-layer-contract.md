@@ -16,6 +16,7 @@
 Рыночные данные:
   loadTradeSymbols(): Promise<TradeSymbolBySymbol>
   fetchTickers(): Promise<TickerBySymbol>
+  fetchTicker(symbol): Promise<Ticker>  // только фьючерсы Binance и Bybit Linear, остальные отказывают
   fetchKlines(symbol, interval, options?): Promise<Kline[]>
   fetchAllKlines(symbolList, interval, options?): Promise<Map<string, Kline[]>>
 
@@ -30,10 +31,10 @@
 Ордера:
   createOrderWebSocket(args): Promise<Order>
   fetchOrderHistory(symbol, options?): Promise<Order[]>
-  cancelOrder(symbol, orderId): Promise<Order>
+  cancelOrder(symbol, orderId): Promise<CancelOrderResult>  // { orderId, isCancelled: true, filledAmount: number | null }, без перечитывания заявки
   getOrder(symbol, orderId): Promise<Order>
   fetchOpenOrders(symbol?): Promise<Order[]>
-  fetchOpenConditionalOrders(settleCoin): Promise<Order[]>
+  fetchOpenConditionalOrders(settleCoin, symbol?): Promise<Order[]>  // symbol необязателен: биржа отдаёт заявки только по инструменту, без него — весь счёт
   modifyOrder(args: ModifyOrderArgs): Promise<Order>
   cancelAllOrders(symbol): Promise<void>
   createBatchOrders(orderList): Promise<Order[]>
@@ -131,7 +132,7 @@ WebSocket Registry:
 - `closeOnTrigger?: boolean` — Bybit Linear conditional close (0.13.0, на spot не применяется)
 - `timeInForce?: TimeInForceEnum` — `GTC`/`IOC`/`FOK`/`PostOnly`
 - `clientOrderId?: string` — клиентский id (Bybit `orderLinkId`, Binance `newClientOrderId`, OKX `clOrdId`/`algoClOrdId`). **Общее правило для приложений под все три биржи: только латинские буквы и цифры, 1–32 знака** — самое строгое из трёх требований (OKX, `OKX_CLIENT_ORDER_ID_PATTERN`, отказ клиента до отправки `OKX_CLIENT_ORDER_ID_INVALID`); Binance и Bybit допускают до 36 знаков с дефисом и подчёркиванием, но такой номер на OKX не пройдёт
-- `orderFilter?: OrderFilterEnum` — Bybit Spot conditional filter: `Order` / `tpslOrder` / `StopOrder` (0.13.0, только spot)
+- `orderFilter?: OrderFilterEnum` — Bybit Spot conditional filter: `Order` / `tpslOrder` / `StopOrder` (только spot). Список открытых обычных заявок Bybit (`fetchOpenOrders`) сам передаёт бирже `Order`: условных заявок в нём нет
 - `marketUnit?: MarketUnitEnum` — Bybit Spot Market unit: `baseCoin` / `quoteCoin` (0.13.0, только spot)
 - `trailingDelta?: number` — Binance Spot STOP_LOSS/TAKE_PROFIT trailing (0.13.0)
 - `quoteOrderQty?: number` — Binance/Bybit Spot Market Buy: USDT-сумма вместо qty (0.13.0)
@@ -196,7 +197,7 @@ WebSocket Registry:
 `fetchPositionLeverage(symbol)` отдельно читает настроенное плечо Binance Futures; положительное конечное число либо `null`, если точное значение недоступно. Ошибки запроса проходят наружу. У остальных клиентов — `null` без запроса. Обычные чтения позиций этот метод не вызывают, но сами делают дополнительный запрос на каждый вызов. Binance Futures (`fetchPosition`, `fetchPositionSnapshot`, `fetchPositionList`, `fetchAllPositions`) каждый раз параллельно со `/fapi/v3/positionRisk` читает `/fapi/v1/symbolConfig` — из него плечо и режим маржи позиции. Bybit Linear плечо берёт из записи `/v5/position/list`, а для режима маржи каждый раз параллельно со списком позиций читает `/v5/account/info`; если он отказал, берёт последние успешно прочитанные сведения о счёте, а если их ещё нет — отдаёт позиции с режимом `null`. Доказательство: `src/exchanges/BinanceFutures.ts:590`, `src/exchanges/BaseExchangeClient.ts:389`, `src/exchanges/BinanceFutures.ts:615`, `src/exchanges/BybitLinear.ts:446`, `src/exchanges/BybitLinear.ts:476`.
 
 
-Опциональный третий параметр метода установки плеча: `SetLeverageOptions` с полем `direction?: 'long' | 'short'`. Bybit сохраняет встречную сторону при изолированной двусторонней марже, при общей марже меняет обе. Binance и OKX сохраняют прежнее общее поведение. Неизвестный режим счёта или недоступное плечо встречной стороны у Bybit приводят к отказу до записи.
+Опциональный третий параметр метода установки плеча: `SetLeverageOptions` с полем `direction?: 'long' | 'short'`. Bybit сохраняет встречную сторону при изолированной двусторонней марже, при общей марже меняет обе. Binance и OKX сохраняют прежнее общее поведение. Необязательный `signal?: AbortSignal` — отмена со стороны вызывающего (его срок вышел): запрос установки плеча, ещё не ушедший в сеть, не уходит вовсе, ушедший обрывается на стороне клиента; применила ли биржа уже полученный запрос — неизвестно, это решает вызывающий. Неизвестный режим счёта или недоступное плечо встречной стороны у Bybit приводят к отказу до записи.
 
 
 

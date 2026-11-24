@@ -16,5 +16,6 @@ export type { FormatWebSocketConnectionsReportArgs } from './utils/formatWebSock
 // Сквозной реэкспорт делает такую потерю невозможной: новый тип в этих файлах виден снаружи сам.
 // Имена двух файлов не пересекаются — проверено; сторож-тест держит это правило.
 export type { StepRounding } from './precision/precision';
+export { roundToStep } from './precision/precision';
 export * from './types/common';
 export * from './types/exchange';

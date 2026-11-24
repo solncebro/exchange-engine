@@ -2,11 +2,11 @@ import type { SetBybitLeverageArgs, SymbolLimitFilterArgs } from '../http/BybitH
 import type { BybitPositionListWithAccountInfo, BybitRememberedAccountInfo } from './BybitLinear.types';
 import type { BybitAccountInfoRaw, BybitPositionRaw } from '../normalizers/bybitNormalizer';
 import type { AddIsolatedPositionMarginArgs, FetchOrderExecutionSummaryArgs, SetLeverageOptions } from '../types/exchange';
-import type { OrderExecutionSummary } from '../types/common';
+import type { OrderExecutionSummary, Ticker } from '../types/common';
 import { buildOrderExecutionWindowList, summarizeOrderExecutionList } from '../utils/orderExecutionSummary';
 import type { OrderExecutionEntry } from '../utils/orderExecutionSummary.types';
 import { sleep } from '../utils/sleep';
-import type { CreateOrderWebSocketArgs, ExchangeArgs, FetchFundingRateHistoryArgs, SetLeverageResult } from '../types/exchange';
+import type { CancelOrderResult, CreateOrderWebSocketArgs, ExchangeArgs, FetchFundingRateHistoryArgs, SetLeverageResult } from '../types/exchange';
 import type { Position, Order, FundingRateHistory, FundingInfo, MarkPrice, OpenInterest, LeverageTier, LeverageTierListBySymbol } from '../types/common';
 import { MarginModeEnum, OrderSideEnum, OrderTypeEnum, PositionModeEnum, TimeInForceEnum } from '../types/common';
 import { ExchangeError } from '../errors/ExchangeError';
@@ -19,12 +19,14 @@ import {
 import {
   normalizeBybitPosition,
   normalizeBybitPositionList,
+  normalizeBybitPositionLeverage,
   isBybitPortfolioMarginAccount,
   resolveBybitMarginMode,
   resolveBybitPositionMarginMode,
   normalizeBybitFundingRateHistoryList,
   normalizeBybitFundingInfoList,
   normalizeBybitMarkPriceList,
+  normalizeBybitTickers,
   normalizeBybitOpenInterest,
   normalizeBybitRiskLimitList,
 } from '../normalizers/bybitNormalizer';
@@ -176,7 +178,7 @@ class BybitLinear extends BybitBaseClient {
     };
   }
 
-  async cancelOrder(symbol: string, orderId: string): Promise<Order> {
+  async cancelOrder(symbol: string, orderId: string): Promise<CancelOrderResult> {
     const positionIdx = parseBybitTrailingStopId(orderId);
 
     if (positionIdx === null) {
@@ -193,13 +195,7 @@ class BybitLinear extends BybitBaseClient {
       trailingStop: '0',
     });
 
-    return this.buildTrailingStopOrder({
-      symbol,
-      positionIdx,
-      side: OrderSideEnum.Buy,
-      activationPrice: 0,
-      status: 'canceled',
-    });
+    return { orderId, isCancelled: true, filledAmount: null };
   }
 
   async getOrder(symbol: string, orderId: string): Promise<Order> {
@@ -312,6 +308,14 @@ class BybitLinear extends BybitBaseClient {
     const rawList = await this.httpClient.fetchAllInstrumentsInfo(this.category);
 
     return normalizeBybitFundingInfoList(rawList);
+  }
+
+  /** Одним чтением списка позиций монеты; сведения о счёте здесь не нужны. Отказ чтения уходит наружу, как у Binance. */
+  async fetchPositionLeverage(symbol: string): Promise<number | null> {
+    this.logger.debug(`[Bybit] Fetching position leverage for ${symbol}`);
+    const raw = await this.httpClient.getPositionList('linear', { symbol });
+
+    return normalizeBybitPositionLeverage(raw.result.list ?? [], symbol);
   }
 
   async fetchPositionMode(): Promise<PositionModeEnum | undefined> {
@@ -509,7 +513,7 @@ class BybitLinear extends BybitBaseClient {
       : await this.readDirectionalLeverageParams(leverage, symbol, options);
 
     try {
-      await this.httpClient.setLeverage(params);
+      await this.httpClient.setLeverage({ ...params, signal: options?.signal });
     } catch (error) {
       if (error instanceof ExchangeError && error.code === BYBIT_LEVERAGE_NOOP_ERROR_CODE) {
         // «Плечо не изменилось» = на бирже УЖЕ стоит ровно запрошенное — это подтверждение.
@@ -641,6 +645,19 @@ class BybitLinear extends BybitBaseClient {
     await this.httpClient.setMarginMode(desiredMode);
     this.accountInfoReadSequence++;
     this.rememberAccountInfo({ ...accountInfo, marginMode: desiredMode }, this.accountInfoReadSequence);
+  }
+
+  async fetchTicker(symbol: string): Promise<Ticker> {
+    this.logger.debug(`[Bybit] Fetching ${this.category} ticker for ${symbol}`);
+    // Тот же запрос и тот же разборщик, что у списка, только с символом: в ответе список из одного элемента.
+    const raw = await this.httpClient.fetchTickers(this.category, { symbol });
+    const ticker = normalizeBybitTickers(raw.result.list, raw.time).get(symbol);
+
+    if (ticker === undefined) {
+      throw new ExchangeError(`Bybit: no ticker returned for ${symbol}`, 'TICKER_NOT_FOUND', 'bybit');
+    }
+
+    return ticker;
   }
 
   async fetchMarkPrice(symbol?: string): Promise<MarkPrice[]> {

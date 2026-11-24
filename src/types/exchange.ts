@@ -6,6 +6,7 @@ import type {
   Kline,
   TradeSymbolBySymbol,
   Order,
+  Ticker,
   TickerBySymbol,
   AccountBalances,
   AccountTrade,
@@ -219,6 +220,21 @@ export interface CancelOrderItemResult {
 
 export type CancelBatchOrdersResult = CancelOrderItemResult[];
 
+/**
+ * Исход отмены одной заявки — ответ биржи на саму отмену, без проверочного чтения заявки после
+ * неё. Отказ (в том числе «заявки уже нет»: Binance −2011, Bybit 110001 — исполненную и уже
+ * снятую биржа не различает) бросается ошибкой с кодом биржи, поэтому вернувшийся исход всегда
+ * значит «снята».
+ */
+export interface CancelOrderResult {
+  orderId: string;
+  isCancelled: true;
+  /** Исполненный до снятия объём — только когда биржа отдаёт его в ответе на отмену (обычная
+   *  заявка Binance). null — неизвестно: условная заявка Binance, Bybit и OKX отвечают лишь
+   *  номером или «успехом», и выдумывать ноль нельзя. */
+  filledAmount: number | null;
+}
+
 export interface ModifyOrderItemResult {
   orderId: string;
   isSuccess: boolean;
@@ -243,6 +259,8 @@ export interface ExchangeClient {
 
   loadTradeSymbols(): Promise<TradeSymbolBySymbol>;
   fetchTickers(): Promise<TickerBySymbol>;
+  /** Один тикер по символу; только фьючерсы Binance и Bybit, остальные рынки отказывают. */
+  fetchTicker(symbol: string): Promise<Ticker>;
   fetchKlines(symbol: string, interval: KlineInterval, options?: FetchPageWithLimitArgs): Promise<Kline[]>;
   fetchAllKlines(symbolList: string[], interval: KlineInterval, options?: FetchAllKlinesOptions): Promise<Map<string, Kline[]>>;
   fetchBalances(): Promise<AccountBalances>;
@@ -272,11 +290,12 @@ export interface ExchangeClient {
   getWebSocketConnectionInfoList(): WebSocketConnectionInfo[];
   close(): Promise<void>;
 
-  cancelOrder(symbol: string, orderId: string): Promise<Order>;
+  cancelOrder(symbol: string, orderId: string): Promise<CancelOrderResult>;
   getOrder(symbol: string, orderId: string): Promise<Order>;
   getOrderByClientOrderId(symbol: string, clientOrderId: string): Promise<Order>;
   fetchOpenOrders(symbol?: string): Promise<Order[]>;
-  fetchOpenConditionalOrders(settleCoin: string): Promise<Order[]>;
+  /** With `symbol` the exchange is asked for that instrument only; without it — every instrument of the settle coin. */
+  fetchOpenConditionalOrders(settleCoin: string, symbol?: string): Promise<Order[]>;
   modifyOrder(args: ModifyOrderArgs): Promise<Order>;
   cancelAllOrders(symbol: string): Promise<void>;
   createBatchOrders(orderList: CreateOrderWebSocketArgs[]): Promise<CreateBatchOrdersResult>;
@@ -377,6 +396,12 @@ export interface SubAccountClient {
 
 export interface SetLeverageOptions {
   direction?: 'long' | 'short';
+  /**
+   * Отмена со стороны вызывающего (его срок вышел). Сработавший сигнал: запрос установки, ещё не
+   * ушедший в сеть, не уходит вовсе, а ушедший обрывается на стороне клиента. Применила ли биржа
+   * уже полученный запрос — неизвестно; это решает вызывающий.
+   */
+  signal?: AbortSignal;
 }
 
 export interface FetchOrderExecutionSummaryArgs {

@@ -39,6 +39,15 @@ class TestHttpClient extends BaseHttpClient {
   testDelete<T>(url: string, params?: Record<string, string | number | boolean>, headers?: Record<string, string>) {
     return this.delete<T>(url, params, headers);
   }
+
+  testWriteWithSignal<T>(method: 'post' | 'postWithParams' | 'put' | 'putWithParams' | 'delete', signal: AbortSignal) {
+    if (method === 'post') return this.post<T>('/test', { a: 1 }, undefined, signal);
+    if (method === 'postWithParams') return this.postWithParams<T>('/test', { a: 1 }, undefined, signal);
+    if (method === 'put') return this.put<T>('/test', { a: 1 }, undefined, signal);
+    if (method === 'putWithParams') return this.putWithParams<T>('/test', { a: 1 }, undefined, signal);
+
+    return this.delete<T>('/test', { a: 1 }, undefined, signal);
+  }
 }
 
 function createMockAxiosInstance() {
@@ -363,6 +372,52 @@ describe('BaseHttpClient', () => {
 
       await expect(client.testDelete('/test')).rejects.toThrow();
       expect(mockInstance.delete).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('cancellation by the caller', () => {
+    const writeCaseList = [
+      { method: 'post', axiosMethod: 'post', configIndex: 2 },
+      { method: 'postWithParams', axiosMethod: 'post', configIndex: 2 },
+      { method: 'put', axiosMethod: 'put', configIndex: 2 },
+      { method: 'putWithParams', axiosMethod: 'put', configIndex: 2 },
+      { method: 'delete', axiosMethod: 'delete', configIndex: 1 },
+    ] as const;
+
+    it.each(writeCaseList)('$method hands the signal to the transport', async ({ method, axiosMethod, configIndex }) => {
+      const controller = new AbortController();
+      mockInstance[axiosMethod].mockResolvedValue({ data: 'ok' });
+
+      await client.testWriteWithSignal(method, controller.signal);
+
+      expect(mockInstance[axiosMethod].mock.calls[0][configIndex]).toMatchObject({ signal: controller.signal });
+    });
+
+    it.each(writeCaseList)('$method does not send a write whose signal already fired', async ({ method, axiosMethod }) => {
+      const controller = new AbortController();
+      const reason = new Error('caller deadline');
+      controller.abort(reason);
+
+      await expect(client.testWriteWithSignal(method, controller.signal)).rejects.toBe(reason);
+      expect(mockInstance[axiosMethod]).not.toHaveBeenCalled();
+    });
+
+    it('reports a write cancelled in flight as a warning, not as an exchange failure', async () => {
+      const controller = new AbortController();
+      let markSent: () => void = () => undefined;
+      const sent = new Promise<void>((resolve) => { markSent = resolve; });
+      mockInstance.post.mockImplementation((_url, _data, config) => new Promise((_resolve, reject) => {
+        config?.signal?.addEventListener?.('abort', () => reject(new actualAxios.CanceledError('canceled')));
+        markSent();
+      }));
+
+      const pending = client.testWriteWithSignal('post', controller.signal);
+      await sent;
+      controller.abort(new Error('caller deadline'));
+
+      await expect(pending).rejects.toThrow('canceled');
+      expect(logger.error).not.toHaveBeenCalled();
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('cancelled by the caller'));
     });
   });
 

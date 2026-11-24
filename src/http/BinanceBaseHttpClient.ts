@@ -67,8 +67,9 @@ abstract class BinanceBaseHttpClient extends BaseHttpClient {
   protected async signedPost<T>(
     path: string,
     params: Record<string, string | number | boolean> = {},
+    signal?: AbortSignal,
   ): Promise<T> {
-    return this.signedSend(params, (signedParams, headers) => this.postWithParams<T>(path, signedParams, headers));
+    return this.signedSend(params, (signedParams, headers) => this.postWithParams<T>(path, signedParams, headers, signal));
   }
 
   protected async signedPut<T>(
@@ -166,6 +167,10 @@ abstract class BinanceBaseHttpClient extends BaseHttpClient {
 
   async fetchTickers(): Promise<BinanceTicker24hrRaw[]> {
     return this.get<BinanceTicker24hrRaw[]>(this.endpoints.ticker24hr);
+  }
+
+  async fetchTicker(symbol: string): Promise<BinanceTicker24hrRaw> {
+    return this.get<BinanceTicker24hrRaw>(this.endpoints.ticker24hr, { symbol });
   }
 
   async fetchOrderBook(symbol: string, limit?: number): Promise<BinanceOrderBookRaw> {

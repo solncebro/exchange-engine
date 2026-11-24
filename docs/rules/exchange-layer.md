@@ -26,6 +26,7 @@ BaseExchangeClient (abstract, implements ExchangeClient)
 ### Реализовано (наследуется всеми):
 - `loadTradeSymbols()` — загрузка символов, очищает и перезаполняет `this.tradeSymbols` Map
 - `fetchTickers()` — делегирует в абстрактный `fetchAndNormalizeTickers()`
+- `fetchTicker(symbol)` — по умолчанию отказ (`Single ticker is not supported for <рынок> market`); реализован только у фьючерсов Binance и Bybit Linear
 - `fetchKlines()` — делегирует в абстрактный `fetchAndNormalizeKlines()`
 - `fetchAllKlines()` — батч-загрузка через `loadKlinesInChunks` утилиту (чанки по 200)
 - `fetchBalances()` — делегирует в абстрактный `fetchAndNormalizeBalances()`, логирует `"Fetching balance"`

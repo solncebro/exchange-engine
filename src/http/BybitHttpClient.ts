@@ -1,6 +1,7 @@
 import { buildBybitAuthHeaders } from '../auth/bybitAuth';
 import {
   BYBIT_INSTRUMENTS_MAX_PAGE_COUNT,
+  BYBIT_INSTRUMENTS_PAGE_LIMIT,
   BYBIT_OPEN_ORDERS_MAX_PAGE_COUNT,
   BYBIT_OPEN_ORDERS_PAGE_INTERVAL_MS,
   BYBIT_OPEN_ORDERS_PAGE_LIMIT,
@@ -51,6 +52,7 @@ import type {
   BybitResponse,
   FetchBybitKlineArgs,
   FetchAllBybitCursorPagesArgs,
+  ResolveNextBybitPageCursorArgs,
   FetchBybitMarkPriceKlineArgs,
   FetchTransactionLogArgs,
   FetchPageWithLimitArgs,
@@ -62,6 +64,22 @@ import type {
   SymbolFilterArgs,
   SymbolLimitFilterArgs,
 } from './BybitHttpClient.types';
+
+/**
+ * Курсор следующей страницы или null, если страница последняя. Последняя — короче заказанной или
+ * без курсора: Bybit отдаёт непустой курсор и на последней странице, а конец журнала помечает
+ * значением null (живые ответы 18.09.2026, 17.09.2026 и 23.11.2026). Без заказанного размера
+ * страницы конец виден только по курсору.
+ */
+function resolveNextBybitPageCursor(args: ResolveNextBybitPageCursorArgs): string | null {
+  const { pageEntryCount, pageLimit, nextPageCursor } = args;
+
+  if (pageLimit !== undefined && pageEntryCount < pageLimit) {
+    return null;
+  }
+
+  return nextPageCursor === undefined || nextPageCursor === null || nextPageCursor === '' ? null : nextPageCursor;
+}
 
 class BybitHttpClient extends BaseHttpClient {
   private readonly secret: string;
@@ -109,9 +127,10 @@ class BybitHttpClient extends BaseHttpClient {
   protected async authenticatedPost<T>(
     path: string,
     body: Record<string, unknown>,
+    signal?: AbortSignal,
   ): Promise<T> {
     const headers = this.buildAuthHeaders(JSON.stringify(body));
-    const response = await this.post<T & BybitApiResponse>(path, body, headers);
+    const response = await this.post<T & BybitApiResponse>(path, body, headers, signal);
 
     this.validateResponse(response);
 
@@ -172,7 +191,7 @@ class BybitHttpClient extends BaseHttpClient {
     let cursor: string | undefined;
 
     for (let pageCount = 0; pageCount < BYBIT_INSTRUMENTS_MAX_PAGE_COUNT; pageCount++) {
-      const params: Record<string, string | number | boolean> = { category, limit: 1000, status };
+      const params: Record<string, string | number | boolean> = { category, limit: BYBIT_INSTRUMENTS_PAGE_LIMIT, status };
 
       if (cursor) {
         params.cursor = cursor;
@@ -184,11 +203,17 @@ class BybitHttpClient extends BaseHttpClient {
       );
 
       allInstrumentList.push(...response.result.list);
-      cursor = response.result.nextPageCursor ?? undefined;
+      const nextCursor = resolveNextBybitPageCursor({
+        pageEntryCount: response.result.list.length,
+        pageLimit: BYBIT_INSTRUMENTS_PAGE_LIMIT,
+        nextPageCursor: response.result.nextPageCursor,
+      });
 
-      if (!cursor) {
+      if (nextCursor === null) {
         return allInstrumentList;
       }
+
+      cursor = nextCursor;
     }
 
     this.logger.warn(
@@ -318,8 +343,8 @@ class BybitHttpClient extends BaseHttpClient {
   /**
    * Обход открытых заявок по курсору. Страница — 20 (по умолчанию) или заказанные здесь 50 заявок,
    * а счёт один на все символы, поэтому без листания сверх первой страницы заявки терялись бы
-   * незамеченными. Конец — по ПУСТОЙ странице: биржа отдаёт непустой курсор и на последней
-   * заполненной странице (живой счёт 18.09.2026), поэтому проверять надо список, а не курсор.
+   * незамеченными. Конец — по странице короче заказанной или пустой: биржа отдаёт непустой курсор
+   * и на последней странице (живые ответы 18.09.2026 и 23.11.2026), поэтому проверять надо список.
    */
   async fetchAllOpenOrders(
     category: string,
@@ -327,9 +352,10 @@ class BybitHttpClient extends BaseHttpClient {
   ): Promise<BybitOrderResponseRaw[]> {
     return this.fetchAllCursorPages({
       label: 'open orders',
+      pageLimit: BYBIT_OPEN_ORDERS_PAGE_LIMIT,
       maxPageCount: BYBIT_OPEN_ORDERS_MAX_PAGE_COUNT,
       pageIntervalMs: BYBIT_OPEN_ORDERS_PAGE_INTERVAL_MS,
-      readPage: (cursor) => this.getOpenOrders(category, { ...options, limit: BYBIT_OPEN_ORDERS_PAGE_LIMIT, cursor }),
+      readPage: (cursor, limit) => this.getOpenOrders(category, { ...options, limit, cursor }),
     });
   }
 
@@ -343,7 +369,7 @@ class BybitHttpClient extends BaseHttpClient {
         await sleep(args.pageIntervalMs);
       }
 
-      const response = await args.readPage(cursor);
+      const response = await args.readPage(cursor, args.pageLimit);
       const pageEntryList = response.result?.list;
 
       if (!Array.isArray(pageEntryList)) {
@@ -353,16 +379,20 @@ class BybitHttpClient extends BaseHttpClient {
       allEntryList.push(...pageEntryList);
       const nextPageCursor = response.result.nextPageCursor;
 
-      if (pageEntryList.length === 0 || nextPageCursor === undefined || nextPageCursor === null || nextPageCursor === '') {
+      // Страница короче заказанной — последняя, хотя курсор биржа отдаёт и на ней (живой ответ
+      // демо 23.11.2026: одна заявка при пределе 50 — с курсором, следующая страница пуста).
+      const nextCursor = resolveNextBybitPageCursor({ pageEntryCount: pageEntryList.length, pageLimit: args.pageLimit, nextPageCursor });
+
+      if (nextCursor === null) {
         return allEntryList;
       }
 
-      if (seenCursorSet.has(nextPageCursor)) {
+      if (seenCursorSet.has(nextCursor)) {
         throw new Error(`[Bybit] ${args.label} handed out a page cursor it had already handed out — the answer would be incomplete`);
       }
 
-      seenCursorSet.add(nextPageCursor);
-      cursor = nextPageCursor;
+      seenCursorSet.add(nextCursor);
+      cursor = nextCursor;
     }
 
     throw new Error(
@@ -384,9 +414,10 @@ class BybitHttpClient extends BaseHttpClient {
   async fetchAllOrderExecutionList(options: SymbolLimitFilterArgs): Promise<BybitOrderExecutionRaw[]> {
     return this.fetchAllCursorPages({
       label: 'order executions',
+      pageLimit: BYBIT_ORDER_EXECUTION_PAGE_LIMIT,
       maxPageCount: BYBIT_ORDER_EXECUTION_MAX_PAGE_COUNT,
       pageIntervalMs: BYBIT_ORDER_EXECUTION_PAGE_INTERVAL_MS,
-      readPage: (cursor) => this.fetchOrderExecutionList({ ...options, limit: BYBIT_ORDER_EXECUTION_PAGE_LIMIT, cursor }),
+      readPage: (cursor, limit) => this.fetchOrderExecutionList({ ...options, limit, cursor }),
     });
   }
 
@@ -424,9 +455,10 @@ class BybitHttpClient extends BaseHttpClient {
   ): Promise<BybitPositionRaw[]> {
     return this.fetchAllCursorPages({
       label: 'position list',
+      pageLimit: BYBIT_POSITION_LIST_PAGE_LIMIT,
       maxPageCount: BYBIT_POSITION_LIST_MAX_PAGE_COUNT,
       pageIntervalMs: BYBIT_POSITION_LIST_PAGE_INTERVAL_MS,
-      readPage: (cursor) => this.getPositionList(category, { ...options, limit: BYBIT_POSITION_LIST_PAGE_LIMIT, cursor }),
+      readPage: (cursor, limit) => this.getPositionList(category, { ...options, limit, cursor }),
     });
   }
 
@@ -436,7 +468,7 @@ class BybitHttpClient extends BaseHttpClient {
       symbol: args.symbol,
       buyLeverage: String(args.buyLeverage),
       sellLeverage: String(args.sellLeverage),
-    });
+    }, args.signal);
   }
 
   async addPositionMargin(args: AddBybitPositionMarginArgs): Promise<Record<string, unknown>> {
@@ -554,16 +586,21 @@ class BybitHttpClient extends BaseHttpClient {
       // только отсутствием поля или пустой строкой. Прежняя проверка на null не останавливалась:
       // запрос уходил снова с `cursor=null`, десятки раз за секунду, и биржа отвечала 10006
       // «Too many visits» — так падало КАЖДОЕ чтение журнала: фандинг при закрытии и отчёт.
-      if (nextPageCursor === undefined || nextPageCursor === null || nextPageCursor === '') {
+      // null приходит лишь на следующей, пустой странице (живой ответ демо 23.11.2026: 5 записей
+      // при пределе 50 — с курсором), поэтому страница короче заказанной тоже конец. Без заказанного
+      // размера страницы её длину не с чем сравнить — тогда конец только по курсору.
+      const nextCursor = resolveNextBybitPageCursor({ pageEntryCount: response.result.list.length, pageLimit: options?.limit, nextPageCursor });
+
+      if (nextCursor === null) {
         return allEntryList;
       }
 
       // Тот же курсор второй раз — биржа не продвигается; листать дальше значит жечь лимит впустую.
-      if (nextPageCursor === cursor) {
+      if (nextCursor === cursor) {
         throw new Error('[Bybit] transaction log handed out the same page cursor twice — the answer would be incomplete');
       }
 
-      cursor = nextPageCursor;
+      cursor = nextCursor;
     }
 
     throw new Error(

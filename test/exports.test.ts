@@ -25,6 +25,7 @@ describe('export contract', () => {
     expect(api.formatWebSocketConnectionsReport).toBeDefined();
     expect(api.parseBybitOrderbookRawFrame).toBeDefined();
     expect(api.parseOkxOrderbookRawFrame).toBeDefined();
+    expect(api.roundToStep).toBeDefined();
     expect(api.MARKET_TYPE_LIST).toEqual(['futures', 'spot']);
   });
 

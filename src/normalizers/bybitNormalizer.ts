@@ -659,6 +659,25 @@ export function normalizeBybitPositionList(rawList: BybitPositionRaw[], accountI
 }
 
 /**
+ * Плечо монеты из списка её позиций: биржа отдаёт его и у монеты без позиции (живой ответ демо
+ * 23.11.2026). Как у Binance — одно плечо на монету: в режиме двух сторон обе строки должны
+ * совпасть, иначе ответ неоднозначен и плечо «неизвестно».
+ */
+export function normalizeBybitPositionLeverage(rawList: BybitPositionRaw[], symbol: string): number | null {
+  const leverageList = rawList.filter((raw) => raw.symbol === symbol).map((raw) => Number(raw.leverage));
+  const distinctLeverageList = [...new Set(leverageList)];
+
+  if (distinctLeverageList.length !== 1) {
+    return null;
+  }
+
+  const [leverage] = distinctLeverageList;
+
+  // Пустая строка даёт ноль: плечо всегда не меньше единицы, ноль — не значение.
+  return Number.isFinite(leverage) && leverage > 0 ? leverage : null;
+}
+
+/**
  * Тип прочитанной заявки Bybit. Обычная берётся из `orderType`, а защитная складывается из
  * двух полей: чем она является (`stopOrderType`) и чем исполнится при срабатывании
  * (`orderType`). Раньше читался только второй, и собственный стоп возвращался с биржи

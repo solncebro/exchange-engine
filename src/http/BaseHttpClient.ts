@@ -210,41 +210,46 @@ abstract class BaseHttpClient {
   protected post<T>(
     url: string,
     data?: HttpPostBody,
-    headers?: HttpHeaders
+    headers?: HttpHeaders,
+    signal?: AbortSignal
   ): Promise<T> {
-    return this.executeRequest(`POST ${url}`, () => this.axiosInstance.post<T>(url, data, { headers }));
+    return this.executeRequest(`POST ${url}`, () => this.axiosInstance.post<T>(url, data, { headers, signal }), signal);
   }
 
   protected postWithParams<T>(
     url: string,
     params?: HttpQueryParams,
-    headers?: HttpHeaders
+    headers?: HttpHeaders,
+    signal?: AbortSignal
   ): Promise<T> {
-    return this.executeRequest(`POST ${url}`, () => this.axiosInstance.post<T>(url, null, { params, headers }));
+    return this.executeRequest(`POST ${url}`, () => this.axiosInstance.post<T>(url, null, { params, headers, signal }), signal);
   }
 
   protected put<T>(
     url: string,
     data?: HttpRecord,
-    headers?: HttpHeaders
+    headers?: HttpHeaders,
+    signal?: AbortSignal
   ): Promise<T> {
-    return this.executeRequest(`PUT ${url}`, () => this.axiosInstance.put<T>(url, data, { headers }));
+    return this.executeRequest(`PUT ${url}`, () => this.axiosInstance.put<T>(url, data, { headers, signal }), signal);
   }
 
   protected putWithParams<T>(
     url: string,
     params?: HttpQueryParams,
-    headers?: HttpHeaders
+    headers?: HttpHeaders,
+    signal?: AbortSignal
   ): Promise<T> {
-    return this.executeRequest(`PUT ${url}`, () => this.axiosInstance.put<T>(url, null, { params, headers }));
+    return this.executeRequest(`PUT ${url}`, () => this.axiosInstance.put<T>(url, null, { params, headers, signal }), signal);
   }
 
   protected delete<T>(
     url: string,
     params?: HttpQueryParams,
-    headers?: HttpHeaders
+    headers?: HttpHeaders,
+    signal?: AbortSignal
   ): Promise<T> {
-    return this.executeRequest(`DELETE ${url}`, () => this.axiosInstance.delete<T>(url, { params, headers }));
+    return this.executeRequest(`DELETE ${url}`, () => this.axiosInstance.delete<T>(url, { params, headers, signal }), signal);
   }
 
   /**
@@ -257,8 +262,11 @@ abstract class BaseHttpClient {
   private async executeRequest<T>(
     label: string,
     requestFunction: () => Promise<AxiosResponse<T>>,
+    signal?: AbortSignal,
   ): Promise<T> {
     await this.beforeRequest();
+    // Ожидание по лимиту могло пережить срок вызывающего — тогда запрос не уходит вовсе.
+    signal?.throwIfAborted();
 
     try {
       this.logger.debug(label);
@@ -268,6 +276,13 @@ abstract class BaseHttpClient {
 
       return response.data;
     } catch (error) {
+      if (signal?.aborted) {
+        // Обрыв по просьбе вызывающего — не сбой биржи: ни ответа, ни ошибки уровня error.
+        this.logger.warn(`${label} cancelled by the caller; whether the exchange applied it is unknown`);
+
+        throw error;
+      }
+
       const axiosError = error as AxiosError;
       this.onResponse(axiosError.response?.status, axiosError.response?.headers, axiosError.response?.data);
       this.handleError(axiosError);

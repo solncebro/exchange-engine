@@ -208,24 +208,16 @@ describe('BybitSpot', () => {
   });
 
   describe('cancelOrder', () => {
-    it('returns the real order fetched after cancellation', async () => {
+    it('takes the outcome from the cancel answer and never reads the order back', async () => {
       const { client, mockInstance } = createClient();
       mockInstance.post.mockResolvedValue({
         data: { retCode: 0, result: { orderId: 'order-1', orderLinkId: '' } },
       });
-      mockInstance.get.mockResolvedValueOnce({
-        data: {
-          result: {
-            list: [{ ...BYBIT_RAW_ORDER_RESPONSE, orderId: 'order-1', symbol: 'BTCUSDT', orderStatus: 'Cancelled' }],
-          },
-        },
-      });
 
       const result = await client.cancelOrder('BTCUSDT', 'order-1');
 
-      expect(result.id).toBe('order-1');
-      expect(result.symbol).toBe('BTCUSDT');
-      expect(result.status).toBe('canceled');
+      expect(result).toEqual({ orderId: 'order-1', isCancelled: true, filledAmount: null });
+      expect(mockInstance.get).not.toHaveBeenCalled();
     });
   });
 

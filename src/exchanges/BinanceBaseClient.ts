@@ -1,4 +1,4 @@
-import type { CreateOrderWebSocketArgs, FetchPageWithLimitArgs, OrderRateLimit } from '../types/exchange';
+import type { CancelOrderResult, CreateOrderWebSocketArgs, FetchPageWithLimitArgs, OrderRateLimit } from '../types/exchange';
 import type {
   Kline,
   KlineInterval,
@@ -21,6 +21,8 @@ import {
   normalizeBinanceTradeSymbols,
   normalizeBinanceTickers,
   normalizeBinanceKlines,
+  markBinancePlacementAnswer,
+  normalizeBinanceCancelOrderResult,
   normalizeBinanceOrder,
   normalizeBinanceBalances,
   normalizeBinanceOrderBook,
@@ -226,11 +228,11 @@ abstract class BinanceBaseClient<T extends BinanceBaseHttpClient> extends BaseEx
     return rawList.map(normalizeBinanceOrder);
   }
 
-  async cancelOrder(symbol: string, orderId: string): Promise<Order> {
+  async cancelOrder(symbol: string, orderId: string): Promise<CancelOrderResult> {
     this.logger.debug(`[Binance] Cancelling order ${orderId} for ${symbol}`);
     const raw = await this.httpClient.cancelOrder(symbol, orderId);
 
-    return normalizeBinanceOrder(raw);
+    return normalizeBinanceCancelOrderResult(raw);
   }
 
   async getOrder(symbol: string, orderId: string): Promise<Order> {
@@ -254,9 +256,9 @@ abstract class BinanceBaseClient<T extends BinanceBaseHttpClient> extends BaseEx
     return rawList.map(normalizeBinanceOrder);
   }
 
-  async fetchOpenConditionalOrders(_settleCoin: string): Promise<Order[]> {
+  async fetchOpenConditionalOrders(_settleCoin: string, symbol?: string): Promise<Order[]> {
     this.logger.debug('[Binance] Fetching open conditional (stop) orders');
-    const rawList = await this.httpClient.getOpenOrders(undefined);
+    const rawList = await this.httpClient.getOpenOrders(symbol);
 
     return rawList.map(normalizeBinanceOrder).filter((order) => order.isConditional === true);
   }
@@ -306,13 +308,13 @@ abstract class BinanceBaseClient<T extends BinanceBaseHttpClient> extends BaseEx
     if (this.tradeStream.isConnected()) {
       this.logger.debug(`[Binance] Creating order via WebSocket: ${args.symbol}`);
 
-      return this.tradeStream.createOrder(orderParams);
+      return markBinancePlacementAnswer(await this.tradeStream.createOrder(orderParams));
     }
 
     this.logger.debug(`[Binance] Creating order via REST: ${args.symbol}`);
     const raw = await this.httpClient.createOrder(orderParams);
 
-    return normalizeBinanceOrder(raw);
+    return markBinancePlacementAnswer(normalizeBinanceOrder(raw));
   }
 
   getWebSocketConnectionInfoList(): WebSocketConnectionInfo[] {

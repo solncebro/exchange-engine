@@ -248,8 +248,8 @@ class BinanceFuturesHttpClient extends BinanceBaseHttpClient {
     return this.signedGet<BinanceUserTradeRaw[]>('/fapi/v1/userTrades', params);
   }
 
-  async setLeverage(symbol: string, leverage: number): Promise<BinanceSetLeverageResponseRaw> {
-    return this.signedPost<BinanceSetLeverageResponseRaw>('/fapi/v1/leverage', { symbol, leverage });
+  async setLeverage(symbol: string, leverage: number, signal?: AbortSignal): Promise<BinanceSetLeverageResponseRaw> {
+    return this.signedPost<BinanceSetLeverageResponseRaw>('/fapi/v1/leverage', { symbol, leverage }, signal);
   }
 
   async setMarginType(symbol: string, marginType: string): Promise<Record<string, unknown>> {

@@ -4,7 +4,20 @@ Universal TypeScript client library for cryptocurrency trading on Binance, Bybit
 
 ## Latest Release
 
-Текущая версия: `0.27.0`
+Текущая версия: `0.28.0`
+
+- **Тикер одного символа:** `fetchTicker(symbol)` для фьючерсов Binance и Bybit Linear возвращает тот же `Ticker`, что элемент `fetchTickers()`, но запросом по одному символу.
+- **ЛОМАЮЩЕЕ ИЗМЕНЕНИЕ — отмена заявки:** `cancelOrder(symbol, orderId)` возвращает `CancelOrderResult` (`orderId`, `isCancelled`, `filledAmount`), а не `Order`.
+- **Принятый биржей объём заявки:** поля `Order.acceptedAmount` и `Order.acceptedStatus`.
+- **Сигнал отмены при установке плеча:** `SetLeverageOptions.signal`.
+- **Условные заявки по инструменту:** `fetchOpenConditionalOrders(settleCoin, symbol?)`.
+- **Округление по шагу:** `roundToStep(value, step, rounding?)` экспортируется из корня пакета.
+- **Bybit:** `fetchPositionLeverage` работает у `BybitLinear`; `fetchOpenOrders` отдаёт только обычные заявки; листания останавливаются на странице короче заказанной.
+- **Быстрый путь разбора JSON:** `parseJsonPreservingLargeIntegers` возвращает обычный `JSON.parse`, когда в тексте нет 16 и более цифр подряд.
+
+Подробности и доказательства — в `CHANGELOG.md`, раздел `[0.28.0]`.
+
+Предыдущий выпуск: `0.27.0`:
 
 - **Новые методы `ExchangeClient`:** настроенное плечо позиции (`fetchPositionLeverage`), добавление изолированной маржи (`addIsolatedPositionMargin`, Binance Futures и Bybit Linear; сумма усекается до 8 и 4 знаков), исполнения счёта за окно (`fetchAccountTrades`, Binance Futures) и сводка исполнений заявки (`fetchOrderExecutionSummary`, Binance Futures и Bybit Linear).
 - **Плечо с направлением у Bybit:** `setLeverage(leverage, symbol, { direction })` при изолированной двусторонней марже сохраняет плечо встречной стороны, при общей меняет обе; когда данных для этого недостаточно — отказ до записи.
@@ -195,7 +208,7 @@ await client.createOrderWebSocket({
 }): Promise<Order>;
 
 // Cancel an order
-await client.cancelOrder(symbol: string, orderId: string): Promise<Order>;
+await client.cancelOrder(symbol: string, orderId: string): Promise<CancelOrderResult>;
 
 // Fetch order history
 await client.fetchOrderHistory(symbol: string, options?: FetchPageWithLimitArgs): Promise<Order[]>;

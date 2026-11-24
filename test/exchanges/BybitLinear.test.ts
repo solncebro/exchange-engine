@@ -5,6 +5,7 @@ import { createMockAxiosInstance } from '../fixtures/mockAxios';
 import {
   BYBIT_RAW_INSTRUMENT_LIST,
   BYBIT_RAW_TICKER_LIST,
+  BYBIT_RAW_SINGLE_LINEAR_TICKER_RESPONSE,
   BYBIT_RAW_KLINE_LIST,
   BYBIT_RAW_WALLET_BALANCE,
   BYBIT_RAW_POSITION,
@@ -64,7 +65,8 @@ describe('BybitLinear', () => {
     const { client, mockInstance } = createClient();
     const first = { execId: 'fill-1', orderId: '77', symbol: 'BTCUSDT', execQty: '0.4', execPrice: '100', execValue: '40', execFee: '0.04', feeCurrency: 'USDT', execTime: '1500', execType: 'Trade' };
     const second = { ...first, execId: 'fill-2', execQty: '0.6', execValue: '60', execFee: '0.06', execTime: '1600' };
-    mockInstance.get.mockResolvedValueOnce({ data: { retCode: 0, result: { list: [second], nextPageCursor: 'next' } } })
+    // A full page of 100 (the same fill repeated — deduplicated) keeps the paging going.
+    mockInstance.get.mockResolvedValueOnce({ data: { retCode: 0, result: { list: Array.from({ length: 100 }, () => second), nextPageCursor: 'next' } } })
       // Bybit marks the end of a cursor list with null (live transaction-log answer, 17.09.2026).
       .mockResolvedValueOnce({ data: { retCode: 0, result: { list: [second, first], nextPageCursor: null } } });
     const summary = await client.fetchOrderExecutionSummary({ symbol: 'BTCUSDT', orderId: '77', startTime: 1000, endTime: 5000 });
@@ -77,7 +79,7 @@ describe('BybitLinear', () => {
   it('rejects a repeated execution cursor instead of returning an incomplete total', async () => {
     const { client, mockInstance } = createClient();
     const fill = { execId: 'fill-1', orderId: '77', symbol: 'BTCUSDT', execQty: '0.4', execPrice: '100', execValue: '40', execFee: '0.04', feeCurrency: 'USDT', execTime: '1500', execType: 'Trade' };
-    mockInstance.get.mockResolvedValue({ data: { retCode: 0, result: { list: [fill], nextPageCursor: 'same' } } });
+    mockInstance.get.mockResolvedValue({ data: { retCode: 0, result: { list: Array.from({ length: 100 }, () => fill), nextPageCursor: 'same' } } });
     await expect(client.fetchOrderExecutionSummary({ symbol: 'BTCUSDT', orderId: '77', startTime: 1000, endTime: 5000 })).rejects.toThrow('order executions handed out a page cursor it had already handed out');
     expect(mockInstance.get).toHaveBeenCalledTimes(2);
   });
@@ -87,9 +89,9 @@ describe('BybitLinear', () => {
     const fill = { execId: 'fill-1', orderId: '77', symbol: 'BTCUSDT', execQty: '0.4', execPrice: '100', execValue: '40', execFee: '0.04', feeCurrency: 'USDT', execTime: '1500', execType: 'Trade' };
     const sleepSpy = jest.spyOn(sleepModule, 'sleep').mockResolvedValue(undefined);
     mockInstance.get
-      .mockResolvedValueOnce({ data: { retCode: 0, result: { list: [fill], nextPageCursor: 'A' } } })
-      .mockResolvedValueOnce({ data: { retCode: 0, result: { list: [fill], nextPageCursor: 'B' } } })
-      .mockResolvedValueOnce({ data: { retCode: 0, result: { list: [fill], nextPageCursor: 'A' } } });
+      .mockResolvedValueOnce({ data: { retCode: 0, result: { list: Array.from({ length: 100 }, () => fill), nextPageCursor: 'A' } } })
+      .mockResolvedValueOnce({ data: { retCode: 0, result: { list: Array.from({ length: 100 }, () => fill), nextPageCursor: 'B' } } })
+      .mockResolvedValueOnce({ data: { retCode: 0, result: { list: Array.from({ length: 100 }, () => fill), nextPageCursor: 'A' } } });
 
     await expect(client.fetchOrderExecutionSummary({ symbol: 'BTCUSDT', orderId: '77', startTime: 1000, endTime: 5000 })).rejects.toThrow('already handed out');
     expect(mockInstance.get).toHaveBeenCalledTimes(3);
@@ -101,7 +103,7 @@ describe('BybitLinear', () => {
     const fill = { execId: 'fill-1', orderId: '77', symbol: 'BTCUSDT', execQty: '0.4', execPrice: '100', execValue: '40', execFee: '0.04', feeCurrency: 'USDT', execTime: '1500', execType: 'Trade' };
     const sleepSpy = jest.spyOn(sleepModule, 'sleep').mockResolvedValue(undefined);
     mockInstance.get
-      .mockResolvedValueOnce({ data: { retCode: 0, result: { list: [fill], nextPageCursor: 'next' } } })
+      .mockResolvedValueOnce({ data: { retCode: 0, result: { list: Array.from({ length: 100 }, () => fill), nextPageCursor: 'next' } } })
       .mockResolvedValueOnce({ data: { retCode: 0, result: { nextPageCursor: '' } } });
 
     await expect(client.fetchOrderExecutionSummary({ symbol: 'BTCUSDT', orderId: '77', startTime: 1000, endTime: 5000 })).rejects.toThrow('order executions page 2 came without a list');
@@ -125,7 +127,7 @@ describe('BybitLinear', () => {
     const { client, mockInstance } = createClient();
     const fill = { execId: 'fill-1', orderId: '77', symbol: 'BTCUSDT', execQty: '0.4', execPrice: '100', execValue: '40', execFee: '0.04', feeCurrency: 'USDT', execTime: '1500', execType: 'Trade' };
     mockInstance.get
-      .mockResolvedValueOnce({ data: { retCode: 0, result: { list: [fill], nextPageCursor: 'next' } } })
+      .mockResolvedValueOnce({ data: { retCode: 0, result: { list: Array.from({ length: 100 }, () => fill), nextPageCursor: 'next' } } })
       .mockResolvedValueOnce({ data: { retCode: 0, result: { list: [], nextPageCursor: 'after-empty' } } });
     const summary = await client.fetchOrderExecutionSummary({ symbol: 'BTCUSDT', orderId: '77', startTime: 1000, endTime: 5000 });
     expect(mockInstance.get).toHaveBeenCalledTimes(2);
@@ -141,11 +143,82 @@ describe('BybitLinear', () => {
     expect(mockInstance.get.mock.calls[1][1].params).toMatchObject({ startTime: 1000 + 7 * 24 * 60 * 60 * 1000, endTime });
   });
 
-  it('returns unknown without a request when separate leverage reads are unsupported', async () => {
-    const { client, mockInstance } = createClient();
+  describe('fetchPositionLeverage', () => {
+    // Живой ответ демо 23.11.2026: у монеты без позиции биржа всё равно отдаёт её плечо.
+    const FLAT_DOGEUSDT_POSITION_ANSWER = {
+      retCode: 0, retMsg: 'OK',
+      result: {
+        nextPageCursor: 'DOGEUSDT%2C1790355662609%2C0', category: 'linear',
+        list: [{
+          symbol: 'DOGEUSDT', leverage: '3', breakEvenPrice: '', autoAddMargin: 0, avgPrice: '0', liqPrice: '', riskLimitValue: '250000',
+          takeProfit: '', positionValue: '', isReduceOnly: false, positionIMByMp: '', tpslMode: 'Full', riskId: 206, trailingStop: '0',
+          unrealisedPnl: '', markPrice: '0.05884', adlRankIndicator: 0, cumRealisedPnl: '-0.91070207', positionMM: '',
+          createdTime: '1789651507806', positionIdx: 0, openTime: 0, positionIM: '', positionMMByMp: '', seq: 140679213961560,
+          updatedTime: '1790355662609', side: '', bustPrice: '', positionBalance: '0', leverageSysUpdatedTime: '', curRealisedPnl: '0',
+          size: '0', positionStatus: 'Normal', mmrSysUpdatedTime: '', stopLoss: '', tradeMode: 0, sessionAvgPrice: '', netDeltaRatio: '',
+        }],
+      },
+      retExtInfo: {}, time: 1795446961346,
+    };
 
-    await expect(client.fetchPositionLeverage('BTCUSDT')).resolves.toBeNull();
-    expect(mockInstance.get).not.toHaveBeenCalled();
+    it('reads the leverage of a coin without a position from the per-coin position list, in one request', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: FLAT_DOGEUSDT_POSITION_ANSWER });
+
+      await expect(client.fetchPositionLeverage('DOGEUSDT')).resolves.toBe(3);
+      expect(mockInstance.get).toHaveBeenCalledTimes(1);
+      expect(mockInstance.get.mock.calls[0][0]).toBe('/v5/position/list');
+      expect(mockInstance.get.mock.calls[0][1].params).toMatchObject({ category: 'linear', symbol: 'DOGEUSDT' });
+    });
+
+    it('returns the one leverage both hedge sides share', async () => {
+      const { client, mockInstance } = createClient();
+      const [flatEntry] = FLAT_DOGEUSDT_POSITION_ANSWER.result.list;
+      mockInstance.get.mockResolvedValue({
+        data: { ...FLAT_DOGEUSDT_POSITION_ANSWER, result: { ...FLAT_DOGEUSDT_POSITION_ANSWER.result, list: [{ ...flatEntry, positionIdx: 1, leverage: '5' }, { ...flatEntry, positionIdx: 2, leverage: '5' }] } },
+      });
+
+      await expect(client.fetchPositionLeverage('DOGEUSDT')).resolves.toBe(5);
+    });
+
+    // Как у Binance: одно плечо на монету — число, неоднозначный ответ — «неизвестно».
+    it('says unknown when the hedge sides disagree', async () => {
+      const { client, mockInstance } = createClient();
+      const [flatEntry] = FLAT_DOGEUSDT_POSITION_ANSWER.result.list;
+      mockInstance.get.mockResolvedValue({
+        data: { ...FLAT_DOGEUSDT_POSITION_ANSWER, result: { ...FLAT_DOGEUSDT_POSITION_ANSWER.result, list: [{ ...flatEntry, positionIdx: 1, leverage: '5' }, { ...flatEntry, positionIdx: 2, leverage: '10' }] } },
+      });
+
+      await expect(client.fetchPositionLeverage('DOGEUSDT')).resolves.toBeNull();
+    });
+
+    it.each(['', '0', '-1', 'abc'])('says unknown for an unsuitable leverage %p', async (leverage) => {
+      const { client, mockInstance } = createClient();
+      const [flatEntry] = FLAT_DOGEUSDT_POSITION_ANSWER.result.list;
+      mockInstance.get.mockResolvedValue({
+        data: { ...FLAT_DOGEUSDT_POSITION_ANSWER, result: { ...FLAT_DOGEUSDT_POSITION_ANSWER.result, list: [{ ...flatEntry, leverage }] } },
+      });
+
+      await expect(client.fetchPositionLeverage('DOGEUSDT')).resolves.toBeNull();
+    });
+
+    it('does not borrow the leverage of another coin or of an empty answer', async () => {
+      const { client, mockInstance } = createClient();
+      const [flatEntry] = FLAT_DOGEUSDT_POSITION_ANSWER.result.list;
+      mockInstance.get
+        .mockResolvedValueOnce({ data: { ...FLAT_DOGEUSDT_POSITION_ANSWER, result: { ...FLAT_DOGEUSDT_POSITION_ANSWER.result, list: [{ ...flatEntry, symbol: 'ETHUSDT' }] } } })
+        .mockResolvedValueOnce({ data: { ...FLAT_DOGEUSDT_POSITION_ANSWER, result: { ...FLAT_DOGEUSDT_POSITION_ANSWER.result, list: [] } } });
+
+      await expect(client.fetchPositionLeverage('DOGEUSDT')).resolves.toBeNull();
+      await expect(client.fetchPositionLeverage('DOGEUSDT')).resolves.toBeNull();
+    });
+
+    it('propagates a failed read rather than inventing leverage, like Binance', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: { retCode: 10001, retMsg: 'params error', result: {}, retExtInfo: {}, time: 1 } });
+
+      await expect(client.fetchPositionLeverage('DOGEUSDT')).rejects.toThrow();
+    });
   });
 
   it('rejects unsupported normalized account execution history', async () => {
@@ -710,10 +783,18 @@ describe('BybitLinear', () => {
       expect(allPositionList.map(entry => entry.symbol)).toEqual(['BTCUSDT']);
     });
 
-    it('reads every page of all positions by cursor until the live empty end page', async () => {
+    it('reads every full page of all positions by cursor and stops on the shorter one', async () => {
       const { client, mockInstance } = createClient();
       const sleepSpy = jest.spyOn(sleepModule, 'sleep').mockResolvedValue(undefined);
       const secondPageCursor = 'ETHUSDT%2C1793879791998%2C0';
+      // Полная первая страница (200 позиций) — листание продолжается; вторая короче — последняя.
+      const firstPage = {
+        ...BYBIT_RAW_POSITION_LIST_PAGE_DEMO_BTCUSDT,
+        result: {
+          ...BYBIT_RAW_POSITION_LIST_PAGE_DEMO_BTCUSDT.result,
+          list: Array.from({ length: 200 }, () => BYBIT_RAW_POSITION_DEMO_ISOLATED_ACCOUNT_BTCUSDT),
+        },
+      };
       const secondPage = {
         ...BYBIT_RAW_POSITION_LIST_PAGE_DEMO_BTCUSDT,
         result: {
@@ -722,7 +803,7 @@ describe('BybitLinear', () => {
           list: [{ ...BYBIT_RAW_POSITION_DEMO_ISOLATED_ACCOUNT_ETHUSDT_EMPTY, size: '0.01', avgPrice: '2397.02', side: 'Buy' }],
         },
       };
-      const positionPageList: unknown[] = [BYBIT_RAW_POSITION_LIST_PAGE_DEMO_BTCUSDT, secondPage, BYBIT_RAW_POSITION_LIST_END_PAGE_DEMO];
+      const positionPageList: unknown[] = [firstPage, secondPage, BYBIT_RAW_POSITION_LIST_END_PAGE_DEMO];
 
       mockInstance.get.mockImplementation(async (requestPath: string) => requestPath === '/v5/account/info'
         ? { data: { retCode: 0, result: BYBIT_RAW_ACCOUNT_INFO_DEMO_ISOLATED } }
@@ -733,14 +814,17 @@ describe('BybitLinear', () => {
         .filter(call => call[0] === '/v5/position/list')
         .map(call => call[1].params);
 
-      expect(allPositionList.map(entry => entry.symbol)).toEqual(['BTCUSDT', 'ETHUSDT']);
-      expect(allPositionList.map(entry => entry.marginMode)).toEqual([MarginModeEnum.Isolated, MarginModeEnum.Isolated]);
-      expect(positionListParamsList.map(params => params.cursor)).toEqual([undefined, BYBIT_RAW_POSITION_LIST_LIVE_DEMO_CURSOR, secondPageCursor]);
+      expect(allPositionList).toHaveLength(201);
+      expect(allPositionList.at(-1)?.symbol).toBe('ETHUSDT');
+      expect(allPositionList.every(entry => entry.marginMode === MarginModeEnum.Isolated)).toBe(true);
+      expect(positionListParamsList.map(params => params.cursor)).toEqual([undefined, BYBIT_RAW_POSITION_LIST_LIVE_DEMO_CURSOR]);
       expect(positionListParamsList.every(params => params.limit === 200 && params.settleCoin === 'USDT')).toBe(true);
       sleepSpy.mockRestore();
     });
 
-    it('reads the single live page and stops on the empty page behind its non-empty cursor', async () => {
+    // Живые ответы демо 05.11.2026 и 23.11.2026: одна позиция при пределе 200 — с непустым курсором.
+    // Короткая страница — последняя: за пустой страницей второй раз не ходим.
+    it('reads the single live page in one request although it carries a cursor', async () => {
       const { client, mockInstance } = createClient();
       const sleepSpy = jest.spyOn(sleepModule, 'sleep').mockResolvedValue(undefined);
       const positionPageList: unknown[] = [BYBIT_RAW_POSITION_LIST_PAGE_DEMO_BTCUSDT, BYBIT_RAW_POSITION_LIST_END_PAGE_DEMO];
@@ -752,7 +836,7 @@ describe('BybitLinear', () => {
       const allPositionList = await client.fetchAllPositions();
 
       expect(allPositionList.map(entry => entry.symbol)).toEqual(['BTCUSDT']);
-      expect(mockInstance.get.mock.calls.filter(call => call[0] === '/v5/position/list')).toHaveLength(2);
+      expect(mockInstance.get.mock.calls.filter(call => call[0] === '/v5/position/list')).toHaveLength(1);
       sleepSpy.mockRestore();
     });
 
@@ -1374,6 +1458,29 @@ describe('BybitLinear', () => {
 
       expect(result.confirmedLeverage).toBe(20);
     });
+
+    it('hands the caller\'s signal to the request without a direction and keeps the body unchanged', async () => {
+      const { client, mockInstance } = createClient();
+      const controller = new AbortController();
+      mockInstance.post.mockResolvedValue({ data: { retCode: 0, retMsg: 'OK' } });
+
+      await client.setLeverage(20, 'BTCUSDT', { signal: controller.signal });
+
+      const [, body, config] = mockInstance.post.mock.calls[0];
+
+      expect(config.signal).toBe(controller.signal);
+      expect(body).toEqual({ category: 'linear', symbol: 'BTCUSDT', buyLeverage: '20', sellLeverage: '20' });
+      expect(mockInstance.get).not.toHaveBeenCalled();
+    });
+
+    it('sends nothing once the caller\'s signal fired', async () => {
+      const { client, mockInstance } = createClient();
+      const controller = new AbortController();
+      controller.abort(new Error('caller deadline'));
+
+      await expect(client.setLeverage(20, 'BTCUSDT', { signal: controller.signal })).rejects.toThrow('caller deadline');
+      expect(mockInstance.post).not.toHaveBeenCalled();
+    });
   });
 
   describe('fetchLeverageTierList', () => {
@@ -1439,6 +1546,28 @@ describe('BybitLinear', () => {
       expect(tickerBySymbol.size).toBeGreaterThan(0);
       expect(tickerBySymbol.get('BTCUSDT')).toBeDefined();
       expect(tickerBySymbol.get('BTCUSDT')!.lastPrice).toBe(65432.1);
+    });
+  });
+
+  describe('fetchTicker', () => {
+    it('requests one symbol and normalizes the single-element list', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: BYBIT_RAW_SINGLE_LINEAR_TICKER_RESPONSE });
+
+      const ticker = await client.fetchTicker('BTCUSDT');
+
+      expect(mockInstance.get).toHaveBeenCalledWith('/v5/market/tickers', expect.objectContaining({ params: expect.objectContaining({ category: 'linear', symbol: 'BTCUSDT' }) }));
+      expect(ticker.symbol).toBe('BTCUSDT');
+      expect(ticker.lastPrice).toBe(64914.5);
+      expect(ticker.markPrice).toBe(64917.9);
+      expect(ticker.timestamp).toBe(1794856648425);
+    });
+
+    it('rejects when the list is empty', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: { retCode: 0, result: { list: [] } } });
+
+      await expect(client.fetchTicker('NOPEUSDT')).rejects.toThrow(/NOPEUSDT/);
     });
   });
 
@@ -1653,25 +1782,49 @@ describe('BybitLinear', () => {
     });
   });
 
+  describe('placement answer', () => {
+    it('has no accepted amount or status: Bybit answers a placement with the number only', async () => {
+      const { client, mockInstance } = createClient();
+      client.tradeSymbols.set('BTCUSDT', BTCUSDT_TRADE_SYMBOL);
+      // Живой ответ демо 23.11.2026 на закрывающую лимитку вдвое больше позиции.
+      mockInstance.post.mockResolvedValue({
+        data: { retCode: 0, retMsg: 'OK', result: { orderId: '3c07d855-caf0-45e3-8c00-26a99429bbdd', orderLinkId: 'lchkmwteqtyd7' }, retExtInfo: {}, time: 1795446975976 },
+      });
+
+      const order = await client.createOrderWebSocket({
+        symbol: 'BTCUSDT', type: OrderTypeEnum.Limit, side: OrderSideEnum.Buy, amount: 0.2, price: 50000, reduceOnly: true,
+      });
+
+      expect(order.id).toBe('3c07d855-caf0-45e3-8c00-26a99429bbdd');
+      expect(order.acceptedAmount).toBeUndefined();
+      expect(order.acceptedStatus).toBeUndefined();
+    });
+  });
+
   describe('cancelOrder', () => {
-    it('returns the real order fetched after cancellation', async () => {
+    it('takes the outcome from the cancel answer and never reads the order back', async () => {
+      const { client, mockInstance } = createClient();
+      // Живой ответ демо 23.11.2026: на отмену Bybit отдаёт только номер.
+      mockInstance.post.mockResolvedValue({
+        data: { retCode: 0, retMsg: 'OK', result: { orderId: '2d113348-463b-406f-870a-3f1cc5deacc1', orderLinkId: 'lchkmwteqtyd6' }, retExtInfo: {}, time: 1795446975425 },
+      });
+
+      const result = await client.cancelOrder('DOGEUSDT', '2d113348-463b-406f-870a-3f1cc5deacc1');
+
+      expect(result).toEqual({ orderId: '2d113348-463b-406f-870a-3f1cc5deacc1', isCancelled: true, filledAmount: null });
+      expect(mockInstance.post).toHaveBeenCalledTimes(1);
+      expect(mockInstance.post.mock.calls[0][0]).toBe('/v5/order/cancel');
+      expect(mockInstance.get).not.toHaveBeenCalled();
+    });
+
+    it('keeps the exchange code when the order is already gone (110001: filled or cancelled alike)', async () => {
       const { client, mockInstance } = createClient();
       mockInstance.post.mockResolvedValue({
-        data: { retCode: 0, result: { orderId: 'order-1', orderLinkId: '' } },
-      });
-      mockInstance.get.mockResolvedValueOnce({
-        data: {
-          result: {
-            list: [{ ...BYBIT_RAW_ORDER_RESPONSE, orderId: 'order-1', symbol: 'BTCUSDT', orderStatus: 'Cancelled' }],
-          },
-        },
+        data: { retCode: 110001, retMsg: 'order not exists or too late to cancel', result: {}, retExtInfo: {}, time: 1795446984905 },
       });
 
-      const result = await client.cancelOrder('BTCUSDT', 'order-1');
-
-      expect(result.id).toBe('order-1');
-      expect(result.symbol).toBe('BTCUSDT');
-      expect(result.status).toBe('canceled');
+      await expect(client.cancelOrder('DOGEUSDT', '45a77894-dd00-468e-acff-2e1cb8dfd43b')).rejects.toMatchObject({ code: 110001 });
+      expect(mockInstance.get).not.toHaveBeenCalled();
     });
   });
 
@@ -1793,6 +1946,20 @@ describe('BybitLinear', () => {
 
       expect(options.params.symbol).toBe('BTCUSDT');
       expect(options.params.settleCoin).toBeUndefined();
+    });
+
+    // Без фильтра Bybit отдаёт в общем списке и условные заявки (живой ответ демо 23.11.2026:
+    // стоп стоял — и оказался и в обычном списке, и в условном). Обычный список — как у Binance.
+    it.each([undefined, 'DOGEUSDT'])('asks for plain orders only (symbol %p)', async (symbol) => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: { result: { list: [] } } });
+
+      await client.fetchOpenOrders(symbol);
+
+      const [path, options] = mockInstance.get.mock.calls[0];
+
+      expect(path).toBe('/v5/order/realtime');
+      expect(options.params.orderFilter).toBe('Order');
     });
   });
 
@@ -3122,8 +3289,7 @@ describe('BybitLinear', () => {
 
       expect(path).toBe('/v5/position/trading-stop');
       expect(body.trailingStop).toBe('0');
-      expect(canceled.status).toBe('canceled');
-      expect(canceled.id).toBe(order.id);
+      expect(canceled).toEqual({ orderId: order.id, isCancelled: true, filledAmount: null });
     });
 
     it('reads the live distance back from the position, so the id survives a restart', async () => {
@@ -3187,6 +3353,21 @@ describe('BybitLinear', () => {
       const { params } = mockInstance.get.mock.calls[0][1];
       expect(params.category).toBe('linear');
       expect(params.settleCoin).toBe('USDT');
+      expect(params.orderFilter).toBe('StopOrder');
+      expect(params.symbol).toBeUndefined();
+    });
+
+    it('asks the exchange for the one symbol when it is given, without the settle coin', async () => {
+      const { client, mockInstance } = createClient();
+      mockInstance.get.mockResolvedValue({ data: { retCode: 0, retMsg: 'OK', result: { list: [], nextPageCursor: '' } } });
+
+      await client.fetchOpenConditionalOrders('USDT', 'BTCUSDT');
+
+      expect(mockInstance.get).toHaveBeenCalledTimes(1);
+      const { params } = mockInstance.get.mock.calls[0][1];
+      expect(params.category).toBe('linear');
+      expect(params.symbol).toBe('BTCUSDT');
+      expect(params.settleCoin).toBeUndefined();
       expect(params.orderFilter).toBe('StopOrder');
     });
   });

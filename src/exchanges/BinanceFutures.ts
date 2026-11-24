@@ -2,6 +2,7 @@ import type { AddIsolatedPositionMarginArgs } from '../types/exchange';
 import type { SetLeverageOptions } from '../types/exchange';
 import type {
   CancelBatchOrdersResult,
+  CancelOrderResult,
   CreateBatchOrdersResult,
   CreateOrderItemResult,
   CreateOrderWebSocketArgs,
@@ -14,7 +15,7 @@ import type {
   ModifyOrderArgs,
   SetLeverageResult,
 } from '../types/exchange';
-import type { AccountTrade, OrderExecutionSummary, Position, Order, FundingRateHistory, FundingInfo, AccountBalances, MarkPrice, OpenInterest, FeeRate, Income, ClosedPnl, LeverageTier, LeverageTierListBySymbol } from '../types/common';
+import type { AccountTrade, OrderExecutionSummary, Ticker, Position, Order, FundingRateHistory, FundingInfo, AccountBalances, MarkPrice, OpenInterest, FeeRate, Income, ClosedPnl, LeverageTier, LeverageTierListBySymbol } from '../types/common';
 import type { FetchOrderExecutionSummaryArgs } from '../types/exchange';
 import { buildOrderExecutionWindowList, summarizeOrderExecutionList } from '../utils/orderExecutionSummary';
 import type { OrderExecutionEntry } from '../utils/orderExecutionSummary.types';
@@ -35,10 +36,13 @@ import {
   normalizeBinancePositionLeverage,
   normalizeBinanceAccountTrade,
   normalizeBinanceOrder,
+  normalizeBinanceCancelOrderResult,
+  markBinancePlacementAnswer,
   normalizeBinanceFundingRateHistory,
   normalizeBinanceFundingInfo,
   normalizeBinanceFuturesBalances,
   normalizeBinanceMarkPriceList,
+  normalizeBinanceTickers,
   normalizeBinanceOpenInterest,
   normalizeBinanceCommissionRate,
   normalizeBinanceIncomeList,
@@ -260,9 +264,9 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
     }
 
     const algoParams = this.buildBinanceAlgoOrderParams(args);
-    const order = this.tradeStream.isConnected()
+    const order = markBinancePlacementAnswer(this.tradeStream.isConnected()
       ? await this.tradeStream.createConditionalOrder(algoParams)
-      : normalizeBinanceAlgoOrder(await this.httpClient.createAlgoOrder(algoParams));
+      : normalizeBinanceAlgoOrder(await this.httpClient.createAlgoOrder(algoParams)));
 
     this.conditionalOrderRegistry.record(order.symbol, order.id, 'conditional');
 
@@ -392,16 +396,16 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
     });
   }
 
-  private async cancelConditionalOrderById(orderId: string): Promise<Order> {
+  private async cancelConditionalOrderById(orderId: string): Promise<CancelOrderResult> {
     if (this.tradeStream.isConnected()) {
       await this.tradeStream.cancelConditionalOrder({ algoId: orderId });
     } else {
       await this.httpClient.cancelAlgoOrder({ algoId: orderId });
     }
 
-    // Отмена условной заявки возвращает короткую расписку, а не снимок заявки, поэтому
-    // отдаём наружу перечитанное состояние — контракт метода прежний.
-    return normalizeBinanceAlgoOrder(await this.httpClient.fetchAlgoOrder({ algoId: orderId }));
+    // Условная служба отвечает на отмену лишь «успехом» (живой ответ демо 23.11.2026). Исход
+    // «снята» следует из него самого; исполненного объёма в ответе нет — он неизвестен.
+    return { orderId, isCancelled: true, filledAmount: null };
   }
 
   async getOrder(symbol: string, orderId: string): Promise<Order> {
@@ -454,9 +458,9 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
     });
   }
 
-  async fetchOpenConditionalOrders(_settleCoin: string): Promise<Order[]> {
+  async fetchOpenConditionalOrders(_settleCoin: string, symbol?: string): Promise<Order[]> {
     // Читаем ИМЕННО отдельную службу: в общем списке заявок условных больше нет.
-    const rawList = await this.httpClient.fetchOpenAlgoOrders();
+    const rawList = await this.httpClient.fetchOpenAlgoOrders(symbol);
     const orderList = rawList.map(normalizeBinanceAlgoOrder);
 
     // Заодно наполняем память о происхождении — после перезапуска она пуста, и это
@@ -466,7 +470,7 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
     return orderList;
   }
 
-  async cancelOrder(symbol: string, orderId: string): Promise<Order> {
+  async cancelOrder(symbol: string, orderId: string): Promise<CancelOrderResult> {
     this.logger.debug(`[Binance] Cancelling order ${orderId} for ${symbol}`);
 
     // Помним происхождение — отменяем адресно, одним запросом. Так идёт подавляющее
@@ -482,7 +486,7 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
     // для обычных заявок, включая ответ биржи «заявки уже нет», по которому вызывающий
     // отличает успешную отмену от настоящей ошибки.
     try {
-      return normalizeBinanceOrder(await this.httpClient.cancelOrder(symbol, orderId));
+      return normalizeBinanceCancelOrderResult(await this.httpClient.cancelOrder(symbol, orderId));
     } catch (plainCancelError) {
       if (knownKind === 'plain' || !isBinanceMissingOrderError(plainCancelError)) {
         throw plainCancelError;
@@ -744,9 +748,9 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
     await this.httpClient.addIsolatedPositionMargin({ symbol: args.symbol, positionSide: args.positionSide, amount });
   }
 
-  async setLeverage(leverage: number, symbol: string, _options?: SetLeverageOptions): Promise<SetLeverageResult> {
+  async setLeverage(leverage: number, symbol: string, options?: SetLeverageOptions): Promise<SetLeverageResult> {
     this.logger.info(`Setting leverage to ${leverage}x for ${symbol}`);
-    const raw = await this.httpClient.setLeverage(symbol, leverage);
+    const raw = await this.httpClient.setLeverage(symbol, leverage, options?.signal);
     // Подтверждение — ТОЛЬКО значение из ответа /fapi/v1/leverage. Ответ без числа не превращается
     // в эхо запроса: вызывающий должен увидеть «не подтверждено» и не полагаться на такое плечо.
     const confirmed = Number(raw.leverage);
@@ -906,7 +910,7 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
           return;
         }
 
-        const placedOrder = normalizeBinanceOrder(rawItem as unknown as BinanceOrderResponseRaw);
+        const placedOrder = markBinancePlacementAnswer(normalizeBinanceOrder(rawItem as unknown as BinanceOrderResponseRaw));
 
         // Пакет — основной путь постановки лесенки: его заявки запоминают происхождение так же,
         // как одиночные (см. createOrderWebSocket), иначе проверка постановки снова опрашивает
@@ -1067,6 +1071,19 @@ class BinanceFutures extends BinanceBaseClient<BinanceFuturesHttpClient> {
       typeof (rawItem as { code?: unknown }).code === 'number' &&
       (rawItem as { code: number }).code < 0
     );
+  }
+
+  async fetchTicker(symbol: string): Promise<Ticker> {
+    this.logger.debug(`[Binance] Fetching futures ticker for ${symbol}`);
+    // Тот же разборщик, что у списка: ответ по одному символу — объект с теми же полями, что элемент массива.
+    const raw = await this.httpClient.fetchTicker(symbol);
+    const ticker = normalizeBinanceTickers([raw]).get(symbol);
+
+    if (ticker === undefined) {
+      throw new ExchangeError(`Binance: ticker response for ${symbol} has symbol '${raw.symbol}'`, 'TICKER_SYMBOL_MISMATCH', 'binance');
+    }
+
+    return ticker;
   }
 
   async fetchMarkPrice(symbol?: string): Promise<MarkPrice[]> {

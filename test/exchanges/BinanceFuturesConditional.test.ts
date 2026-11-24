@@ -3,6 +3,7 @@ import { BinanceFutures } from '../../src/exchanges/BinanceFutures';
 import { OrderSideEnum, OrderTypeEnum, TriggerByEnum } from '../../src/types/common';
 import { createMockLogger } from '../fixtures/mockLogger';
 import { createMockAxiosInstance } from '../fixtures/mockAxios';
+import { BTCUSDT_TRADE_SYMBOL } from '../fixtures/mockTradeSymbol';
 import {
   BINANCE_RAW_EXCHANGE_INFO,
   BINANCE_RAW_ORDER_RESPONSE,
@@ -250,26 +251,83 @@ describe('BinanceFutures — conditional orders live in their own service', () =
       });
 
       routeGet(mockInstance, { '/fapi/v1/algoOrder': BINANCE_RAW_ALGO_ORDER_RESPONSE });
-      mockInstance.delete.mockResolvedValue({ data: { algoId: 3000000000003505, code: '200', msg: 'success' } });
+      mockInstance.get.mockClear();
+      // Живой ответ демо 23.11.2026: условная служба на отмену отвечает только «успехом».
+      mockInstance.delete.mockResolvedValue({ data: { algoId: 3000000000003505, clientAlgoId: 'myAlgo123', code: '200', msg: 'success' } });
 
-      await client.cancelOrder('BTCUSDT', '3000000000003505');
+      const outcome = await client.cancelOrder('BTCUSDT', '3000000000003505');
 
       const deletedPathList = mockInstance.delete.mock.calls.map(([url]: [string]) => url);
 
       expect(deletedPathList).toContain('/fapi/v1/algoOrder');
       expect(deletedPathList).not.toContain('/fapi/v1/order');
+      expect(outcome).toEqual({ orderId: '3000000000003505', isCancelled: true, filledAmount: null });
+      // Исход — ответ на саму отмену: заявку после неё не перечитываем.
+      expect(mockInstance.get).not.toHaveBeenCalled();
     });
 
-    it('keeps plain cancellation on the plain endpoint', async () => {
+    it('keeps plain cancellation on the plain endpoint and takes the fill from its answer', async () => {
       const { client, mockInstance } = createFutures();
       routeGet(mockInstance, { '/fapi/v1/exchangeInfo': BINANCE_RAW_EXCHANGE_INFO });
       await client.loadTradeSymbols();
-      mockInstance.delete.mockResolvedValue({ data: BINANCE_RAW_ORDER_RESPONSE });
+      mockInstance.get.mockClear();
+      // Живой ответ демо 23.11.2026 на отмену обычной закрывающей лимитки (DOGEUSDT).
+      mockInstance.delete.mockResolvedValue({
+        data: {
+          orderId: 2395886953, symbol: 'DOGEUSDT', status: 'CANCELED', clientOrderId: 'lchkmwteo0nn5', price: '0.049990', origQty: '103',
+          executedQty: '0', cumQty: '0', timeInForce: 'GTC', type: 'LIMIT', reduceOnly: true, closePosition: false, side: 'BUY',
+          positionSide: 'BOTH', stopPrice: '0.000000', workingType: 'CONTRACT_PRICE', priceProtect: false, origType: 'LIMIT',
+          priceMatch: 'NONE', selfTradePreventionMode: 'EXPIRE_MAKER', goodTillDate: 0, updateTime: 1795446829255,
+        },
+      });
 
-      const order = await client.cancelOrder('BTCUSDT', '123456789');
+      const outcome = await client.cancelOrder('DOGEUSDT', '2395886953');
 
-      expect(order.id).toBe('123456789');
+      expect(outcome).toEqual({ orderId: '2395886953', isCancelled: true, filledAmount: 0 });
       expect(mockInstance.delete.mock.calls[0][0]).toBe('/fapi/v1/order');
+      expect(mockInstance.get).not.toHaveBeenCalled();
+    });
+
+    it('reports the part filled before the cancel when the answer carries it', async () => {
+      const { client, mockInstance } = createFutures();
+      routeGet(mockInstance, { '/fapi/v1/exchangeInfo': BINANCE_RAW_EXCHANGE_INFO });
+      await client.loadTradeSymbols();
+      mockInstance.delete.mockResolvedValue({ data: { ...BINANCE_RAW_ORDER_RESPONSE, status: 'CANCELED', origQty: '0.100', executedQty: '0.040' } });
+
+      const outcome = await client.cancelOrder('BTCUSDT', '123456789');
+
+      expect(outcome.filledAmount).toBeCloseTo(0.04, 9);
+    });
+
+    it('says the fill is unknown rather than zero when the answer has no executed amount', async () => {
+      const { client, mockInstance } = createFutures();
+      routeGet(mockInstance, { '/fapi/v1/exchangeInfo': BINANCE_RAW_EXCHANGE_INFO });
+      await client.loadTradeSymbols();
+      const { executedQty: _executedQty, ...answerWithoutFill } = BINANCE_RAW_ORDER_RESPONSE;
+      mockInstance.delete.mockResolvedValue({ data: { ...answerWithoutFill, status: 'CANCELED' } });
+
+      const outcome = await client.cancelOrder('BTCUSDT', '123456789');
+
+      expect(outcome.filledAmount).toBeNull();
+    });
+
+    it('cancels an unknown conditional id through the algo service after the plain book says -2011, without a read back', async () => {
+      const { client, mockInstance } = createFutures();
+      routeGet(mockInstance, { '/fapi/v1/exchangeInfo': BINANCE_RAW_EXCHANGE_INFO });
+      await client.loadTradeSymbols();
+      mockInstance.get.mockClear();
+      mockInstance.delete.mockImplementation(async (url: string) => {
+        if (url === '/fapi/v1/order') {
+          throw new Error('[-2011] Unknown order sent.');
+        }
+
+        return { data: { algoId: 1000000299367053, clientAlgoId: 'lchkmwteo0nn3', code: '200', msg: 'success' } };
+      });
+
+      const outcome = await client.cancelOrder('DOGEUSDT', '1000000299367053');
+
+      expect(outcome).toEqual({ orderId: '1000000299367053', isCancelled: true, filledAmount: null });
+      expect(mockInstance.get).not.toHaveBeenCalled();
     });
 
     it('preserves the original "order is already gone" answer when neither service has it', async () => {
@@ -281,6 +339,80 @@ describe('BinanceFutures — conditional orders live in their own service', () =
       mockInstance.delete.mockRejectedValue(new Error('[-2011] Unknown order sent.'));
 
       await expect(client.cancelOrder('BTCUSDT', '999')).rejects.toThrow('-2011');
+    });
+  });
+
+  describe('placement answer: accepted amount and status', () => {
+    const DOGEUSDT_TRADE_SYMBOL = {
+      ...BTCUSDT_TRADE_SYMBOL,
+      symbol: 'DOGEUSDT',
+      baseAsset: 'DOGE',
+      filter: { tickSize: '0.00001', stepSize: '1', minQty: '1', maxQty: '1000000', minNotional: '5' },
+    };
+
+    // Живые ответы демо 23.11.2026 (односторонний режим, позиция SHORT 103 DOGE).
+    const CLOSING_LIMIT_CUT_ANSWER = {
+      orderId: 2395886996, symbol: 'DOGEUSDT', status: 'NEW', clientOrderId: 'lchkmwteo0nn6', price: '0.049990', origQty: '103',
+      executedQty: '0', cumQty: '0', timeInForce: 'GTC', type: 'LIMIT', reduceOnly: true, closePosition: false, side: 'BUY',
+      positionSide: 'BOTH', stopPrice: '0.000000', workingType: 'CONTRACT_PRICE', priceProtect: false, origType: 'LIMIT',
+      priceMatch: 'NONE', selfTradePreventionMode: 'EXPIRE_MAKER', goodTillDate: 0, updateTime: 1795446829615,
+    };
+    const STOP_TWICE_POSITION_ANSWER = {
+      algoId: 1000000299367053, clientAlgoId: 'lchkmwteo0nn3', algoType: 'CONDITIONAL', orderType: 'STOP_MARKET', symbol: 'DOGEUSDT',
+      side: 'BUY', positionSide: 'BOTH', timeInForce: 'GTC', quantity: '206', algoStatus: 'NEW', triggerPrice: '0.079410',
+      price: '0.000000', icebergQuantity: null, selfTradePreventionMode: 'EXPIRE_MAKER', workingType: 'CONTRACT_PRICE',
+      priceMatch: 'NONE', closePosition: false, priceProtect: false, reduceOnly: true, createTime: 1795446825064,
+      updateTime: 1795446825065, triggerTime: 0, goodTillDate: 0,
+    };
+
+    it('shows the closing limit cut to the position right in the placement answer', async () => {
+      const { client, mockInstance } = createFutures();
+      client.tradeSymbols.set('DOGEUSDT', DOGEUSDT_TRADE_SYMBOL);
+      mockInstance.post.mockResolvedValue({ data: CLOSING_LIMIT_CUT_ANSWER });
+
+      const order = await client.createOrderWebSocket({
+        symbol: 'DOGEUSDT', type: OrderTypeEnum.Limit, side: OrderSideEnum.Buy, amount: 206, price: 0.04999, reduceOnly: true,
+      });
+
+      expect(order.acceptedAmount).toBe(103);
+      expect(order.acceptedStatus).toBe('open');
+    });
+
+    it('takes the accepted amount and status of a conditional stop from the algo answer — no cut there', async () => {
+      const { client, mockInstance } = createFutures();
+      client.tradeSymbols.set('DOGEUSDT', DOGEUSDT_TRADE_SYMBOL);
+      mockInstance.post.mockResolvedValue({ data: STOP_TWICE_POSITION_ANSWER });
+
+      const order = await client.createOrderWebSocket({
+        symbol: 'DOGEUSDT', type: OrderTypeEnum.StopMarket, side: OrderSideEnum.Buy, amount: 206, stopPrice: 0.07941, reduceOnly: true,
+      });
+
+      expect(order.acceptedAmount).toBe(206);
+      expect(order.acceptedStatus).toBe('open');
+    });
+
+    it('carries the accepted amount of every plain order of a batch', async () => {
+      const { client, mockInstance } = createFutures();
+      client.tradeSymbols.set('DOGEUSDT', DOGEUSDT_TRADE_SYMBOL);
+      mockInstance.post.mockResolvedValue({ data: [CLOSING_LIMIT_CUT_ANSWER] });
+
+      const [outcome] = await client.createBatchOrders([
+        { symbol: 'DOGEUSDT', type: OrderTypeEnum.Limit, side: OrderSideEnum.Buy, amount: 206, price: 0.04999, reduceOnly: true },
+      ]);
+
+      expect(outcome.order?.acceptedAmount).toBe(103);
+      expect(outcome.order?.acceptedStatus).toBe('open');
+    });
+
+    it('marks only placements: a read order has no accepted fields', async () => {
+      const { client, mockInstance } = createFutures();
+      client.tradeSymbols.set('DOGEUSDT', DOGEUSDT_TRADE_SYMBOL);
+      routeGet(mockInstance, { '/fapi/v1/order': CLOSING_LIMIT_CUT_ANSWER });
+
+      const order = await client.getOrder('DOGEUSDT', '2395886996');
+
+      expect(order.acceptedAmount).toBeUndefined();
+      expect(order.acceptedStatus).toBeUndefined();
     });
   });
 
@@ -299,6 +431,24 @@ describe('BinanceFutures — conditional orders live in their own service', () =
       expect(orderList).toHaveLength(1);
       expect(orderList[0].stopPrice).toBe(60000);
       expect(mockInstance.get.mock.calls.map(([url]: [string]) => url)).toEqual(['/fapi/v1/openAlgoOrders']);
+      expect(mockInstance.get.mock.calls[0][1].params.symbol).toBeUndefined();
+    });
+
+    it('asks the exchange for the one symbol when it is given', async () => {
+      const { client, mockInstance } = createFutures();
+      routeGet(mockInstance, {
+        '/fapi/v1/exchangeInfo': BINANCE_RAW_EXCHANGE_INFO,
+        '/fapi/v1/openAlgoOrders': [BINANCE_RAW_ALGO_ORDER_RESPONSE],
+      });
+      await client.loadTradeSymbols();
+      mockInstance.get.mockClear();
+
+      const orderList = await client.fetchOpenConditionalOrders('USDT', 'BTCUSDT');
+
+      expect(orderList).toHaveLength(1);
+      expect(mockInstance.get).toHaveBeenCalledTimes(1);
+      expect(mockInstance.get.mock.calls[0][0]).toBe('/fapi/v1/openAlgoOrders');
+      expect(mockInstance.get.mock.calls[0][1].params.symbol).toBe('BTCUSDT');
     });
 
     it('remembers where the listed orders came from, so a restart can cancel them', async () => {

@@ -3,6 +3,7 @@ import type { FetchOrderExecutionSummaryArgs, SetLeverageOptions } from '../type
 import type { OrderExecutionSummary } from '../types/common';
 import type {
   CancelBatchOrdersResult,
+  CancelOrderResult,
   CreateBatchOrdersResult,
   ExchangeClient,
   ExchangeArgs,
@@ -30,6 +31,7 @@ import type {
   KlineInterval,
   TradeSymbol,
   TradeSymbolBySymbol,
+  Ticker,
   TickerBySymbol,
   AccountBalances,
   AccountTrade,
@@ -114,6 +116,10 @@ abstract class BaseExchangeClient implements ExchangeClient {
     this.logger.debug(`[${this.exchangeLabel}] Fetching ${this.marketLabel} tickers`);
 
     return this.fetchAndNormalizeTickers();
+  }
+
+  async fetchTicker(_symbol: string): Promise<Ticker> {
+    throw new Error(`Single ticker is not supported for ${this.marketLabel} market`);
   }
 
   async fetchKlines(
@@ -444,7 +450,7 @@ abstract class BaseExchangeClient implements ExchangeClient {
     throw new Error(`Not supported for ${this.marketLabel} market`);
   }
 
-  async cancelOrder(_symbol: string, _orderId: string): Promise<Order> {
+  async cancelOrder(_symbol: string, _orderId: string): Promise<CancelOrderResult> {
     throw new Error(`Not supported for ${this.marketLabel} market`);
   }
 
@@ -460,7 +466,7 @@ abstract class BaseExchangeClient implements ExchangeClient {
     throw new Error(`Not supported for ${this.marketLabel} market`);
   }
 
-  async fetchOpenConditionalOrders(_settleCoin: string): Promise<Order[]> {
+  async fetchOpenConditionalOrders(_settleCoin: string, _symbol?: string): Promise<Order[]> {
     throw new Error(`Not supported for ${this.marketLabel} market`);
   }
 

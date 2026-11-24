@@ -672,6 +672,32 @@ describe('OkxSwap', () => {
       expect(result.confirmedLeverage).toBe(10);
     });
 
+    it('hands the caller\'s signal to the cross request and keeps it out of the body', async () => {
+      const { client, mockInstance } = createClient();
+      const controller = new AbortController();
+      mockInstance.get.mockResolvedValue(okxSuccess([{ uid: '1', acctLv: '2', posMode: 'net_mode' }]));
+      mockInstance.post.mockResolvedValue(okxSuccess([{ instId: 'BTC-USDT-SWAP', posSide: 'net', mgnMode: 'cross', lever: '20' }]));
+
+      await client.setLeverage(20, 'BTCUSDT', { signal: controller.signal });
+
+      const [, body, config] = mockInstance.post.mock.calls[0];
+
+      expect(config.signal).toBe(controller.signal);
+      expect(body.signal).toBeUndefined();
+    });
+
+    it('hands the caller\'s signal to both hedge-isolated requests', async () => {
+      const { client, mockInstance } = createClient();
+      const controller = new AbortController();
+      (client as any).marginModeBySymbol.set('BTCUSDT', MarginModeEnum.Isolated);
+      mockInstance.get.mockResolvedValue(okxSuccess([{ uid: '1', acctLv: '2', posMode: 'long_short_mode' }]));
+      mockInstance.post.mockResolvedValue(okxSuccess([{ instId: 'BTC-USDT-SWAP', posSide: 'long', mgnMode: 'isolated', lever: '10' }]));
+
+      await client.setLeverage(10, 'BTCUSDT', { signal: controller.signal });
+
+      expect(mockInstance.post.mock.calls.map((call) => call[2].signal)).toEqual([controller.signal, controller.signal]);
+    });
+
     it('returns null confirmedLeverage when lever is missing from the response', async () => {
       const { client, mockInstance } = createClient();
       mockInstance.get.mockResolvedValue(okxSuccess([{ uid: '1', acctLv: '2', posMode: 'net_mode' }]));

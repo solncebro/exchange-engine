@@ -920,19 +920,19 @@ describe('OkxSwap orders', () => {
   });
 
   describe('cancelOrder', () => {
-    it('cancels a known conditional order through the algo endpoint only', async () => {
+    it('cancels a known conditional order through the algo endpoint only, without a read back', async () => {
       const { client, mockInstance } = await createLoadedClient();
       (client as any).conditionalOrderRegistry.record('BTCUSDT', 'algo-4', 'conditional');
       mockInstance.post.mockResolvedValue(okxSuccess([{ algoId: 'algo-4', clOrdId: '', algoClOrdId: '', sCode: '0', sMsg: '' }]));
-      mockInstance.get.mockResolvedValue(okxSuccess([{ ...OKX_RAW_ALGO_ORDER_STOP_MARKET, algoId: 'algo-4', state: 'canceled' }]));
 
-      const order = await client.cancelOrder('BTCUSDT', 'algo-4');
+      const outcome = await client.cancelOrder('BTCUSDT', 'algo-4');
 
       const [path, body] = mockInstance.post.mock.calls[0];
 
       expect(path).toBe('/api/v5/trade/cancel-algos');
       expect(body).toEqual([{ algoId: 'algo-4', instId: 'BTC-USDT-SWAP' }]);
-      expect(order.status).toBe('canceled');
+      expect(outcome).toEqual({ orderId: 'algo-4', isCancelled: true, filledAmount: null });
+      expect(mockInstance.get).not.toHaveBeenCalled();
     });
 
     it('falls back to the algo cancel when the plain book answers 51400 for an unknown id', async () => {
@@ -944,12 +944,12 @@ describe('OkxSwap orders', () => {
 
         return Promise.resolve(okxSuccess([{ algoId: 'algo-5', clOrdId: '', algoClOrdId: '', sCode: '0', sMsg: '' }]));
       });
-      mockInstance.get.mockResolvedValue(okxSuccess([{ ...OKX_RAW_ALGO_ORDER_STOP_MARKET, algoId: 'algo-5', state: 'canceled' }]));
 
-      const order = await client.cancelOrder('BTCUSDT', 'algo-5');
+      const outcome = await client.cancelOrder('BTCUSDT', 'algo-5');
 
-      expect(order.id).toBe('algo-5');
+      expect(outcome.orderId).toBe('algo-5');
       expect(mockInstance.post.mock.calls[1][0]).toBe('/api/v5/trade/cancel-algos');
+      expect(mockInstance.get).not.toHaveBeenCalled();
     });
 
     it('rethrows the plain-book error when the algo fallback fails too', async () => {
@@ -1000,85 +1000,36 @@ describe('OkxSwap orders', () => {
       const tradeStream = enableOrderStream(client);
       (client as any).conditionalOrderRegistry.record('BTCUSDT', 'plain-ws', 'plain');
       tradeStream.cancelOrder.mockResolvedValue(okxOrderResult('plain-ws'));
-      mockInstance.get.mockResolvedValue(okxSuccess([{ ...SWAP_ORDER_RAW, ordId: 'plain-ws', state: 'canceled' }]));
 
-      const order = await client.cancelOrder('BTCUSDT', 'plain-ws');
+      const outcome = await client.cancelOrder('BTCUSDT', 'plain-ws');
 
       expect(tradeStream.cancelOrder).toHaveBeenCalledWith({ instId: 'BTC-USDT-SWAP', ordId: 'plain-ws' });
       expect(mockInstance.post).not.toHaveBeenCalled();
-      expect(order.status).toBe('canceled');
+      expect(mockInstance.get).not.toHaveBeenCalled();
+      expect(outcome).toEqual({ orderId: 'plain-ws', isCancelled: true, filledAmount: null });
     });
 
-    it('reads the order back after a successful plain cancel', async () => {
+    // Ответ OKX на отмену несёт лишь номер: исполненный до снятия объём неизвестен, а не ноль —
+    // нулём здесь раньше и продавали вдвое больше.
+    it('takes the outcome from the plain cancel answer, with the fill unknown rather than zero', async () => {
       const { client, mockInstance } = await createLoadedClient();
       (client as any).conditionalOrderRegistry.record('BTCUSDT', 'plain-1', 'plain');
       mockInstance.post.mockResolvedValue(okxSuccess([okxOrderResult('plain-1')]));
-      mockInstance.get.mockResolvedValue(okxSuccess([{ ...SWAP_ORDER_RAW, state: 'canceled' }]));
 
-      const order = await client.cancelOrder('BTCUSDT', 'plain-1');
+      const outcome = await client.cancelOrder('BTCUSDT', 'plain-1');
 
-      expect(order.status).toBe('canceled');
+      expect(outcome).toEqual({ orderId: 'plain-1', isCancelled: true, filledAmount: null });
+      expect(mockInstance.get).not.toHaveBeenCalled();
     });
 
-    it('remembers a cancelled order of unknown origin as plain so the read back asks one service only', async () => {
+    it('remembers a cancelled order of unknown origin as plain', async () => {
       const { client, mockInstance } = await createLoadedClient();
       mockInstance.post.mockResolvedValue(okxSuccess([okxOrderResult('plain-m1')]));
-      mockInstance.get.mockResolvedValue(okxSuccess([{ ...SWAP_ORDER_RAW, ordId: 'plain-m1', state: 'canceled' }]));
 
       await client.cancelOrder('BTCUSDT', 'plain-m1');
 
-      expect(mockInstance.get.mock.calls.map((call: unknown[]) => call[0])).toEqual(['/api/v5/trade/order']);
+      expect(mockInstance.get).not.toHaveBeenCalled();
       expect((client as any).conditionalOrderRegistry.lookup('BTCUSDT', 'plain-m1')).toBe('plain');
-    });
-
-    it('refuses to invent a conditional order when the exchange confirmed the cancel but the read back found nothing', async () => {
-      const { client, mockInstance, logger } = await createLoadedClient();
-      (client as any).conditionalOrderRegistry.record('BTCUSDT', 'algo-gone', 'conditional');
-      mockInstance.post.mockResolvedValue(okxSuccess([{ algoId: 'algo-gone', clOrdId: '', algoClOrdId: '', sCode: '0', sMsg: '' }]));
-      mockInstance.get.mockResolvedValue(okxSuccess([]));
-
-      await expect(client.cancelOrder('BTCUSDT', 'algo-gone')).rejects.toMatchObject({
-        code: 'OKX_CANCELLED_ORDER_UNREADABLE',
-      });
-      expect(logger.warn).toHaveBeenCalled();
-    });
-
-    it('fails with the reason instead of an order that says side Buy and nothing filled', async () => {
-      const { client, mockInstance, logger } = await createLoadedClient();
-      (client as any).conditionalOrderRegistry.record('BTCUSDT', 'plain-2', 'plain');
-      mockInstance.post.mockResolvedValue(okxSuccess([okxOrderResult('plain-2')]));
-      // Отказ биржи, а не обрыв сети: сетевую ошибку слой запросов повторяет с нарастающей
-      // паузой, и проверка меряла бы эти паузы, а не поведение отмены.
-      mockInstance.get.mockResolvedValue({ data: { code: '51603', msg: 'read back failed', data: [] } });
-
-      await expect(client.cancelOrder('BTCUSDT', 'plain-2')).rejects.toMatchObject({
-        code: 'OKX_CANCELLED_ORDER_UNREADABLE',
-      });
-      expect(logger.warn).toHaveBeenCalled();
-    });
-
-    it('says in the error that the cancel itself went through, so the caller does not repeat it', async () => {
-      const { client, mockInstance } = await createLoadedClient();
-      (client as any).conditionalOrderRegistry.record('BTCUSDT', 'plain-9', 'plain');
-      mockInstance.post.mockResolvedValue(okxSuccess([okxOrderResult('plain-9')]));
-      mockInstance.get.mockResolvedValue({ data: { code: '51603', msg: 'read back failed', data: [] } });
-
-      await expect(client.cancelOrder('BTCUSDT', 'plain-9')).rejects.toThrow(/was cancelled, but reading its final state failed/);
-    });
-
-    it('never reports a half-filled sell as an untouched Buy of zero', async () => {
-      const { client, mockInstance } = await createLoadedClient();
-      (client as any).conditionalOrderRegistry.record('BTCUSDT', 'plain-half', 'plain');
-      mockInstance.post.mockResolvedValue(okxSuccess([okxOrderResult('plain-half')]));
-      mockInstance.get.mockResolvedValue({ data: { code: '51603', msg: 'read back failed', data: [] } });
-
-      const outcome = await client.cancelOrder('BTCUSDT', 'plain-half').then(
-        (order) => ({ order, error: null }),
-        (error) => ({ order: null, error }),
-      );
-
-      expect(outcome.order).toBeNull();
-      expect(outcome.error).toBeInstanceOf(ExchangeError);
     });
   });
 
@@ -1419,6 +1370,25 @@ describe('OkxSwap orders', () => {
       expect(conditionalCallList).toHaveLength(2);
       expect(conditionalCallList[1][1].params.after).toBe(`page1-${OKX_ORDER_PAGE_LIMIT - 1}`);
       expect(orderList).toHaveLength(OKX_ORDER_PAGE_LIMIT + 1);
+    });
+
+    it('asks every order type for the one instrument when a symbol is given', async () => {
+      const { client, mockInstance } = await createLoadedClient();
+      mockInstance.get.mockResolvedValue(okxSuccess([]));
+
+      await client.fetchOpenConditionalOrders('USDT', 'BTCUSDT');
+
+      expect(mockInstance.get).toHaveBeenCalledTimes(7);
+      expect(mockInstance.get.mock.calls.map((call: any[]) => call[1].params.instId)).toEqual(Array(7).fill('BTC-USDT-SWAP'));
+    });
+
+    it('asks for every instrument when no symbol is given', async () => {
+      const { client, mockInstance } = await createLoadedClient();
+      mockInstance.get.mockResolvedValue(okxSuccess([]));
+
+      await client.fetchOpenConditionalOrders('USDT');
+
+      expect(mockInstance.get.mock.calls.every((call: any[]) => call[1].params.instId === undefined)).toBe(true);
     });
   });
 

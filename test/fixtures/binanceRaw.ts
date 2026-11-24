@@ -507,3 +507,6 @@ export const BINANCE_RAW_LEVERAGE_BRACKET_LIST: BinanceLeverageBracketRaw[] = [
     ],
   },
 ];
+
+// Live GET /fapi/v1/ticker/24hr?symbol=BTCUSDT (2026-11-17), the response is a single object, not an array.
+export const BINANCE_RAW_SINGLE_FUTURES_TICKER = {"closeTime":1794856641058,"count":4708050,"firstId":8281137054,"highPrice":"65679.20","lastId":8285848781,"lastPrice":"64908.60","lastQty":"0.001","lowPrice":"63871.00","openPrice":"64924.40","openTime":1794770220000,"priceChange":"-15.80","priceChangePercent":"-0.024","quoteVolume":"11761524996.39","symbol":"BTCUSDT","volume":"181744.424","weightedAvgPrice":"64714.64"};

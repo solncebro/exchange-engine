@@ -135,6 +135,7 @@ interface FetchSubAccountBalancesArgs {
 | `getMaxOrderQty` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `getMarketMaxOrderQty` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `fetchTickers` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `fetchTicker` | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ |
 | `fetchKlines` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `fetchAllKlines` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `fetchOrderBook` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -152,7 +153,7 @@ interface FetchSubAccountBalancesArgs {
 | `fetchPositionSnapshot` | ✅ | ❌ | ✅ | ❌ | ✅ | ❌ |
 | `fetchPositionList` | ✅ | ❌ | ✅ | ❌ | ✅ | ❌ |
 | `fetchAllPositions` | ✅ | ❌ | ✅ | ❌ | ✅ | ❌ |
-| `fetchPositionLeverage` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| `fetchPositionLeverage` | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ |
 | `addIsolatedPositionMargin` | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ |
 | `fetchPositionMode` | ✅ | ❌ | ✅ | ❌ | ✅ | ❌ |
 | `setPositionMode` | ✅ | ❌ | ✅ | ❌ | ✅ | ❌ |
@@ -615,6 +616,16 @@ const sellLimit = futures.priceToPrecision('BTCUSDT', 50123.41, 'up');
 
 ---
 
+### `roundToStep()`
+
+```typescript
+roundToStep(value: number, step: string, rounding: StepRounding = 'nearest'): number
+```
+
+Общая функция округления по шагу, через которую работают `amountToPrecision` и `priceToPrecision`; экспортируется из корня пакета. `step` — строка шага; `rounding` — `'nearest'` (по умолчанию), `'up'` или `'down'`.
+
+---
+
 ### `getMinOrderQty()`
 
 ```typescript
@@ -699,6 +710,21 @@ fetchTickers(): Promise<TickerBySymbol>
 const tickers = await futures.fetchTickers();
 const btc = tickers.get('BTCUSDT');
 console.log(btc?.lastPrice, btc?.priceChangePercent);
+```
+
+---
+
+### `fetchTicker(symbol)`
+
+```typescript
+fetchTicker(symbol: string): Promise<Ticker>
+```
+
+Тикер 24h одного символа — запрос только по нему, а не по всем инструментам. Только фьючерсы Binance и Bybit Linear; остальные рынки отказывают. Тот же разборщик и те же поля `Ticker`, что у `fetchTickers()`. Если биржа вернула ответ не по этому символу (Binance) или пустой список (Bybit), — `ExchangeError` (`TICKER_SYMBOL_MISMATCH` / `TICKER_NOT_FOUND`).
+
+```typescript
+const btc = await futures.fetchTicker('BTCUSDT');
+console.log(btc.lastPrice);
 ```
 
 ---
@@ -915,7 +941,7 @@ fetchIncome(options?: FetchIncomeArgs): Promise<Income[]>
 fetchPositionLeverage(symbol: string): Promise<number | null>
 ```
 
-Reads the currently configured Binance Futures leverage from symbol configuration, independently of positionRisk. Positive finite numeric values are returned; absent, invalid, foreign-symbol or ambiguous data returns `null`. Request failures throw. Other clients return `null` without a request. This method does not change leverage. Routine Binance Futures position reads (`fetchPosition`, `fetchPositionSnapshot`, `fetchPositionList`, `fetchAllPositions`) read the same symbol configuration themselves, so their `Position.leverage` and `Position.marginMode` already come from the exchange; when that configuration fails or lacks the symbol, the position is returned with `leverage` 0 and `marginMode` `null` (unknown) and one warning is logged — there is no second source. This method is for reading the leverage alone, without a position read.
+Reads the currently configured Binance Futures leverage from symbol configuration, independently of positionRisk. Positive finite numeric values are returned; absent, invalid, foreign-symbol or ambiguous data returns `null`. Request failures throw. Bybit Linear reads the symbol's position list (`/v5/position/list`, one request) and returns the leverage only when every cell of the symbol reports the same positive value; empty list, empty value (portfolio margin) or differing cells give `null`, a failed request throws. Other clients return `null` without a request. This method does not change leverage. Routine Binance Futures position reads (`fetchPosition`, `fetchPositionSnapshot`, `fetchPositionList`, `fetchAllPositions`) read the same symbol configuration themselves, so their `Position.leverage` and `Position.marginMode` already come from the exchange; when that configuration fails or lacks the symbol, the position is returned with `leverage` 0 and `marginMode` `null` (unknown) and one warning is logged — there is no second source. This method is for reading the leverage alone, without a position read.
 
 ### `fetchAccountTrades()`
 
@@ -1274,7 +1300,7 @@ createOrderWebSocket(args: CreateOrderWebSocketArgs): Promise<Order>
 | `args.trailingDelta` | `number` | нет | Binance Spot: trailing для STOP/TAKE_PROFIT |
 | `args.quoteOrderQty` | `number` | нет | Binance / Bybit Spot: сумма в котируемой валюте для Market Buy |
 
-**Возврат:** `Order` — созданный ордер.
+**Возврат:** `Order` — созданный ордер. У Binance в нём есть `acceptedAmount` и `acceptedStatus` — принятый биржей объём и состояние из её ответа на постановку (закрывающую заявку больше позиции биржа урезает уже здесь); у Bybit и OKX этих полей нет.
 
 ```typescript
 import { OrderTypeEnum, OrderSideEnum } from '@solncebro/exchange-engine';
@@ -1293,17 +1319,17 @@ const order = await futures.createOrderWebSocket({
 ### `cancelOrder()`
 
 ```typescript
-cancelOrder(symbol: string, orderId: string): Promise<Order>
+cancelOrder(symbol: string, orderId: string): Promise<CancelOrderResult>
 ```
 
-Отменяет ордер по ID.
+Отменяет ордер по ID. Заявка после отмены не перечитывается: результат — ответ самой биржи на отмену.
 
 | Параметр | Тип | Обязательный | Описание |
 |---|---|:---:|---|
 | `symbol` | `string` | да | Торговый символ |
 | `orderId` | `string` | да | ID ордера |
 
-**Возврат:** `Order` — отмененный ордер.
+**Возврат:** `CancelOrderResult` — `{ orderId: string; isCancelled: true; filledAmount: number | null }`. `filledAmount` — исполненный до снятия объём, когда биржа отдаёт его в ответе на отмену (обычная заявка Binance); `null` — неизвестно (условная заявка Binance, Bybit, OKX отвечают только номером или «успехом»). Отказ, в том числе «заявки уже нет» (Binance −2011, Bybit 110001), бросается ошибкой с кодом биржи, поэтому вернувшийся исход всегда значит «снята».
 
 | Биржа | Futures | Spot |
 |---|:---:|:---:|
@@ -1359,7 +1385,7 @@ getOrderByClientOrderId(symbol: string, clientOrderId: string): Promise<Order>
 fetchOpenOrders(symbol?: string): Promise<Order[]>
 ```
 
-Получает список открытых ордеров.
+Получает список открытых ордеров. Только обычные: условные заявки (стопы, тейки) читает `fetchOpenConditionalOrders`; Bybit для этого передаёт бирже `orderFilter=Order`.
 
 | Параметр | Тип | Обязательный | Описание |
 |---|---|:---:|---|
@@ -1377,7 +1403,7 @@ fetchOpenOrders(symbol?: string): Promise<Order[]>
 ### `fetchOpenConditionalOrders()`
 
 ```typescript
-fetchOpenConditionalOrders(settleCoin: string): Promise<Order[]>
+fetchOpenConditionalOrders(settleCoin: string, symbol?: string): Promise<Order[]>
 ```
 
 Открытые УСЛОВНЫЕ заявки — стопы, тейки, скользящие стопы. Обычный список открытых заявок их не содержит: биржи держат условные заявки отдельно, пока они не сработали.
@@ -1385,6 +1411,7 @@ fetchOpenConditionalOrders(settleCoin: string): Promise<Order[]>
 | Параметр | Тип | Обязательный | Описание |
 |---|---|:---:|---|
 | `settleCoin` | `string` | да | Валюта расчёта (`USDT`). Участвует в отборе не везде — см. таблицу |
+| `symbol` | `string` | нет | Инструмент: биржа отдаёт условные заявки только по нему (Binance Futures и Spot, Bybit, OKX); без него — весь счёт. Запрос по одному инструменту у Binance существенно легче по весу, чем по всему счёту |
 
 **Возврат:** `Promise<Order[]>`.
 
@@ -2431,6 +2458,8 @@ interface Order {
   reduceOnly: boolean;
   timestamp: number;
   updatedTimestamp: number;
+  acceptedAmount?: number;  // из ответа биржи на постановку (Binance); у прочитанной заявки нет
+  acceptedStatus?: string;  // то же: состояние из ответа на постановку
 }
 ```
 
@@ -2905,6 +2934,7 @@ interface FetchOrderExecutionSummaryArgs {
 ```typescript
 interface SetLeverageOptions {
   direction?: 'long' | 'short';
+  signal?: AbortSignal;
 }
 ```
 
@@ -3075,5 +3105,5 @@ try {
 ```
 
 
-Опциональный третий параметр метода установки плеча: `SetLeverageOptions` с полем `direction?: 'long' | 'short'`. Bybit сохраняет встречную сторону при изолированной двусторонней марже, при общей марже меняет обе. Binance и OKX сохраняют прежнее общее поведение. У Bybit отказ до записи (`ExchangeError`): режим не определён (неизвестный или отсутствующий режим единого счёта; у классического счёта ячейки символа расходятся по `tradeMode`, их нет или `tradeMode` не 0 и не 1) — `MARGIN_MODE_UNKNOWN`; портфельная маржа — `LEVERAGE_PORTFOLIO_MARGIN_UNSUPPORTED` (документация Bybit о плече позиции при портфельной марже: «leverage rules are invalid», https://bybit-exchange.github.io/docs/v5/position); неполная пара ячеек при изолированной марже — `LEVERAGE_POSITION_MODE_UNKNOWN`; нечитаемое плечо встречной стороны — `LEVERAGE_OPPOSITE_SIDE_UNKNOWN`.
+Опциональный третий параметр метода установки плеча: `SetLeverageOptions` с полем `direction?: 'long' | 'short'`. Bybit сохраняет встречную сторону при изолированной двусторонней марже, при общей марже меняет обе. Binance и OKX сохраняют прежнее общее поведение. Необязательный `signal?: AbortSignal` — отмена со стороны вызывающего (его срок вышел): запрос установки плеча, ещё не ушедший в сеть, не уходит вовсе, ушедший обрывается на стороне клиента; применила ли биржа уже полученный запрос — неизвестно, это решает вызывающий. У Bybit отказ до записи (`ExchangeError`): режим не определён (неизвестный или отсутствующий режим единого счёта; у классического счёта ячейки символа расходятся по `tradeMode`, их нет или `tradeMode` не 0 и не 1) — `MARGIN_MODE_UNKNOWN`; портфельная маржа — `LEVERAGE_PORTFOLIO_MARGIN_UNSUPPORTED` (документация Bybit о плече позиции при портфельной марже: «leverage rules are invalid», https://bybit-exchange.github.io/docs/v5/position); неполная пара ячеек при изолированной марже — `LEVERAGE_POSITION_MODE_UNKNOWN`; нечитаемое плечо встречной стороны — `LEVERAGE_OPPOSITE_SIDE_UNKNOWN`.
 

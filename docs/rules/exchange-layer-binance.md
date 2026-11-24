@@ -9,6 +9,7 @@
 Реализует все `protected fetchAndNormalize*()` методы:
 - `fetchAndNormalizeTradeSymbols()` → `httpClient.fetchExchangeInfo()` → `normalizeBinanceTradeSymbols()`
 - `fetchAndNormalizeTickers()` → `httpClient.fetchTickers()` → `normalizeBinanceTickers()`
+- Фьючерсы: `fetchTicker(symbol)` → `httpClient.fetchTicker(symbol)` → `normalizeBinanceTickers([raw])` (тот же разборщик, что у списка; ответ по одному символу — объект, а не массив); ответ с другим символом — `ExchangeError` с кодом `TICKER_SYMBOL_MISMATCH`. Лимит запросов — общий слой `get()` HTTP-клиента, как у `fetchTickers`
 - `fetchAndNormalizeKlines()` → `httpClient.fetchKlines()` → `normalizeBinanceKlines()`
 - `fetchAndNormalizeBalances()` → `httpClient.fetchAccount()` → `normalizeBinanceBalances()`
 
@@ -18,13 +19,14 @@
 3. Для limit-like ордеров маппит `timeInForce`: **futures** через `BINANCE_FUTURES_TIME_IN_FORCE_REVERSE` (`PostOnly → GTX`, дефолт `GTC`); **spot** post-only Limit → тип `LIMIT_MAKER` (без `timeInForce`), иначе значение enum как есть (`GTC`/`IOC`/`FOK`)
 4. Если `tradeStream.isConnected()` → отправляет через WebSocket
 5. Иначе fallback: `httpClient.createOrder()` → `normalizeBinanceOrder()`
+6. Ответ на постановку (одиночную и пакетную) проходит `markBinancePlacementAnswer`: `Order.acceptedAmount` = объём ответа (`origQty`), `Order.acceptedStatus` = его состояние. Закрывающую заявку больше позиции биржа урезает уже в этом ответе, условный стоп — нет. У прочитанной заявки полей нет
 
 Реализует методы работы с ордерами (7 методов):
 - `fetchOrderHistory(symbol, options?)` → `httpClient.getAllOrders()` → `map(normalizeBinanceOrder)`
-- `cancelOrder(symbol, orderId)` → `httpClient.cancelOrder()` → `normalizeBinanceOrder()`. У `BinanceFutures` переопределён: сначала реестр происхождения, потом обычная книга, при её ответе «заявки нет» — условная служба; отказ ОБЕИХ разбирается общим `resolveTwoServiceOrderFailure` (см. ниже)
+- `cancelOrder(symbol, orderId)` → `httpClient.cancelOrder()` → `normalizeBinanceCancelOrderResult()` → `CancelOrderResult` `{ orderId, isCancelled: true, filledAmount }` (`filledAmount` — `executedQty` ответа обычной заявки, `null` если его нет); заявка не перечитывается. У `BinanceFutures` переопределён: сначала реестр происхождения, потом обычная книга, при её ответе «заявки нет» — условная служба (`cancelConditionalOrderById`: ответ службы — лишь «успех», исход `filledAmount: null`); отказ ОБЕИХ разбирается общим `resolveTwoServiceOrderFailure` (см. ниже)
 - `getOrder(symbol, orderId)` → `httpClient.getOrder()` → `normalizeBinanceOrder()`
 - `fetchOpenOrders(symbol?)` → `httpClient.getOpenOrders()` → `map(normalizeBinanceOrder)`
-- `fetchOpenConditionalOrders(_settleCoin)` → `httpClient.getOpenOrders(undefined)` (все открытые ордера, без символа) → `map(normalizeBinanceOrder)` → `.filter(order => order.stopPrice > 0)` (Binance не отдаёт отдельный список условных ордеров — фильтруется по наличию `stopPrice`; `settleCoin` не используется, параметр есть для паритета с Bybit)
+- `fetchOpenConditionalOrders(_settleCoin, symbol?)` → `httpClient.getOpenOrders(symbol)` (символ необязателен: без него все открытые ордера счёта, с ним биржа отдаёт ордера только этого инструмента; у фьючерсов — отдельная служба условных заявок `fetchOpenAlgoOrders(symbol)` с тем же необязательным инструментом) → `map(normalizeBinanceOrder)` → `.filter(order => order.stopPrice > 0)` (Binance не отдаёт отдельный список условных ордеров — фильтруется по наличию `stopPrice`; `settleCoin` не используется, параметр есть для паритета с Bybit)
 - `fetchOrderBook(symbol, limit?)` → `httpClient.fetchOrderBook()` → `normalizeBinanceOrderBook()`
 - `fetchTrades(symbol, limit?)` → `httpClient.fetchTrades()` → `normalizeBinancePublicTrades()`
 

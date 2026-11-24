@@ -256,27 +256,28 @@ class OkxSwap extends OkxBaseClient {
    * какая — уже изменена. Подтверждённым плечо считается только когда ОБА ответа назвали одно и то
    * же число.
    */
-  async setLeverage(leverage: number, symbol: string, _options?: SetLeverageOptions): Promise<SetLeverageResult> {
+  async setLeverage(leverage: number, symbol: string, options?: SetLeverageOptions): Promise<SetLeverageResult> {
     this.logger.info(`[OKX] Setting leverage to ${leverage}x for ${symbol}`);
     const instId = this.symbolMap.resolveInstId(symbol);
     const mgnMode = this.toOkxMarginMode(await this.ensureMarginMode(symbol));
     const config = await this.ensureAccountConfig();
+    const signal = options?.signal;
 
     if (mgnMode !== 'isolated' || config.posMode !== 'long_short_mode') {
-      const dataList = await this.httpClient.setLeverage({ instId, lever: String(leverage), mgnMode });
+      const dataList = await this.httpClient.setLeverage({ instId, lever: String(leverage), mgnMode, signal });
 
       return { confirmedLeverage: resolveOkxConfirmedLeverage([dataList]) };
     }
 
-    return this.setOkxHedgeIsolatedLeverage(instId, String(leverage));
+    return this.setOkxHedgeIsolatedLeverage(instId, String(leverage), signal);
   }
 
-  private async setOkxHedgeIsolatedLeverage(instId: string, lever: string): Promise<SetLeverageResult> {
+  private async setOkxHedgeIsolatedLeverage(instId: string, lever: string, signal: AbortSignal | undefined): Promise<SetLeverageResult> {
     const outcomeList: OkxLeverageOutcome[] = [];
 
     for (const posSide of OKX_HEDGE_POSITION_SIDE_LIST) {
       try {
-        const dataList = await this.httpClient.setLeverage({ instId, lever, mgnMode: 'isolated', posSide });
+        const dataList = await this.httpClient.setLeverage({ instId, lever, mgnMode: 'isolated', posSide, signal });
 
         outcomeList.push({ posSide, dataList, error: null });
       } catch (error) {

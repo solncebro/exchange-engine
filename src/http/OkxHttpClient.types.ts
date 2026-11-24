@@ -58,6 +58,7 @@ export interface SetOkxLeverageArgs {
   lever: string;
   mgnMode: 'cross' | 'isolated';
   posSide?: 'long' | 'short';
+  signal?: AbortSignal;
 }
 
 export interface FetchOkxTradeFeeArgs {

@@ -626,3 +626,28 @@ export const BYBIT_RAW_ADD_MARGIN_REFUSAL_POSITION_IDX_MISMATCH = {
   retCode: 10001,
   retMsg: 'position idx(1) not match position mode(0) in symbol(6)',
 };
+
+// Live GET /v5/market/tickers?category=linear&symbol=BTCUSDT (2026-11-17), trimmed to the fields the normalizer reads.
+export const BYBIT_RAW_SINGLE_LINEAR_TICKER_RESPONSE = {
+  "retCode": 0,
+  "retMsg": "OK",
+  "result": {
+    "category": "linear",
+    "list": [
+      {
+        "symbol": "BTCUSDT",
+        "lastPrice": "64914.50",
+        "indexPrice": "64938.74",
+        "markPrice": "64917.90",
+        "prevPrice24h": "64890.40",
+        "price24hPcnt": "0.000371",
+        "highPrice24h": "65683.00",
+        "lowPrice24h": "63871.00",
+        "turnover24h": "4891325294.3552",
+        "volume24h": "75580.5430",
+        "fundingRate": "0.00007437"
+      }
+    ]
+  },
+  "time": 1794856648425
+};
